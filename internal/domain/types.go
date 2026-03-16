@@ -55,78 +55,78 @@ const (
 
 // Identity is a normalized machine identity across providers.
 type Identity struct {
-	ID         string
-	Provider   Provider
-	Type       IdentityType
-	Name       string
-	ARN        string
-	OwnerHint  string
-	CreatedAt  time.Time
-	LastUsedAt *time.Time
-	Tags       map[string]string
-	RawRef     string
+	ID         string            `json:"id"`
+	Provider   Provider          `json:"provider"`
+	Type       IdentityType      `json:"type"`
+	Name       string            `json:"name"`
+	ARN        string            `json:"arn"`
+	OwnerHint  string            `json:"owner_hint"`
+	CreatedAt  time.Time         `json:"created_at"`
+	LastUsedAt *time.Time        `json:"last_used_at,omitempty"`
+	Tags       map[string]string `json:"tags,omitempty"`
+	RawRef     string            `json:"raw_ref"`
 }
 
 // Workload is a compute entity that can execute with one or more identities.
 type Workload struct {
-	ID        string
-	Provider  Provider
-	Type      string
-	Name      string
-	AccountID string
-	Region    string
-	RawRef    string
+	ID        string   `json:"id"`
+	Provider  Provider `json:"provider"`
+	Type      string   `json:"type"`
+	Name      string   `json:"name"`
+	AccountID string   `json:"account_id"`
+	Region    string   `json:"region"`
+	RawRef    string   `json:"raw_ref"`
 }
 
 // Policy stores provider-native policy documents and parsed summaries.
 type Policy struct {
-	ID         string
-	Provider   Provider
-	Name       string
-	Document   []byte
-	Normalized map[string]any
-	RawRef     string
+	ID         string         `json:"id"`
+	Provider   Provider       `json:"provider"`
+	Name       string         `json:"name"`
+	Document   []byte         `json:"document"`
+	Normalized map[string]any `json:"normalized,omitempty"`
+	RawRef     string         `json:"raw_ref"`
 }
 
 // Relationship models directional edges in the permission graph.
 type Relationship struct {
-	ID           string
-	Type         RelationshipType
-	FromNodeID   string
-	ToNodeID     string
-	EvidenceRef  string
-	DiscoveredAt time.Time
+	ID           string           `json:"id"`
+	Type         RelationshipType `json:"type"`
+	FromNodeID   string           `json:"from_node_id"`
+	ToNodeID     string           `json:"to_node_id"`
+	EvidenceRef  string           `json:"evidence_ref"`
+	DiscoveredAt time.Time        `json:"discovered_at"`
 }
 
 // Finding is a typed risk detected by the analysis engine.
 type Finding struct {
-	ID           string
-	ScanID       string
-	Type         FindingType
-	Severity     FindingSeverity
-	Title        string
-	HumanSummary string
-	Path         []string
-	Evidence     map[string]any
-	Remediation  string
-	CreatedAt    time.Time
+	ID           string          `json:"id"`
+	ScanID       string          `json:"scan_id"`
+	Type         FindingType     `json:"type"`
+	Severity     FindingSeverity `json:"severity"`
+	Title        string          `json:"title"`
+	HumanSummary string          `json:"human_summary"`
+	Path         []string        `json:"path,omitempty"`
+	Evidence     map[string]any  `json:"evidence,omitempty"`
+	Remediation  string          `json:"remediation"`
+	CreatedAt    time.Time       `json:"created_at"`
 }
 
 // OwnershipSignal tracks ownership hints and confidence.
 type OwnershipSignal struct {
-	ID         string
-	IdentityID string
-	Team       string
-	Repository string
-	Source     string
-	Confidence float64
+	ID         string  `json:"id"`
+	IdentityID string  `json:"identity_id"`
+	Team       string  `json:"team"`
+	Repository string  `json:"repository"`
+	Source     string  `json:"source"`
+	Confidence float64 `json:"confidence"`
 }
 
 // Scan tracks one full ingestion and analysis run.
 type Scan struct {
-	ID         string
-	Provider   Provider
-	StartedAt  time.Time
-	FinishedAt *time.Time
-	Status     string
+	ID         string     `json:"id"`
+	Provider   Provider   `json:"provider"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	Status     string     `json:"status"`
 }
