@@ -42,4 +42,16 @@ describe('apiClient', () => {
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url).toContain('/v1/scans/scan%2Fid%20with%20space/diff?limit=20');
   });
+
+  it('adds baseline scan query when provided', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({})
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.getScanDiff('scan-2', 20, 'reader', 'scan-1');
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toContain('/v1/scans/scan-2/diff?limit=20&previous_scan_id=scan-1');
+  });
 });

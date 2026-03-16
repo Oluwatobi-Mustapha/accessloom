@@ -124,9 +124,12 @@ export const apiClient = {
     const suffix = buildQuery({ scan_id: scanID });
     return request<Finding>(`/v1/findings/${encodeURIComponent(findingID)}${suffix}`, apiKey);
   },
-  getScanDiff(scanID: string, limit = 20, apiKey?: string) {
+  getScanDiff(scanID: string, limit = 20, apiKey?: string, previousScanID?: string) {
     return request<ScanDiff>(
-      `/v1/scans/${encodeURIComponent(scanID)}/diff${buildQuery({ limit })}`,
+      `/v1/scans/${encodeURIComponent(scanID)}/diff${buildQuery({
+        limit,
+        previous_scan_id: previousScanID
+      })}`,
       apiKey
     );
   },

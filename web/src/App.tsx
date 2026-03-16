@@ -24,6 +24,7 @@ export function App() {
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [events, setEvents] = useState<ScanEvent[]>([]);
   const [selectedScanID, setSelectedScanID] = useState('');
+  const [baselineScanID, setBaselineScanID] = useState('');
   const [severityFilter, setSeverityFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [overviewError, setOverviewError] = useState<string | null>(null);
@@ -49,6 +50,11 @@ export function App() {
     if (scans.some((scan) => scan.id === selectedScanID)) return selectedScanID;
     return scans[0].id;
   }, [scans, selectedScanID]);
+
+  const baselineOptions = useMemo(
+    () => scans.filter((scan) => scan.id !== availableScanID),
+    [scans, availableScanID]
+  );
 
   useEffect(() => {
     let active = true;
@@ -84,6 +90,17 @@ export function App() {
   }, [apiKey, refreshNonce, selectedScanID]);
 
   useEffect(() => {
+    if (!baselineScanID) return;
+    if (baselineScanID === availableScanID) {
+      setBaselineScanID('');
+      return;
+    }
+    if (!baselineOptions.some((scan) => scan.id === baselineScanID)) {
+      setBaselineScanID('');
+    }
+  }, [availableScanID, baselineOptions, baselineScanID]);
+
+  useEffect(() => {
     const scanID = availableScanID;
     if (!scanID) {
       setFindings([]);
@@ -102,7 +119,7 @@ export function App() {
         { scan_id: scanID, severity: severityFilter, type: typeFilter, limit: 100 },
         apiKey || undefined
       ),
-      apiClient.getScanDiff(scanID, 20, apiKey || undefined),
+      apiClient.getScanDiff(scanID, 20, apiKey || undefined, baselineScanID || undefined),
       apiClient.listIdentities(scanID, 100, apiKey || undefined),
       apiClient.listRelationships(scanID, 100, apiKey || undefined),
       apiClient.listScanEvents(scanID, 'info', 30, apiKey || undefined)
@@ -139,7 +156,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [availableScanID, severityFilter, typeFilter, apiKey, refreshNonce]);
+  }, [availableScanID, baselineScanID, severityFilter, typeFilter, apiKey, refreshNonce]);
 
   useEffect(() => {
     const scanID = availableScanID;
@@ -218,6 +235,22 @@ export function App() {
             <option value="medium">medium</option>
             <option value="low">low</option>
             <option value="info">info</option>
+          </select>
+        </div>
+        <div>
+          <label htmlFor="baseline-scan">Baseline Scan</label>
+          <select
+            id="baseline-scan"
+            value={baselineScanID}
+            onChange={(event) => setBaselineScanID(event.target.value)}
+            disabled={baselineOptions.length === 0}
+          >
+            <option value="">auto previous</option>
+            {baselineOptions.map((scan) => (
+              <option key={scan.id} value={scan.id}>
+                {scan.id.slice(0, 8)} · {scan.status}
+              </option>
+            ))}
           </select>
         </div>
         <div>
