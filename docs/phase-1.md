@@ -25,13 +25,20 @@ Deliver a usable AWS scanner that collects IAM identity data, normalizes relatio
 - Multi-tenant RBAC
 - AI-generated recommendations
 
-## Incremental Milestones
+## Milestone Status
 
-1. Foundation (this step): skeleton, interfaces, telemetry, CLI/API entrypoints
-2. AWS Collector: IAM role + policy retrieval with pagination and retries
-3. Normalizer + Graph: semantic permission expansion and edge materialization
-4. Risk Engine: first rule set with evidence-rich findings
-5. CLI UX pass: friendly summaries and actionable remediation output
+1. Foundation: completed
+   - modular monolith skeleton
+   - typed domain contracts
+   - telemetry hooks and baseline API/CLI
+2. AWS Collector: completed
+   - IAM role collection with pagination
+   - retry/backoff for throttling and transient failures
+   - idempotent deduplication by role ARN
+   - fixture-based and edge-case unit tests
+3. Normalizer + Graph: next
+4. Risk Engine: pending
+5. CLI UX pass: pending
 
 ## Phase Diagram
 
