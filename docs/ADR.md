@@ -97,3 +97,15 @@ This file tracks major decisions in simple terms.
 - Decision: Require `https` webhook URLs (allow `http` only for localhost), support optional HMAC signing.
 - Why: Reduce accidental insecure transport and allow receiver-side request verification.
 - Tradeoff: Slightly stricter setup for dev/test endpoints.
+
+## ADR-017: Scoped Keys Must Pass Explicit Read Authorization
+- Date: 2026-03-16
+- Decision: Enforce readable scope on `/v1/*` when scoped keys are enabled.
+- Why: Prevent keys with unknown/invalid scopes from reading findings and scan history.
+- Tradeoff: Existing scoped keys must include `read` or `write`.
+
+## ADR-018: Fail Fast on Invalid Write-Key Configuration
+- Date: 2026-03-16
+- Decision: Startup fails when legacy write keys are not also present in allowed API keys.
+- Why: Prevent silent lockout or inconsistent authorization behavior.
+- Tradeoff: Slightly stricter startup config requirements.

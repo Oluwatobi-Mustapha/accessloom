@@ -32,6 +32,7 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
   - API key auth middleware
   - write authorization keys for scan trigger
   - scoped API key model (`read`/`write`) with precedence over legacy key lists
+  - explicit read-scope enforcement on `/v1/*` endpoints
   - per-IP rate limiting
   - request timeout and security headers
   - audit request logging
@@ -41,6 +42,9 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
   - severity threshold and max finding cap
   - optional HMAC request signing
   - non-blocking delivery (scan success does not depend on webhook success)
+- Startup guardrails:
+  - reject invalid read/write key combinations early
+  - emit security warnings for risky but allowed config states
 
 ## Config wiring
 

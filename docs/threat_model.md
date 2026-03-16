@@ -87,6 +87,16 @@ Simple threat list for current system.
 - Fix: Require `https` for remote endpoints (allow `http` only for localhost development).
 - Status: Implemented.
 
+## 18) Invalid Scoped Key Still Reads API Data
+- Threat: A key with an unknown scope might authenticate but still read sensitive endpoints.
+- Fix: Enforce readable scope on `/v1/*`; `write` implies `read`.
+- Status: Implemented.
+
+## 19) Misconfigured Write-Key List
+- Threat: Write key exists but is not allowed in base API key list, causing broken or confusing auth behavior.
+- Fix: Startup validation rejects invalid legacy write-key configuration.
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and key rotation runbook.
 - Add audit sink forwarding guide for centralized log pipelines.

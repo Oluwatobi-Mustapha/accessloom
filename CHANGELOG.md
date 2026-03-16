@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- Added scoped read authorization enforcement on `/v1/*` when using scoped API keys.
+- Added startup security validation for legacy write key configuration.
+- Added startup security warning emission for risky but allowed config states.
 - Added high-severity findings webhook alerts with configurable threshold and cap.
 - Added optional HMAC signing for alert webhook requests.
 - Added webhook safety guardrails (`https` required for remote endpoints).
