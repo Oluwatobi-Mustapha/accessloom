@@ -2,6 +2,12 @@
 
 Simple operational runbook for Identrail API/worker deploys.
 
+Portable deployment profiles:
+- Docker: `deploy/docker/`
+- Kubernetes: `deploy/kubernetes/`
+- Linux VM/systemd: `deploy/systemd/`
+- Guide: `docs/deployment-anywhere.md`
+
 ## 1) Pre-Deploy Checklist
 
 - Confirm `IDENTRAIL_DATABASE_URL` points to target environment.

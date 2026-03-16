@@ -134,3 +134,28 @@ jobs:
 
       - name: Build Web
         run: npm run build --prefix web
+
+  deploy-portability:
+    name: Deploy Portability
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [go-quality, web-build]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Docker Compose Config
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp deploy/docker/.env.example deploy/docker/.env
+          docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env config > /tmp/identrail-compose.yml
+
+      - name: Build API Image
+        run: docker build -f deploy/docker/Dockerfile.backend --build-arg TARGET=server -t identrail/api:ci .
+
+      - name: Build Worker Image
+        run: docker build -f deploy/docker/Dockerfile.backend --build-arg TARGET=worker -t identrail/worker:ci .
+
+      - name: Build Web Image
+        run: docker build -f deploy/docker/Dockerfile.web --build-arg VITE_IDENTRAIL_API_URL=http://localhost:8080 -t identrail/web:ci .

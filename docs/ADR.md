@@ -205,3 +205,9 @@ This file tracks major decisions in simple terms.
 - Decision: Implement Kubernetes support first with fixture collector + normalized pipeline, then add live API collector.
 - Why: Keep scope narrow, stabilize domain mapping/rules, and ship deterministic tests before cluster auth/network complexity.
 - Tradeoff: Early Kubernetes mode is simulation-first and does not yet pull from live clusters.
+
+## ADR-035: Ship Multi-Target Deployment Profiles
+- Date: 2026-03-16
+- Decision: Add first-class deploy profiles for Docker Compose, Kubernetes manifests, and systemd units.
+- Why: Make adoption practical across startups and enterprises without forcing one platform choice.
+- Tradeoff: More deployment artifacts to maintain in sync with runtime config changes.

@@ -167,6 +167,11 @@ Simple threat list for current system.
 - Fix: Normalize only valid service account subjects and skip malformed subjects/bindings.
 - Status: Implemented.
 
+## 34) Environment Drift Across Deployment Targets
+- Threat: Different host/container/cluster setups can drift in env vars and weaken security controls.
+- Fix: Ship versioned deployment profiles and env templates (Docker, Kubernetes, systemd) with explicit required variables.
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and external KMS guidance.
 - Add audit sink forwarding guide for centralized log pipelines.

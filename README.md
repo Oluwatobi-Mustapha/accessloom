@@ -5,6 +5,7 @@ Identrail is a machine identity security platform.
 It discovers machine and workload identities across cloud environments, maps who can assume what, analyzes privilege paths, and surfaces risky identities.
 
 Operational runbook: `docs/deploy-runbook.md`.
+Portable deployment guide: `docs/deployment-anywhere.md`.
 Web shell scaffold: `web/` (React + TypeScript + Vite).
 
 ## Current Capabilities
@@ -56,3 +57,12 @@ Web shell scaffold: `web/` (React + TypeScript + Vite).
   - `IDENTRAIL_MIGRATIONS_DIR`
 - CI gates:
   - GitHub Actions pipeline for Go quality checks, coverage, Postgres integration tests, and web build validation
+
+## Deployment Profiles
+
+- Docker Compose (single host):
+  - `deploy/docker/docker-compose.yml`
+- Kubernetes:
+  - `deploy/kubernetes/`
+- Linux VM + systemd:
+  - `deploy/systemd/`

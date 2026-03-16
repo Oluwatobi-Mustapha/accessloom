@@ -1,6 +1,13 @@
 # Changelog
 
 ## Unreleased
+- Added portable deployment assets:
+  - multi-stage backend image (`deploy/docker/Dockerfile.backend`) for API/worker
+  - web image (`deploy/docker/Dockerfile.web`) with hardened nginx static serving
+  - Docker Compose stack (`deploy/docker/docker-compose.yml`) for API/worker/Postgres/web
+  - Kubernetes manifests (`deploy/kubernetes/*`) for namespace/config/secret/deployments/service/ingress
+  - systemd templates (`deploy/systemd/*`) for VM-based deployments
+  - deployment guide (`docs/deployment-anywhere.md`)
 - Added Kubernetes phase-4 foundation:
   - fixture collector for service accounts, role bindings, and pods
   - normalizer, permission resolver, graph resolver, and deterministic risk rules
