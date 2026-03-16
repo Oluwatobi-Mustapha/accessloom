@@ -40,7 +40,7 @@ Simple threat list for current system.
 ## 8) Misconfigured Database Connection Pool
 - Threat: Too many DB connections or long-lived bad connections.
 - Fix: Set safe Postgres pool defaults.
-- Status: Planned next hardening step.
+- Status: Implemented.
 
 ## Current Gaps (Next)
 - Add authn/authz for API endpoints.

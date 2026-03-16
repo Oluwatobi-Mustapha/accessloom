@@ -4,6 +4,8 @@
 - Added ADR record file (`docs/ADR.md`).
 - Added simple threat model (`docs/threat_model.md`).
 - Added API security hardening (headers, bounded limits, scan timeout).
+- Added self assessment report (`docs/self_assessment.md`).
+- Added safe Postgres pool defaults to reduce misconfiguration risk.
 
 ## 2026-03-16
 - Phase 1 foundation completed.
