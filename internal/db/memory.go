@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/domain"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/providers"
 	"github.com/google/uuid"
 )
 
@@ -17,6 +18,12 @@ type MemoryStore struct {
 	scans    map[string]ScanRecord
 	scanIDs  []string
 	findings map[string]domain.Finding
+
+	rawAssets     map[string]providers.RawAsset
+	identities    map[string]domain.Identity
+	policies      map[string]domain.Policy
+	relationships map[string]domain.Relationship
+	permissions   map[string]providers.PermissionTuple
 }
 
 // NewMemoryStore initializes an empty in-memory store.
@@ -25,6 +32,12 @@ func NewMemoryStore() *MemoryStore {
 		scans:    map[string]ScanRecord{},
 		scanIDs:  []string{},
 		findings: map[string]domain.Finding{},
+
+		rawAssets:     map[string]providers.RawAsset{},
+		identities:    map[string]domain.Identity{},
+		policies:      map[string]domain.Policy{},
+		relationships: map[string]domain.Relationship{},
+		permissions:   map[string]providers.PermissionTuple{},
 	}
 }
 
@@ -76,6 +89,38 @@ func (m *MemoryStore) UpsertFindings(_ context.Context, scanID string, findings 
 		finding.ScanID = scanID
 		key := scanID + "|" + finding.ID
 		m.findings[key] = finding
+	}
+	return nil
+}
+
+// UpsertArtifacts persists raw and normalized scan artifacts idempotently.
+func (m *MemoryStore) UpsertArtifacts(_ context.Context, scanID string, artifacts ScanArtifacts) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.scans[scanID]; !exists {
+		return fmt.Errorf("scan %s not found", scanID)
+	}
+
+	for _, asset := range artifacts.RawAssets {
+		key := scanID + "|" + asset.SourceID + "|" + asset.Kind
+		m.rawAssets[key] = asset
+	}
+	for _, identity := range artifacts.Bundle.Identities {
+		key := scanID + "|" + identity.ID
+		m.identities[key] = identity
+	}
+	for _, policy := range artifacts.Bundle.Policies {
+		key := scanID + "|" + policy.ID
+		m.policies[key] = policy
+	}
+	for _, relationship := range artifacts.Relationships {
+		key := scanID + "|" + relationship.ID
+		m.relationships[key] = relationship
+	}
+	for _, permission := range artifacts.Permissions {
+		key := scanID + "|" + permission.IdentityID + "|" + permission.Action + "|" + permission.Resource + "|" + permission.Effect
+		m.permissions[key] = permission
 	}
 	return nil
 }

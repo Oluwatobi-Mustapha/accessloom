@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/domain"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/providers"
 )
 
 func TestMemoryStoreScanLifecycleAndFindings(t *testing.T) {
@@ -27,6 +28,20 @@ func TestMemoryStoreScanLifecycleAndFindings(t *testing.T) {
 	}}
 	if err := store.UpsertFindings(context.Background(), scan.ID, findings); err != nil {
 		t.Fatalf("upsert findings failed: %v", err)
+	}
+	if err := store.UpsertArtifacts(context.Background(), scan.ID, ScanArtifacts{
+		RawAssets: []providers.RawAsset{{Kind: "iam_role", SourceID: "arn:aws:iam::1:role/test", Payload: []byte(`{"arn":"arn:aws:iam::1:role/test"}`), Collected: now.Format(time.RFC3339Nano)}},
+		Bundle: providers.NormalizedBundle{
+			Identities: []domain.Identity{{ID: "aws:identity:arn:aws:iam::1:role/test", Provider: domain.ProviderAWS, Type: domain.IdentityTypeRole, Name: "test", RawRef: "arn:aws:iam::1:role/test"}},
+		},
+		Permissions:   []providers.PermissionTuple{{IdentityID: "aws:identity:arn:aws:iam::1:role/test", Action: "s3:GetObject", Resource: "arn:aws:s3:::x/*", Effect: "Allow"}},
+		Relationships: []domain.Relationship{{ID: "rel-1", Type: domain.RelationshipCanAccess, FromNodeID: "aws:identity:arn:aws:iam::1:role/test", ToNodeID: "aws:access:s3%3AGetObject:arn%3Aaws%3As3%3A%3A%3Ax%2F%2A", DiscoveredAt: now}},
+	}); err != nil {
+		t.Fatalf("upsert artifacts failed: %v", err)
+	}
+	// idempotent re-run must not fail
+	if err := store.UpsertArtifacts(context.Background(), scan.ID, ScanArtifacts{}); err != nil {
+		t.Fatalf("second upsert artifacts failed: %v", err)
 	}
 
 	if err := store.CompleteScan(context.Background(), scan.ID, "completed", now.Add(2*time.Second), 3, 1, ""); err != nil {
@@ -58,6 +73,10 @@ func TestMemoryStoreErrorsForUnknownScan(t *testing.T) {
 	}
 
 	err = store.UpsertFindings(context.Background(), "missing", []domain.Finding{{ID: "f1"}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	err = store.UpsertArtifacts(context.Background(), "missing", ScanArtifacts{})
 	if err == nil {
 		t.Fatal("expected error")
 	}

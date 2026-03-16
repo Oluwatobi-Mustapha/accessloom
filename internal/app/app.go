@@ -10,9 +10,13 @@ import (
 
 // ScanResult bundles one collection and analysis cycle.
 type ScanResult struct {
-	Assets    int
-	Findings  []domain.Finding
-	Completed time.Time
+	Assets        int
+	RawAssets     []providers.RawAsset
+	Bundle        providers.NormalizedBundle
+	Permissions   []providers.PermissionTuple
+	Relationships []domain.Relationship
+	Findings      []domain.Finding
+	Completed     time.Time
 }
 
 // Scanner orchestrates end-to-end scan stages with explicit dependencies.
@@ -53,8 +57,12 @@ func (s Scanner) Run(ctx context.Context) (ScanResult, error) {
 	}
 
 	return ScanResult{
-		Assets:    len(raw),
-		Findings:  findings,
-		Completed: time.Now().UTC(),
+		Assets:        len(raw),
+		RawAssets:     raw,
+		Bundle:        bundle,
+		Permissions:   permissions,
+		Relationships: relationships,
+		Findings:      findings,
+		Completed:     time.Now().UTC(),
 	}, nil
 }

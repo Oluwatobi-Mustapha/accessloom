@@ -69,6 +69,16 @@ func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
 		return RunScanResult{}, err
 	}
 
+	if err := s.Store.UpsertArtifacts(ctx, record.ID, db.ScanArtifacts{
+		RawAssets:     result.RawAssets,
+		Bundle:        result.Bundle,
+		Permissions:   result.Permissions,
+		Relationships: result.Relationships,
+	}); err != nil {
+		_ = s.Store.CompleteScan(ctx, record.ID, "failed", s.Now().UTC(), result.Assets, 0, err.Error())
+		return RunScanResult{}, fmt.Errorf("persist artifacts: %w", err)
+	}
+
 	if err := s.Store.UpsertFindings(ctx, record.ID, result.Findings); err != nil {
 		_ = s.Store.CompleteScan(ctx, record.ID, "failed", s.Now().UTC(), result.Assets, 0, err.Error())
 		return RunScanResult{}, fmt.Errorf("persist findings: %w", err)

@@ -42,6 +42,7 @@ Collector -> Raw Assets -> Normalizer -> Domain Entities
 - Raw and normalized data are both preserved for auditability and rule explainability.
 - Observability is integrated from day one with structured logs, Prometheus metrics, and tracing hooks.
 - Persistence supports local memory mode and PostgreSQL mode behind a single store interface.
+- Scan execution persists both raw and normalized artifacts for auditability and explainability.
 
 ## Initial Runtime Components
 

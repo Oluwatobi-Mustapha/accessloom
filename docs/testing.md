@@ -21,3 +21,4 @@
 - storage layer behavior (memory + postgres via sqlmock)
 - migration baseline smoke validation
 - scheduler locking and periodic runner behavior
+- artifact persistence idempotency across raw + normalized sets

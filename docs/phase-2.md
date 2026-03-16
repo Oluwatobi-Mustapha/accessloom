@@ -19,6 +19,8 @@ Persist scan metadata and findings over time, expose stable API endpoints, and p
   - `POST /v1/scans`
   - `GET /v1/scans`
   - `GET /v1/findings`
+- full artifact persistence:
+  - raw assets, identities, policies, relationships, permissions, findings
 - Scheduler foundation and lock-based idempotency:
   - keyed in-memory scan lock
   - periodic runner abstraction
@@ -30,6 +32,7 @@ Persist scan metadata and findings over time, expose stable API endpoints, and p
 ## Idempotency approach
 
 - Findings are persisted with composite key `(scan_id, finding_id)` and upsert semantics.
+- Raw and normalized artifacts are persisted with scan-scoped upsert keys.
 - Scan triggers are protected by single-flight provider lock (`scan:<provider>`).
 - Re-running persistence for the same scan does not duplicate findings.
 

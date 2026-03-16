@@ -21,8 +21,8 @@ CREATE TABLE IF NOT EXISTS raw_assets (
 );
 
 CREATE TABLE IF NOT EXISTS identities (
-    id TEXT PRIMARY KEY,
     scan_id UUID NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
     provider TEXT NOT NULL,
     type TEXT NOT NULL,
     name TEXT NOT NULL,
@@ -32,33 +32,36 @@ CREATE TABLE IF NOT EXISTS identities (
     last_used_at TIMESTAMPTZ,
     tags JSONB,
     raw_ref TEXT NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (scan_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_identities_scan_id ON identities (scan_id);
 CREATE INDEX IF NOT EXISTS idx_identities_provider_type ON identities (provider, type);
 
 CREATE TABLE IF NOT EXISTS policies (
-    id TEXT PRIMARY KEY,
     scan_id UUID NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
     provider TEXT NOT NULL,
     name TEXT NOT NULL,
-    document JSONB,
+    document TEXT,
     normalized JSONB,
     raw_ref TEXT NOT NULL,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (scan_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_policies_scan_id ON policies (scan_id);
 
 CREATE TABLE IF NOT EXISTS relationships (
-    id TEXT PRIMARY KEY,
     scan_id UUID NOT NULL REFERENCES scans(id) ON DELETE CASCADE,
+    id TEXT NOT NULL,
     type TEXT NOT NULL,
     from_node_id TEXT NOT NULL,
     to_node_id TEXT NOT NULL,
     evidence_ref TEXT,
-    discovered_at TIMESTAMPTZ NOT NULL
+    discovered_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (scan_id, id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_relationships_scan_id ON relationships (scan_id);

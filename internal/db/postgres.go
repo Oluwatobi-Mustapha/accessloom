@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/domain"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/providers"
 	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
@@ -72,6 +73,36 @@ func (p *PostgresStore) CompleteScan(ctx context.Context, scanID string, status 
 	)
 	if err != nil {
 		return fmt.Errorf("complete scan: %w", err)
+	}
+	return nil
+}
+
+// UpsertArtifacts inserts raw and normalized artifacts idempotently for one scan.
+func (p *PostgresStore) UpsertArtifacts(ctx context.Context, scanID string, artifacts ScanArtifacts) error {
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin artifacts transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := upsertRawAssets(ctx, tx, scanID, artifacts.RawAssets); err != nil {
+		return err
+	}
+	if err := upsertIdentities(ctx, tx, scanID, artifacts.Bundle.Identities); err != nil {
+		return err
+	}
+	if err := upsertPolicies(ctx, tx, scanID, artifacts.Bundle.Policies); err != nil {
+		return err
+	}
+	if err := upsertRelationships(ctx, tx, scanID, artifacts.Relationships); err != nil {
+		return err
+	}
+	if err := upsertPermissions(ctx, tx, scanID, artifacts.Permissions); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit artifacts transaction: %w", err)
 	}
 	return nil
 }
@@ -232,4 +263,166 @@ func nullableString(value string) any {
 		return nil
 	}
 	return value
+}
+
+func nullableTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC()
+}
+
+func upsertRawAssets(ctx context.Context, tx *sql.Tx, scanID string, assets []providers.RawAsset) error {
+	query := `
+		INSERT INTO raw_assets (scan_id, source_id, kind, payload, collected_at)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (scan_id, source_id, kind)
+		DO UPDATE SET payload = EXCLUDED.payload, collected_at = EXCLUDED.collected_at
+	`
+	for _, asset := range assets {
+		collectedAt, err := time.Parse(time.RFC3339Nano, asset.Collected)
+		if err != nil {
+			collectedAt = time.Now().UTC()
+		}
+		_, err = tx.ExecContext(ctx, query, scanID, asset.SourceID, asset.Kind, asset.Payload, collectedAt.UTC())
+		if err != nil {
+			return fmt.Errorf("upsert raw asset %s: %w", asset.SourceID, err)
+		}
+	}
+	return nil
+}
+
+func upsertIdentities(ctx context.Context, tx *sql.Tx, scanID string, identities []domain.Identity) error {
+	query := `
+		INSERT INTO identities (scan_id, id, provider, type, name, arn, owner_hint, created_at, last_used_at, tags, raw_ref, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+		ON CONFLICT (scan_id, id)
+		DO UPDATE SET
+		  provider = EXCLUDED.provider,
+		  type = EXCLUDED.type,
+		  name = EXCLUDED.name,
+		  arn = EXCLUDED.arn,
+		  owner_hint = EXCLUDED.owner_hint,
+		  created_at = EXCLUDED.created_at,
+		  last_used_at = EXCLUDED.last_used_at,
+		  tags = EXCLUDED.tags,
+		  raw_ref = EXCLUDED.raw_ref,
+		  updated_at = NOW()
+	`
+	for _, identity := range identities {
+		tagsJSON, err := json.Marshal(identity.Tags)
+		if err != nil {
+			return fmt.Errorf("marshal identity tags: %w", err)
+		}
+		_, err = tx.ExecContext(
+			ctx,
+			query,
+			scanID,
+			identity.ID,
+			string(identity.Provider),
+			string(identity.Type),
+			identity.Name,
+			nullableString(identity.ARN),
+			nullableString(identity.OwnerHint),
+			nullableTime(identity.CreatedAt),
+			identity.LastUsedAt,
+			tagsJSON,
+			identity.RawRef,
+		)
+		if err != nil {
+			return fmt.Errorf("upsert identity %s: %w", identity.ID, err)
+		}
+	}
+	return nil
+}
+
+func upsertPolicies(ctx context.Context, tx *sql.Tx, scanID string, policies []domain.Policy) error {
+	query := `
+		INSERT INTO policies (scan_id, id, provider, name, document, normalized, raw_ref, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+		ON CONFLICT (scan_id, id)
+		DO UPDATE SET
+		  provider = EXCLUDED.provider,
+		  name = EXCLUDED.name,
+		  document = EXCLUDED.document,
+		  normalized = EXCLUDED.normalized,
+		  raw_ref = EXCLUDED.raw_ref,
+		  updated_at = NOW()
+	`
+	for _, policy := range policies {
+		normalizedJSON, err := json.Marshal(policy.Normalized)
+		if err != nil {
+			return fmt.Errorf("marshal policy normalized: %w", err)
+		}
+		_, err = tx.ExecContext(
+			ctx,
+			query,
+			scanID,
+			policy.ID,
+			string(policy.Provider),
+			policy.Name,
+			string(policy.Document),
+			normalizedJSON,
+			policy.RawRef,
+		)
+		if err != nil {
+			return fmt.Errorf("upsert policy %s: %w", policy.ID, err)
+		}
+	}
+	return nil
+}
+
+func upsertRelationships(ctx context.Context, tx *sql.Tx, scanID string, relationships []domain.Relationship) error {
+	query := `
+		INSERT INTO relationships (scan_id, id, type, from_node_id, to_node_id, evidence_ref, discovered_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (scan_id, id)
+		DO UPDATE SET
+		  type = EXCLUDED.type,
+		  from_node_id = EXCLUDED.from_node_id,
+		  to_node_id = EXCLUDED.to_node_id,
+		  evidence_ref = EXCLUDED.evidence_ref,
+		  discovered_at = EXCLUDED.discovered_at
+	`
+	for _, relationship := range relationships {
+		_, err := tx.ExecContext(
+			ctx,
+			query,
+			scanID,
+			relationship.ID,
+			string(relationship.Type),
+			relationship.FromNodeID,
+			relationship.ToNodeID,
+			nullableString(relationship.EvidenceRef),
+			relationship.DiscoveredAt.UTC(),
+		)
+		if err != nil {
+			return fmt.Errorf("upsert relationship %s: %w", relationship.ID, err)
+		}
+	}
+	return nil
+}
+
+func upsertPermissions(ctx context.Context, tx *sql.Tx, scanID string, permissions []providers.PermissionTuple) error {
+	query := `
+		INSERT INTO permissions (scan_id, identity_id, action, resource, effect)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (scan_id, identity_id, action, resource, effect)
+		DO NOTHING
+	`
+	for _, permission := range permissions {
+		_, err := tx.ExecContext(
+			ctx,
+			query,
+			scanID,
+			permission.IdentityID,
+			permission.Action,
+			permission.Resource,
+			permission.Effect,
+		)
+		if err != nil {
+			return fmt.Errorf("upsert permission for %s: %w", permission.IdentityID, err)
+		}
+	}
+	return nil
 }
