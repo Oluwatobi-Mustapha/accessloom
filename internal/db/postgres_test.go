@@ -231,6 +231,62 @@ func TestPostgresStoreScanEvents(t *testing.T) {
 	}
 }
 
+func TestPostgresStoreRejectsInvalidScanEventLevel(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	if err := store.AppendScanEvent(context.Background(), "scan-1", "invalid", "bad", nil); err == nil {
+		t.Fatal("expected invalid level error")
+	}
+}
+
+func TestPostgresStoreListIdentitiesAndRelationships(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	now := time.Now().UTC()
+
+	identityRows := sqlmock.NewRows([]string{"id", "provider", "type", "name", "arn", "owner_hint", "created_at", "last_used_at", "tags", "raw_ref"}).
+		AddRow("id-1", "aws", "role", "app-role", "arn:aws:iam::1:role/app-role", "", now, nil, []byte(`{"team":"platform"}`), "raw-1")
+	mock.ExpectQuery("SELECT i.id, i.provider, i.type, i.name").WithArgs("", "aws", "role", "app", 20).WillReturnRows(identityRows)
+
+	identities, err := store.ListIdentities(context.Background(), IdentityFilter{
+		Provider:   "aws",
+		Type:       "role",
+		NamePrefix: "app",
+	}, 20)
+	if err != nil {
+		t.Fatalf("list identities failed: %v", err)
+	}
+	if len(identities) != 1 || identities[0].ID != "id-1" {
+		t.Fatalf("unexpected identities: %+v", identities)
+	}
+
+	relationshipRows := sqlmock.NewRows([]string{"id", "type", "from_node_id", "to_node_id", "evidence_ref", "discovered_at"}).
+		AddRow("rel-1", "can_assume", "id-1", "id-2", "", now)
+	mock.ExpectQuery("SELECT id, type, from_node_id").WithArgs("", "can_assume", "", "", 30).WillReturnRows(relationshipRows)
+
+	relationships, err := store.ListRelationships(context.Background(), RelationshipFilter{Type: "can_assume"}, 30)
+	if err != nil {
+		t.Fatalf("list relationships failed: %v", err)
+	}
+	if len(relationships) != 1 || relationships[0].ID != "rel-1" {
+		t.Fatalf("unexpected relationships: %+v", relationships)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestNewPostgresStoreWithDB(t *testing.T) {
 	store := NewPostgresStoreWithDB(&sql.DB{})
 	if store == nil {

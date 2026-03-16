@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -200,6 +201,84 @@ func (m *MemoryStore) ListFindingsByScan(_ context.Context, scanID string, limit
 	return result, nil
 }
 
+// ListIdentities returns identities filtered by scan/provider/type/name.
+func (m *MemoryStore) ListIdentities(_ context.Context, filter IdentityFilter, limit int) ([]domain.Identity, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	filteredScanID := strings.TrimSpace(filter.ScanID)
+	if filteredScanID != "" {
+		if _, exists := m.scans[filteredScanID]; !exists {
+			return nil, ErrNotFound
+		}
+	}
+
+	namePrefix := strings.ToLower(strings.TrimSpace(filter.NamePrefix))
+	provider := strings.ToLower(strings.TrimSpace(filter.Provider))
+	identityType := strings.ToLower(strings.TrimSpace(filter.Type))
+	result := []domain.Identity{}
+	for key, identity := range m.identities {
+		scanID := scanKeyPrefix(key)
+		if filteredScanID != "" && scanID != filteredScanID {
+			continue
+		}
+		if provider != "" && strings.ToLower(string(identity.Provider)) != provider {
+			continue
+		}
+		if identityType != "" && strings.ToLower(string(identity.Type)) != identityType {
+			continue
+		}
+		if namePrefix != "" && !strings.HasPrefix(strings.ToLower(identity.Name), namePrefix) {
+			continue
+		}
+		result = append(result, identity)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+// ListRelationships returns relationships filtered by scan/type/from/to.
+func (m *MemoryStore) ListRelationships(_ context.Context, filter RelationshipFilter, limit int) ([]domain.Relationship, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	filteredScanID := strings.TrimSpace(filter.ScanID)
+	if filteredScanID != "" {
+		if _, exists := m.scans[filteredScanID]; !exists {
+			return nil, ErrNotFound
+		}
+	}
+	relType := strings.ToLower(strings.TrimSpace(filter.Type))
+	fromNode := strings.TrimSpace(filter.FromNodeID)
+	toNode := strings.TrimSpace(filter.ToNodeID)
+
+	result := []domain.Relationship{}
+	for key, relationship := range m.relationships {
+		scanID := scanKeyPrefix(key)
+		if filteredScanID != "" && scanID != filteredScanID {
+			continue
+		}
+		if relType != "" && strings.ToLower(string(relationship.Type)) != relType {
+			continue
+		}
+		if fromNode != "" && relationship.FromNodeID != fromNode {
+			continue
+		}
+		if toNode != "" && relationship.ToNodeID != toNode {
+			continue
+		}
+		result = append(result, relationship)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].DiscoveredAt.After(result[j].DiscoveredAt) })
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
 // AppendScanEvent appends one scan event entry.
 func (m *MemoryStore) AppendScanEvent(_ context.Context, scanID string, level string, message string, metadata map[string]any) error {
 	m.mu.Lock()
@@ -208,10 +287,14 @@ func (m *MemoryStore) AppendScanEvent(_ context.Context, scanID string, level st
 	if _, exists := m.scans[scanID]; !exists {
 		return ErrNotFound
 	}
+	normalizedLevel, err := NormalizeScanEventLevel(strings.ToLower(strings.TrimSpace(level)))
+	if err != nil {
+		return err
+	}
 	m.events[scanID] = append(m.events[scanID], ScanEvent{
 		ID:        uuid.NewString(),
 		ScanID:    scanID,
-		Level:     level,
+		Level:     normalizedLevel,
 		Message:   message,
 		Metadata:  metadata,
 		CreatedAt: time.Now().UTC(),
@@ -235,6 +318,14 @@ func (m *MemoryStore) ListScanEvents(_ context.Context, scanID string, limit int
 		events = events[:limit]
 	}
 	return events, nil
+}
+
+func scanKeyPrefix(key string) string {
+	parts := strings.SplitN(key, "|", 2)
+	if len(parts) != 2 {
+		return ""
+	}
+	return parts[0]
 }
 
 // Close closes store resources.

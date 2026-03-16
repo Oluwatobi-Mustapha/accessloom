@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/domain"
@@ -324,8 +325,112 @@ func (p *PostgresStore) ListFindingsByScan(ctx context.Context, scanID string, l
 	return result, nil
 }
 
+// ListIdentities returns identities filtered by scan/provider/type/name prefix.
+func (p *PostgresStore) ListIdentities(ctx context.Context, filter IdentityFilter, limit int) ([]domain.Identity, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := p.db.QueryContext(
+		ctx,
+		`SELECT i.id, i.provider, i.type, i.name, COALESCE(i.arn, ''), COALESCE(i.owner_hint, ''), i.created_at, i.last_used_at, i.tags, i.raw_ref
+		 FROM identities i
+		 WHERE ($1 = '' OR i.scan_id = $1::uuid)
+		   AND ($2 = '' OR i.provider = $2)
+		   AND ($3 = '' OR i.type = $3)
+		   AND ($4 = '' OR LOWER(i.name) LIKE LOWER($4 || '%'))
+		 ORDER BY i.name ASC
+		 LIMIT $5`,
+		filter.ScanID,
+		filter.Provider,
+		filter.Type,
+		filter.NamePrefix,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query identities: %w", err)
+	}
+	defer rows.Close()
+
+	result := []domain.Identity{}
+	for rows.Next() {
+		var identity domain.Identity
+		var provider string
+		var identityType string
+		var arn string
+		var ownerHint string
+		var createdAt *time.Time
+		var tagsJSON []byte
+		if err := rows.Scan(&identity.ID, &provider, &identityType, &identity.Name, &arn, &ownerHint, &createdAt, &identity.LastUsedAt, &tagsJSON, &identity.RawRef); err != nil {
+			return nil, fmt.Errorf("identity row: %w", err)
+		}
+		identity.Provider = domain.Provider(provider)
+		identity.Type = domain.IdentityType(identityType)
+		identity.ARN = arn
+		identity.OwnerHint = ownerHint
+		if createdAt != nil {
+			identity.CreatedAt = createdAt.UTC()
+		}
+		if len(tagsJSON) > 0 {
+			if err := json.Unmarshal(tagsJSON, &identity.Tags); err != nil {
+				return nil, fmt.Errorf("decode identity tags: %w", err)
+			}
+		}
+		result = append(result, identity)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("identity rows: %w", err)
+	}
+	return result, nil
+}
+
+// ListRelationships returns relationships filtered by scan/type/from/to.
+func (p *PostgresStore) ListRelationships(ctx context.Context, filter RelationshipFilter, limit int) ([]domain.Relationship, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := p.db.QueryContext(
+		ctx,
+		`SELECT id, type, from_node_id, to_node_id, COALESCE(evidence_ref, ''), discovered_at
+		 FROM relationships
+		 WHERE ($1 = '' OR scan_id = $1::uuid)
+		   AND ($2 = '' OR type = $2)
+		   AND ($3 = '' OR from_node_id = $3)
+		   AND ($4 = '' OR to_node_id = $4)
+		 ORDER BY discovered_at DESC
+		 LIMIT $5`,
+		filter.ScanID,
+		filter.Type,
+		filter.FromNodeID,
+		filter.ToNodeID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query relationships: %w", err)
+	}
+	defer rows.Close()
+
+	result := []domain.Relationship{}
+	for rows.Next() {
+		var relationship domain.Relationship
+		var relationshipType string
+		if err := rows.Scan(&relationship.ID, &relationshipType, &relationship.FromNodeID, &relationship.ToNodeID, &relationship.EvidenceRef, &relationship.DiscoveredAt); err != nil {
+			return nil, fmt.Errorf("relationship row: %w", err)
+		}
+		relationship.Type = domain.RelationshipType(relationshipType)
+		result = append(result, relationship)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("relationship rows: %w", err)
+	}
+	return result, nil
+}
+
 // AppendScanEvent writes one scan event row.
 func (p *PostgresStore) AppendScanEvent(ctx context.Context, scanID string, level string, message string, metadata map[string]any) error {
+	normalizedLevel, levelErr := NormalizeScanEventLevel(strings.ToLower(strings.TrimSpace(level)))
+	if levelErr != nil {
+		return levelErr
+	}
 	payload, err := json.Marshal(metadata)
 	if err != nil {
 		return fmt.Errorf("marshal scan event metadata: %w", err)
@@ -336,7 +441,7 @@ func (p *PostgresStore) AppendScanEvent(ctx context.Context, scanID string, leve
 		 VALUES ($1, $2, $3, $4, $5, NOW())`,
 		uuid.NewString(),
 		scanID,
-		level,
+		normalizedLevel,
 		message,
 		payload,
 	)

@@ -148,3 +148,69 @@ func TestMemoryStoreScanDetails(t *testing.T) {
 		t.Fatalf("expected 2 events, got %d", len(events))
 	}
 }
+
+func TestMemoryStoreIdentityAndRelationshipFilters(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
+	scanA, err := store.CreateScan(context.Background(), "aws", now)
+	if err != nil {
+		t.Fatalf("create scan A: %v", err)
+	}
+	scanB, err := store.CreateScan(context.Background(), "aws", now.Add(5*time.Minute))
+	if err != nil {
+		t.Fatalf("create scan B: %v", err)
+	}
+	if err := store.UpsertArtifacts(context.Background(), scanA.ID, ScanArtifacts{
+		Bundle: providers.NormalizedBundle{
+			Identities: []domain.Identity{
+				{ID: "id-1", Provider: domain.ProviderAWS, Type: domain.IdentityTypeRole, Name: "app-role", RawRef: "raw-1"},
+				{ID: "id-2", Provider: domain.ProviderAWS, Type: domain.IdentityTypeRole, Name: "db-role", RawRef: "raw-2"},
+			},
+		},
+		Relationships: []domain.Relationship{
+			{ID: "rel-1", Type: domain.RelationshipCanAssume, FromNodeID: "id-1", ToNodeID: "id-2", DiscoveredAt: now},
+		},
+	}); err != nil {
+		t.Fatalf("upsert artifacts scan A: %v", err)
+	}
+	if err := store.UpsertArtifacts(context.Background(), scanB.ID, ScanArtifacts{
+		Bundle: providers.NormalizedBundle{
+			Identities: []domain.Identity{
+				{ID: "id-3", Provider: domain.ProviderAWS, Type: domain.IdentityTypeRole, Name: "app-worker", RawRef: "raw-3"},
+			},
+		},
+		Relationships: []domain.Relationship{
+			{ID: "rel-2", Type: domain.RelationshipCanAccess, FromNodeID: "id-3", ToNodeID: "bucket-1", DiscoveredAt: now.Add(1 * time.Minute)},
+		},
+	}); err != nil {
+		t.Fatalf("upsert artifacts scan B: %v", err)
+	}
+
+	identities, err := store.ListIdentities(context.Background(), IdentityFilter{ScanID: scanA.ID, NamePrefix: "app"}, 10)
+	if err != nil {
+		t.Fatalf("list identities: %v", err)
+	}
+	if len(identities) != 1 || identities[0].ID != "id-1" {
+		t.Fatalf("unexpected identities: %+v", identities)
+	}
+
+	relationships, err := store.ListRelationships(context.Background(), RelationshipFilter{Type: "can_access"}, 10)
+	if err != nil {
+		t.Fatalf("list relationships: %v", err)
+	}
+	if len(relationships) != 1 || relationships[0].ID != "rel-2" {
+		t.Fatalf("unexpected relationships: %+v", relationships)
+	}
+}
+
+func TestMemoryStoreRejectsInvalidScanEventLevel(t *testing.T) {
+	store := NewMemoryStore()
+	scan, err := store.CreateScan(context.Background(), "aws", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("create scan: %v", err)
+	}
+	err = store.AppendScanEvent(context.Background(), scan.ID, "invalid", "bad level", nil)
+	if err == nil {
+		t.Fatal("expected invalid event level error")
+	}
+}
