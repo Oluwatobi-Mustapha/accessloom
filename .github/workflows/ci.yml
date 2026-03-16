@@ -126,5 +126,8 @@ jobs:
       - name: Install Web Dependencies
         run: npm ci --prefix web
 
+      - name: Run Web Tests
+        run: npm run test:ci --prefix web
+
       - name: Build Web
         run: npm run build --prefix web
