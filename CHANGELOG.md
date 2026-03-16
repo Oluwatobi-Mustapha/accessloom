@@ -2,6 +2,10 @@
 
 ## Unreleased
 - Standardized API domain payload fields to explicit `snake_case` JSON tags.
+- Added optional scan diff baseline selection:
+  - API: `GET /v1/scans/:scan_id/diff?previous_scan_id=...`
+  - service-level validation rejects invalid baselines (same scan/newer scan/different provider)
+  - UI baseline selector added in dashboard controls
 - Expanded web dashboard with:
   - findings table + severity/type filters
   - scan selector + scan diff panel

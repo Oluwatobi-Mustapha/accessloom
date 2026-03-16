@@ -157,6 +157,11 @@ Simple threat list for current system.
 - Fix: Explicit `snake_case` JSON tags on domain response models + frontend contract tests.
 - Status: Implemented.
 
+## 32) Wrong Baseline Selection Skews Drift Analysis
+- Threat: Comparing a scan against an invalid baseline (same scan, newer scan, or different provider) gives misleading risk movement.
+- Fix: Validate `previous_scan_id` strictly and reject invalid baselines with `400`.
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and external KMS guidance.
 - Add audit sink forwarding guide for centralized log pipelines.

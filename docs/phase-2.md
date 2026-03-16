@@ -34,6 +34,7 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
   - findings filters: `scan_id`, `severity`, `type`
   - trends filters: `severity`, `type`
   - scan event filters: `level`
+  - scan diff baseline override: `previous_scan_id`
   - finding drill-down by id, with optional `scan_id` scope
 - Full artifact persistence:
   - raw assets, identities, policies, relationships, permissions, findings

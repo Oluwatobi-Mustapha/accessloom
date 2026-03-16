@@ -193,3 +193,9 @@ This file tracks major decisions in simple terms.
 - Decision: Add explicit JSON tags to core domain models used in API responses.
 - Why: Keep payload shape stable for frontend and external clients, avoid implicit struct-name casing leaks.
 - Tradeoff: Existing consumers that depended on title-case fields must migrate.
+
+## ADR-033: Support Explicit Baseline Scan Selection for Diff
+- Date: 2026-03-16
+- Decision: Allow `previous_scan_id` on scan diff endpoint to compare against a chosen earlier scan.
+- Why: Operators need deterministic historical comparisons, not only auto-previous scan behavior.
+- Tradeoff: Additional validation logic for provider match and scan ordering.

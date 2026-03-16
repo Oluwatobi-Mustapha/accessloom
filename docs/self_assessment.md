@@ -22,6 +22,7 @@ Updated only at major milestones.
 - Delivery gate: production-grade CI pipeline added (quality, coverage, integration, web build).
 - API contract: domain payloads standardized to explicit snake_case JSON fields.
 - Dashboard: findings filters + scan diff + explorer snapshot shipped with frontend tests.
+- Diff analytics: baseline scan override added with strict validation and UI selector support.
 - Worker: scheduled process runs scans with shared runtime bootstrap.
 - Migrations: startup migration runner added for Postgres mode.
 - Test health: `go test ./... -cover` passing, coverage above 80%.
