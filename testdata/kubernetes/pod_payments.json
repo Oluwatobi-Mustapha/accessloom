@@ -1,0 +1,13 @@
+{
+  "kind": "Pod",
+  "metadata": {
+    "name": "payments-api-0",
+    "namespace": "apps",
+    "labels": {
+      "app": "payments-api"
+    }
+  },
+  "spec": {
+    "serviceAccountName": "payments-api"
+  }
+}

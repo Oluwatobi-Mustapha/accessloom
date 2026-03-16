@@ -1,0 +1,17 @@
+{
+  "kind": "ClusterRoleBinding",
+  "metadata": {
+    "name": "payments-cluster-admin"
+  },
+  "roleRef": {
+    "kind": "ClusterRole",
+    "name": "cluster-admin"
+  },
+  "subjects": [
+    {
+      "kind": "ServiceAccount",
+      "name": "payments-api",
+      "namespace": "apps"
+    }
+  ]
+}
