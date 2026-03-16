@@ -4,6 +4,8 @@ Identrail is a machine identity security platform.
 
 It discovers machine and workload identities across cloud environments, maps who can assume what, analyzes privilege paths, and surfaces risky identities.
 
+Operational runbook: `docs/deploy-runbook.md`.
+
 ## Current Capabilities
 
 - AWS scan pipeline: collector -> normalizer -> graph -> risk engine
@@ -13,7 +15,10 @@ It discovers machine and workload identities across cloud environments, maps who
 - REST API workflows:
   - `POST /v1/scans`
   - `GET /v1/scans`
+  - `GET /v1/scans/:scan_id/diff`
+  - `GET /v1/scans/:scan_id/events`
   - `GET /v1/findings`
+  - `GET /v1/findings/summary`
 - Worker workflow:
   - `worker` runs scheduled scans
 - Persistence:
@@ -28,6 +33,7 @@ It discovers machine and workload identities across cloud environments, maps who
   - high-severity scan alert webhook (`IDENTRAIL_ALERT_WEBHOOK_URL`)
   - alert threshold + bounds (`IDENTRAIL_ALERT_MIN_SEVERITY`, `IDENTRAIL_ALERT_MAX_FINDINGS`)
   - optional webhook request signing (`IDENTRAIL_ALERT_HMAC_SECRET`)
+  - alert retry controls (`IDENTRAIL_ALERT_MAX_RETRIES`, `IDENTRAIL_ALERT_RETRY_BACKOFF`)
   - startup security config validation (prevents invalid read/write key setups)
   - scoped-key validation (rejects unknown scopes at startup)
   - per-IP rate limiting (`IDENTRAIL_RATE_LIMIT_RPM`, `IDENTRAIL_RATE_LIMIT_BURST`)
