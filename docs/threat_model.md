@@ -152,6 +152,11 @@ Simple threat list for current system.
 - Fix: Enforce CI gates for formatting, static checks, coverage floor, Postgres integration tests, and web build.
 - Status: Implemented.
 
+## 31) API Contract Casing Drift Breaks Clients
+- Threat: Implicit JSON field names (`ID`, `ScanID`) can drift and break frontend or external consumers.
+- Fix: Explicit `snake_case` JSON tags on domain response models + frontend contract tests.
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and external KMS guidance.
 - Add audit sink forwarding guide for centralized log pipelines.

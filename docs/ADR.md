@@ -187,3 +187,9 @@ This file tracks major decisions in simple terms.
 - Decision: Add GitHub Actions CI with Go quality checks, coverage gate, Postgres integration tests, and web build checks.
 - Why: Catch regressions before deploy and keep backend/frontend contracts stable.
 - Tradeoff: Slightly longer feedback cycle for large pull requests.
+
+## ADR-032: Standardize API Payloads to snake_case
+- Date: 2026-03-16
+- Decision: Add explicit JSON tags to core domain models used in API responses.
+- Why: Keep payload shape stable for frontend and external clients, avoid implicit struct-name casing leaks.
+- Tradeoff: Existing consumers that depended on title-case fields must migrate.

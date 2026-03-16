@@ -48,4 +48,5 @@ GitHub Actions workflow: `.github/workflows/ci.yml`
   - `go test -tags=integration ./internal/integration -count=1 -v`
 - `web-build`
   - `npm ci --prefix web`
+  - `npm run test:ci --prefix web`
   - `npm run build --prefix web`

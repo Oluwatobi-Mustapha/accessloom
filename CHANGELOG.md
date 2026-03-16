@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- Standardized API domain payload fields to explicit `snake_case` JSON tags.
+- Expanded web dashboard with:
+  - findings table + severity/type filters
+  - scan selector + scan diff panel
+  - identities/relationships/events explorer snapshot
+- Added frontend test stack (Vitest + Testing Library + jsdom) with CI execution.
 - Added production CI workflow (`.github/workflows/ci.yml`) with:
   - Go format and vet gates
   - Go test + coverage threshold (>= 80%)
