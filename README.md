@@ -22,10 +22,12 @@ It discovers machine and workload identities across cloud environments, maps who
 - Security basics:
   - scan lock
   - API key auth (`IDENTRAIL_API_KEYS`)
+  - write authorization keys for scan trigger (`IDENTRAIL_WRITE_API_KEYS`)
   - per-IP rate limiting (`IDENTRAIL_RATE_LIMIT_RPM`, `IDENTRAIL_RATE_LIMIT_BURST`)
   - bounded list limits
   - scan timeout
   - security response headers
+  - audit log middleware for `/v1/*`
 - Startup migration support:
   - `IDENTRAIL_RUN_MIGRATIONS`
   - `IDENTRAIL_MIGRATIONS_DIR`

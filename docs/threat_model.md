@@ -37,22 +37,32 @@ Simple threat list for current system.
 - Fix: API key authentication for `/v1/*` endpoints.
 - Status: Implemented.
 
-## 8) Excessive Request Flood
+## 8) Unauthorized Scan Trigger
+- Threat: Read-only API key can still trigger write actions.
+- Fix: Dedicated write authorization key list for `POST /v1/scans`.
+- Status: Implemented.
+
+## 9) Excessive Request Flood
 - Threat: Repeated requests can degrade API availability.
 - Fix: Per-IP rate limiter.
 - Status: Implemented.
 
-## 9) Misconfigured Database Connection Pool
+## 10) Missing API Audit Trail
+- Threat: Hard to investigate who called sensitive endpoints.
+- Fix: API audit log middleware on `/v1/*`.
+- Status: Implemented.
+
+## 11) Misconfigured Database Connection Pool
 - Threat: Too many DB connections or long-lived bad connections.
 - Fix: Set safe Postgres pool defaults.
 - Status: Implemented.
 
-## 10) Schema Drift on Startup
+## 12) Schema Drift on Startup
 - Threat: Service starts on old schema and fails at runtime.
 - Fix: Startup migration runner for Postgres mode.
 - Status: Implemented.
 
 ## Current Gaps (Next)
-- Add API authorization model (not only API key auth).
-- Add audit log stream for access and scan triggers.
+- Add role/scope-based auth model.
+- Add audit log export to external sink.
 - Add secret encryption policy and key management guide.

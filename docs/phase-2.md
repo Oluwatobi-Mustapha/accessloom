@@ -30,8 +30,10 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
   - worker binary (`cmd/worker`) for scheduled scans
 - API hardening:
   - API key auth middleware
+  - write authorization keys for scan trigger
   - per-IP rate limiting
   - request timeout and security headers
+  - audit request logging
 
 ## Config wiring
 
@@ -40,6 +42,7 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 - `IDENTRAIL_SCAN_INTERVAL`
 - `IDENTRAIL_WORKER_RUN_NOW`
 - `IDENTRAIL_API_KEYS`
+- `IDENTRAIL_WRITE_API_KEYS`
 - `IDENTRAIL_RATE_LIMIT_RPM`
 - `IDENTRAIL_RATE_LIMIT_BURST`
 - `IDENTRAIL_RUN_MIGRATIONS`
@@ -53,6 +56,6 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 
 ## Next milestones
 
-1. API authorization model (role/scope checks)
-2. audit logging stream and alert hooks
+1. role/scope-based authorization model (beyond API keys)
+2. audit log export stream and alert hooks
 3. production deploy docs for migration/rollback runbook

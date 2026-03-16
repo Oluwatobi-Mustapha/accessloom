@@ -61,3 +61,15 @@ This file tracks major decisions in simple terms.
 - Decision: Run `*.up.sql` migrations on startup in Postgres mode (configurable).
 - Why: Prevent schema drift and startup/runtime mismatch.
 - Tradeoff: Requires careful deploy/rollback runbook.
+
+## ADR-011: Split API Keys for Read vs Write
+- Date: 2026-03-16
+- Decision: Add separate write-key list for scan trigger endpoint.
+- Why: Prevent read-only keys from triggering scan runs.
+- Tradeoff: Extra key management overhead.
+
+## ADR-012: API Audit Logging Middleware
+- Date: 2026-03-16
+- Decision: Log each `/v1/*` request with method, path, status, IP, and latency.
+- Why: Improve forensic visibility and operational tracing.
+- Tradeoff: Must manage log volume and retention.
