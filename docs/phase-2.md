@@ -31,9 +31,11 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 - API hardening:
   - API key auth middleware
   - write authorization keys for scan trigger
+  - scoped API key model (`read`/`write`) with precedence over legacy key lists
   - per-IP rate limiting
   - request timeout and security headers
   - audit request logging
+  - optional audit log file export sink
 
 ## Config wiring
 
@@ -43,10 +45,12 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 - `IDENTRAIL_WORKER_RUN_NOW`
 - `IDENTRAIL_API_KEYS`
 - `IDENTRAIL_WRITE_API_KEYS`
+- `IDENTRAIL_API_KEY_SCOPES`
 - `IDENTRAIL_RATE_LIMIT_RPM`
 - `IDENTRAIL_RATE_LIMIT_BURST`
 - `IDENTRAIL_RUN_MIGRATIONS`
 - `IDENTRAIL_MIGRATIONS_DIR`
+- `IDENTRAIL_AUDIT_LOG_FILE`
 
 ## Idempotency approach
 
@@ -56,6 +60,6 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 
 ## Next milestones
 
-1. role/scope-based authorization model (beyond API keys)
-2. audit log export stream and alert hooks
-3. production deploy docs for migration/rollback runbook
+1. structured alert hooks for high-severity findings
+2. production deploy docs for migration/rollback runbook
+3. audit sink shipping path to centralized log systems
