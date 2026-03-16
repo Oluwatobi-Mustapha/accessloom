@@ -65,7 +65,13 @@ func NewBootstrap(ctx context.Context, cfg config.Config) (Bootstrap, error) {
 		auditSinks = append(auditSinks, fileSink)
 	}
 	if cfg.AuditForwardURL != "" {
-		forwardSink, sinkErr := api.NewHTTPAuditSink(cfg.AuditForwardURL, cfg.AuditForwardTimeout, cfg.AuditForwardHMACSecret)
+		forwardSink, sinkErr := api.NewHTTPAuditSink(
+			cfg.AuditForwardURL,
+			cfg.AuditForwardTimeout,
+			cfg.AuditForwardHMACSecret,
+			cfg.AuditForwardMaxRetries,
+			cfg.AuditForwardRetryBackoff,
+		)
 		if sinkErr != nil {
 			for _, sink := range auditSinks {
 				_ = sink.Close()
