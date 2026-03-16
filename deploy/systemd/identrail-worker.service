@@ -1,0 +1,23 @@
+[Unit]
+Description=Identrail worker service
+After=network-online.target identrail-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=identrail
+Group=identrail
+EnvironmentFile=/etc/identrail/identrail.env
+WorkingDirectory=/opt/identrail
+ExecStart=/usr/local/bin/identrail-worker
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/log/identrail
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,83 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: identrail-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: identrail
+      POSTGRES_USER: identrail
+      POSTGRES_PASSWORD: identrail
+    ports:
+      - "5432:5432"
+    volumes:
+      - identrail_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U identrail -d identrail"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.backend
+      args:
+        TARGET: server
+    image: identrail/api:local
+    container_name: identrail-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      IDENTRAIL_HTTP_ADDR: ":8080"
+      IDENTRAIL_DATABASE_URL: "postgres://identrail:identrail@postgres:5432/identrail?sslmode=disable"
+      IDENTRAIL_RUN_MIGRATIONS: "true"
+      IDENTRAIL_MIGRATIONS_DIR: "/app/migrations"
+      IDENTRAIL_AUDIT_LOG_FILE: "/var/log/identrail/audit.jsonl"
+    ports:
+      - "8080:8080"
+    volumes:
+      - identrail_audit:/var/log/identrail
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.backend
+      args:
+        TARGET: worker
+    image: identrail/worker:local
+    container_name: identrail-worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      api:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      IDENTRAIL_DATABASE_URL: "postgres://identrail:identrail@postgres:5432/identrail?sslmode=disable"
+      IDENTRAIL_RUN_MIGRATIONS: "false"
+      IDENTRAIL_MIGRATIONS_DIR: "/app/migrations"
+
+  web:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.web
+      args:
+        VITE_IDENTRAIL_API_URL: "${VITE_IDENTRAIL_API_URL:-http://localhost:8080}"
+    image: identrail/web:local
+    container_name: identrail-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    ports:
+      - "8081:8080"
+
+volumes:
+  identrail_pgdata:
+  identrail_audit:

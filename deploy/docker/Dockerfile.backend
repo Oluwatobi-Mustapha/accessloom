@@ -1,0 +1,26 @@
+FROM golang:1.25-alpine AS builder
+WORKDIR /src
+
+RUN apk add --no-cache ca-certificates tzdata git
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ARG TARGET=server
+RUN GOOS=linux GOARCH=amd64 CGO_ENABLED=0 \
+    go build -trimpath -ldflags="-s -w" -o /out/identrail ./cmd/${TARGET}
+
+FROM gcr.io/distroless/static-debian12:nonroot
+WORKDIR /app
+
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=builder /out/identrail /usr/local/bin/identrail
+COPY --from=builder /src/migrations /app/migrations
+COPY --from=builder /src/testdata /app/testdata
+
+ENV IDENTRAIL_MIGRATIONS_DIR=/app/migrations
+USER nonroot:nonroot
+
+ENTRYPOINT ["/usr/local/bin/identrail"]

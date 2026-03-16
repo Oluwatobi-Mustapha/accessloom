@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: identrail-worker
+  namespace: identrail
+  labels:
+    app: identrail-worker
+spec:
+  replicas: 1
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: identrail-worker
+  template:
+    metadata:
+      labels:
+        app: identrail-worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: worker
+          image: ghcr.io/oluwatobi-mustapha/identrail-worker:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: identrail-config
+            - secretRef:
+                name: identrail-secrets
+          env:
+            - name: IDENTRAIL_RUN_MIGRATIONS
+              value: "false"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
