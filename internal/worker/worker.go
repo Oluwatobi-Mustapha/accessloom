@@ -21,6 +21,12 @@ func Run(ctx context.Context, cfg config.Config, signals <-chan os.Signal) error
 		return fmt.Errorf("initialize logger: %w", err)
 	}
 	defer func() { _ = logger.Sync() }()
+	if err := config.ValidateSecurity(cfg); err != nil {
+		return fmt.Errorf("validate security config: %w", err)
+	}
+	for _, warning := range config.SecurityWarnings(cfg) {
+		logger.Warn("security configuration warning", telemetry.String("detail", warning))
+	}
 
 	traceShutdown, err := telemetry.SetupTracing(ctx, cfg.ServiceName+"-worker")
 	if err != nil {

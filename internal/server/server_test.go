@@ -53,6 +53,20 @@ func TestNewBootstrapAuditFileError(t *testing.T) {
 	}
 }
 
+func TestNewBootstrapInvalidSecurityConfig(t *testing.T) {
+	cfg := config.Config{
+		HTTPAddr:     ":0",
+		LogLevel:     "info",
+		Provider:     "aws",
+		ServiceName:  "identrail-test",
+		WriteAPIKeys: []string{"writer-only"},
+		APIKeys:      []string{"reader-only"},
+	}
+	if _, err := NewBootstrap(context.Background(), cfg); err == nil {
+		t.Fatal("expected security validation error")
+	}
+}
+
 func TestNewHTTPServer(t *testing.T) {
 	cfg := config.Config{HTTPAddr: ":9999"}
 	srv := NewHTTPServer(cfg, nil)

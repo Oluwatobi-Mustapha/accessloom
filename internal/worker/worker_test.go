@@ -66,3 +66,24 @@ func TestRunFailsWithInvalidStoreConfig(t *testing.T) {
 		t.Fatal("expected store initialization error")
 	}
 }
+
+func TestRunFailsWithInvalidSecurityConfig(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := config.Config{
+		LogLevel:       "info",
+		ServiceName:    "identrail-test",
+		Provider:       "aws",
+		ScanInterval:   10 * time.Millisecond,
+		WorkerRunNow:   false,
+		AWSFixturePath: []string{"testdata/aws/role_with_policies.json"},
+		APIKeys:        []string{"reader"},
+		WriteAPIKeys:   []string{"writer"},
+	}
+
+	sigCh := make(chan os.Signal, 1)
+	if err := Run(ctx, cfg, sigCh); err == nil {
+		t.Fatal("expected security validation error")
+	}
+}

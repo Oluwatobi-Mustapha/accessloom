@@ -31,6 +31,13 @@ func NewBootstrap(ctx context.Context, cfg config.Config) (Bootstrap, error) {
 	if err != nil {
 		return Bootstrap{}, fmt.Errorf("initialize logger: %w", err)
 	}
+	if err := config.ValidateSecurity(cfg); err != nil {
+		_ = logger.Sync()
+		return Bootstrap{}, fmt.Errorf("validate security config: %w", err)
+	}
+	for _, warning := range config.SecurityWarnings(cfg) {
+		logger.Warn("security configuration warning", telemetry.String("detail", warning))
+	}
 
 	metrics := telemetry.NewMetrics()
 	traceShutdown, err := telemetry.SetupTracing(ctx, cfg.ServiceName)
