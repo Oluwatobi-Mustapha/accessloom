@@ -1,0 +1,17 @@
+version: "2"
+sql:
+  - engine: "postgresql"
+    schema:
+      - "../migrations"
+    queries:
+      - "queries/scans.sql"
+      - "queries/findings.sql"
+      - "queries/events.sql"
+      - "queries/graph.sql"
+    gen:
+      go:
+        package: "sqlcdb"
+        out: "../internal/db/sqlcdb"
+        sql_package: "database/sql"
+        emit_json_tags: true
+        emit_interface: true
