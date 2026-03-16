@@ -1,24 +1,17 @@
-# Scheduler and Idempotent Scan Locking
+# Scheduler and Scan Locking
 
 ## Purpose
 
-The scheduler layer prevents overlapping scan executions for the same provider and provides a reusable loop for periodic scans.
+Prevent overlapping scans and support periodic scan runs.
 
 ## Components
 
-- `internal/scheduler/lock.go`
-  - keyed in-memory lock
-  - `TryAcquire(key)` returns release function
-- `internal/scheduler/runner.go`
-  - periodic run loop
-  - single-flight execution via lock
-  - `ErrAlreadyRunning` when a run is skipped due to lock contention
+- `internal/scheduler/lock.go`: keyed in-memory lock
+- `internal/scheduler/runner.go`: periodic loop executor
+- `cmd/worker`: process that runs scheduled scans
 
-## API Integration
+## How safety works
 
-`internal/api.Service` uses the scheduler lock per provider key (`scan:<provider>`):
-
-- if lock is available, scan proceeds
-- if lock is held, API returns conflict (`409`) with `scan already in progress`
-
-This gives idempotent behavior for repeated trigger calls and protects persistence from concurrent duplicate writes.
+- Service lock key: `scan:<provider>`
+- If a scan is already running, new trigger is skipped/conflicted
+- This protects writes from overlap and duplicate race conditions

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Persist scan metadata and findings over time, expose stable API endpoints, and prepare the platform for scheduled idempotent scans.
+Persist scan metadata and findings over time, expose stable API endpoints, and run scans safely on a schedule.
 
 ## Implemented in this milestone series
 
@@ -13,31 +13,32 @@ Persist scan metadata and findings over time, expose stable API endpoints, and p
 - API service orchestration:
   - creates scan records
   - runs scanner
-  - upserts findings idempotently
+  - upserts full artifacts and findings idempotently
   - finalizes scan status and counts
 - API endpoints backed by storage:
   - `POST /v1/scans`
   - `GET /v1/scans`
   - `GET /v1/findings`
-- full artifact persistence:
+- Full artifact persistence:
   - raw assets, identities, policies, relationships, permissions, findings
-- Scheduler foundation and lock-based idempotency:
+- Scheduler and worker:
   - keyed in-memory scan lock
   - periodic runner abstraction
-  - conflict protection for concurrent scan triggers
+  - worker binary (`cmd/worker`) for scheduled scans
 - Config wiring:
   - `IDENTRAIL_DATABASE_URL`
   - `IDENTRAIL_AWS_FIXTURES`
+  - `IDENTRAIL_SCAN_INTERVAL`
+  - `IDENTRAIL_WORKER_RUN_NOW`
 
 ## Idempotency approach
 
-- Findings are persisted with composite key `(scan_id, finding_id)` and upsert semantics.
-- Raw and normalized artifacts are persisted with scan-scoped upsert keys.
-- Scan triggers are protected by single-flight provider lock (`scan:<provider>`).
-- Re-running persistence for the same scan does not duplicate findings.
+- Findings use upsert key `(scan_id, finding_id)`.
+- Raw/normalized artifacts use scan-scoped upsert keys.
+- Scan triggers are protected by provider lock (`scan:<provider>`).
 
 ## Next milestones
 
-1. Scheduled worker process and startup wiring for periodic scans
-2. Persist normalized entities/relationships during scans
-3. API filtering and pagination hardening
+1. API authentication and authorization
+2. API rate limiter and audit logging
+3. Migration runner during startup/deploy

@@ -2,15 +2,11 @@
 
 Identrail is a machine identity security platform.
 
-It discovers machine and workload identities across cloud environments, maps who can assume what, analyzes privilege paths, and surfaces security findings such as overprivileged, stale, risky, or ownerless identities.
-
-Initial focus is AWS, with architecture hooks for Kubernetes and Azure.
-
-The goal is simple: give security and IAM teams clear visibility and actionable risk insights before identity issues become incidents.
+It discovers machine and workload identities across cloud environments, maps who can assume what, analyzes privilege paths, and surfaces risky identities.
 
 ## Current Capabilities
 
-- AWS phase-1 scan pipeline (collector -> normalizer -> graph -> risk engine)
+- AWS scan pipeline: collector -> normalizer -> graph -> risk engine
 - CLI workflows:
   - `identrail scan`
   - `identrail findings`
@@ -18,6 +14,13 @@ The goal is simple: give security and IAM teams clear visibility and actionable 
   - `POST /v1/scans`
   - `GET /v1/scans`
   - `GET /v1/findings`
-- Persistence layer with memory mode (default) and PostgreSQL mode (`IDENTRAIL_DATABASE_URL`)
-- Idempotent storage of raw + normalized scan artifacts and typed findings
-- Security guardrails: single-flight scan lock, bounded API list limits, scan request timeout, security response headers
+- Worker workflow:
+  - `worker` runs scheduled scans
+- Persistence:
+  - memory mode (default)
+  - PostgreSQL mode (`IDENTRAIL_DATABASE_URL`)
+- Security basics:
+  - scan lock
+  - bounded list limits
+  - scan timeout
+  - security response headers

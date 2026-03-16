@@ -2,23 +2,16 @@
 
 ## Principles
 
-- Unit tests for every core package and orchestration path
-- Fixture-based tests for provider payload normalization and collection behavior
-- Integration tests against Postgres in Phase 2
-- Mock provider dependencies for deterministic rule testing
+- Unit tests for core packages and orchestration paths
+- Fixture-based tests for provider collection/normalization/rules
+- Sqlmock tests for Postgres store behavior
+- Scheduler and worker tests for run safety
 
-## Current Coverage Focus
+## Current Focus
 
-- Config loading and defaults
-- Domain validation behavior
-- Telemetry setup and instrumentation behavior
-- API routing health and scan schedule endpoints
-- Scan orchestration success and failure paths
-- AWS collector pagination, throttling retries, dedup idempotency, and cancellation handling
-- AWS normalizer and graph behavior (trust parsing, permission expansion, relationship materialization)
-- AWS risk engine behavior (typed findings, deterministic IDs, severity order, escalation path detection)
-- CLI scan/findings workflows (table/json output, state persistence, invalid modes)
-- storage layer behavior (memory + postgres via sqlmock)
-- migration baseline smoke validation
-- scheduler locking and periodic runner behavior
-- artifact persistence idempotency across raw + normalized sets
+- Config defaults and env parsing
+- API routes and scan trigger behavior
+- Memory/Postgres persistence logic
+- Artifact and finding idempotent upserts
+- Scheduler lock/runner behavior
+- Worker startup and cancellation behavior

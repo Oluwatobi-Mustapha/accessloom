@@ -48,9 +48,11 @@ Collector -> Raw Assets -> Normalizer -> Domain Entities
 
 - `cmd/server`: REST API process for health, scans, and findings endpoints.
 - `cmd/cli`: operator-focused scanner interface.
+- `cmd/worker`: scheduled scan process for periodic runs.
 - `internal/app.Scanner`: deterministic scan execution pipeline.
 - `internal/api.Service`: scan orchestration + persistence bridge.
 - `internal/db`: storage adapters and migration-backed schema.
+- `internal/runtime`: shared service bootstrap used by server and worker.
 
 ## Future Extraction Plan
 
