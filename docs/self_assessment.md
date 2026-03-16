@@ -16,6 +16,9 @@ Updated only at major milestones.
 - Analyst workflows: findings summary, scan diff, and scan event timeline APIs added.
 - Explorer workflows: identities, relationships, and findings trend endpoints added.
 - Audit forwarding: optional HTTP forward sink with signing guardrails.
+- API drill-down: finding-by-id endpoint and server-side findings/trend/event filters added.
+- Postgres reads: scan/finding/event reads now use typed query wrappers aligned with sqlc contracts.
+- Audit reliability: audit forwarding retries/backoff added with bounded startup validation.
 - Worker: scheduled process runs scans with shared runtime bootstrap.
 - Migrations: startup migration runner added for Postgres mode.
 - Test health: `go test ./... -cover` passing, coverage above 80%.

@@ -3,9 +3,15 @@
 ## Unreleased
 - Added findings trends endpoint (`GET /v1/findings/trends`).
 - Added explorer endpoints (`GET /v1/identities`, `GET /v1/relationships`).
+- Added finding detail endpoint (`GET /v1/findings/:finding_id`).
+- Added findings list server-side filters (`scan_id`, `severity`, `type`).
+- Added findings trend filters (`severity`, `type`).
+- Added scan event level filter (`GET /v1/scans/:scan_id/events?level=`).
 - Added optional audit forwarding sink (`IDENTRAIL_AUDIT_FORWARD_URL`) with URL safety checks.
+- Added audit forwarding retry/backoff controls (`IDENTRAIL_AUDIT_FORWARD_MAX_RETRIES`, `IDENTRAIL_AUDIT_FORWARD_RETRY_BACKOFF`).
 - Added typed scan event level validation (`debug|info|warn|error`).
 - Added sqlc query contract scaffolding (`sqlc/sqlc.yaml`, `sqlc/queries/*`).
+- Started Postgres read-path migration to typed query wrappers aligned with sqlc contracts.
 - Added integration test lane for Postgres-backed scan/diff flow (`go test -tags=integration ./internal/integration`).
 - Added Phase 3 web scaffold (`web/` React + TypeScript + Vite).
 - Added scan events persistence and API endpoint (`GET /v1/scans/:scan_id/events`).

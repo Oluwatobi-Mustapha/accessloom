@@ -137,6 +137,16 @@ Simple threat list for current system.
 - Fix: Enforce typed scan event levels (`debug`, `info`, `warn`, `error`).
 - Status: Implemented.
 
+## 28) Audit Forward Event Loss During Collector Outage
+- Threat: Temporary collector outages can drop API audit events.
+- Fix: Bounded retries and backoff for audit forwarding on transient failures.
+- Status: Implemented.
+
+## 29) Heavy Client-Side Filtering Can Cause Query Drift
+- Threat: Different clients may compute filters differently and show inconsistent risk data.
+- Fix: Add server-side filters (`scan_id`, `severity`, `type`, `level`) and finding detail endpoint.
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and external KMS guidance.
 - Add audit sink forwarding guide for centralized log pipelines.
