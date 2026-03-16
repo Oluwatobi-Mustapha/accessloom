@@ -180,6 +180,60 @@ func TestServiceGetFindingsSummary(t *testing.T) {
 	}
 }
 
+func TestServiceListFindingsFiltered(t *testing.T) {
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
+	scanA, _ := store.CreateScan(context.Background(), "aws", now)
+	scanB, _ := store.CreateScan(context.Background(), "aws", now.Add(1*time.Minute))
+	_ = store.UpsertFindings(context.Background(), scanA.ID, []domain.Finding{
+		{ID: "f1", Type: domain.FindingOwnerless, Severity: domain.SeverityHigh, CreatedAt: now},
+	})
+	_ = store.UpsertFindings(context.Background(), scanB.ID, []domain.Finding{
+		{ID: "f2", Type: domain.FindingEscalationPath, Severity: domain.SeverityCritical, CreatedAt: now.Add(1 * time.Minute)},
+		{ID: "f3", Type: domain.FindingOwnerless, Severity: domain.SeverityLow, CreatedAt: now.Add(1 * time.Minute)},
+	})
+
+	svc := NewService(store, fakeScanner{}, "aws")
+
+	highOnly, err := svc.ListFindingsFiltered(context.Background(), 10, FindingsFilter{Severity: "critical"})
+	if err != nil {
+		t.Fatalf("list findings filtered by severity: %v", err)
+	}
+	if len(highOnly) != 1 || highOnly[0].ID != "f2" {
+		t.Fatalf("unexpected critical findings: %+v", highOnly)
+	}
+
+	scanOnly, err := svc.ListFindingsFiltered(context.Background(), 10, FindingsFilter{ScanID: scanA.ID, Type: "ownerless_identity"})
+	if err != nil {
+		t.Fatalf("list findings filtered by scan/type: %v", err)
+	}
+	if len(scanOnly) != 1 || scanOnly[0].ID != "f1" {
+		t.Fatalf("unexpected findings for scan/type: %+v", scanOnly)
+	}
+}
+
+func TestServiceGetFinding(t *testing.T) {
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
+	scan, _ := store.CreateScan(context.Background(), "aws", now)
+	_ = store.UpsertFindings(context.Background(), scan.ID, []domain.Finding{
+		{ID: "finding-1", Type: domain.FindingOwnerless, Severity: domain.SeverityHigh, CreatedAt: now},
+	})
+
+	svc := NewService(store, fakeScanner{}, "aws")
+	found, err := svc.GetFinding(context.Background(), "finding-1", scan.ID)
+	if err != nil {
+		t.Fatalf("get finding: %v", err)
+	}
+	if found.ID != "finding-1" {
+		t.Fatalf("unexpected finding id: %q", found.ID)
+	}
+
+	if _, err := svc.GetFinding(context.Background(), "missing", scan.ID); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("expected not found for missing finding, got %v", err)
+	}
+}
+
 func TestServiceGetScanDiff(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
@@ -234,6 +288,17 @@ func TestServiceListScanEvents(t *testing.T) {
 	}
 	if len(events) == 0 {
 		t.Fatal("expected scan events")
+	}
+
+	if err := store.AppendScanEvent(context.Background(), result.Scan.ID, db.ScanEventLevelError, "forced error", nil); err != nil {
+		t.Fatalf("append error event: %v", err)
+	}
+	errorEvents, err := svc.ListScanEventsFiltered(context.Background(), result.Scan.ID, db.ScanEventLevelError, 20)
+	if err != nil {
+		t.Fatalf("list filtered scan events: %v", err)
+	}
+	if len(errorEvents) == 0 {
+		t.Fatal("expected at least one error-level event")
 	}
 }
 
@@ -312,5 +377,24 @@ func TestServiceGetFindingsTrend(t *testing.T) {
 	}
 	if points[1].BySeverity["critical"] != 1 {
 		t.Fatalf("unexpected severity bucket: %+v", points[1].BySeverity)
+	}
+}
+
+func TestServiceGetFindingsTrendFiltered(t *testing.T) {
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
+	scan, _ := store.CreateScan(context.Background(), "aws", now)
+	_ = store.UpsertFindings(context.Background(), scan.ID, []domain.Finding{
+		{ID: "f1", Severity: domain.SeverityCritical, Type: domain.FindingEscalationPath, CreatedAt: now},
+		{ID: "f2", Severity: domain.SeverityHigh, Type: domain.FindingOwnerless, CreatedAt: now},
+	})
+
+	svc := NewService(store, fakeScanner{}, "aws")
+	points, err := svc.GetFindingsTrendFiltered(context.Background(), 10, "critical", "escalation_path")
+	if err != nil {
+		t.Fatalf("trend filtered: %v", err)
+	}
+	if len(points) != 1 || points[0].Total != 1 {
+		t.Fatalf("unexpected filtered points: %+v", points)
 	}
 }

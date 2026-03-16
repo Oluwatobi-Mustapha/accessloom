@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/app"
@@ -34,6 +35,13 @@ type RunScanResult struct {
 	Scan         db.ScanRecord `json:"scan"`
 	Assets       int           `json:"assets"`
 	FindingCount int           `json:"finding_count"`
+}
+
+// FindingsFilter narrows findings list queries without changing API response schema.
+type FindingsFilter struct {
+	ScanID   string
+	Severity string
+	Type     string
 }
 
 // FindingsSummary returns quick aggregation counters for dashboards/alerts.
@@ -150,6 +158,67 @@ func (s *Service) ListFindings(ctx context.Context, limit int) ([]domain.Finding
 	return s.Store.ListFindings(ctx, limit)
 }
 
+// ListFindingsFiltered returns findings with optional scan/type/severity filters.
+func (s *Service) ListFindingsFiltered(ctx context.Context, limit int, filter FindingsFilter) ([]domain.Finding, error) {
+	if strings.TrimSpace(filter.ScanID) == "" && strings.TrimSpace(filter.Severity) == "" && strings.TrimSpace(filter.Type) == "" {
+		return s.Store.ListFindings(ctx, limit)
+	}
+
+	loadLimit := limit
+	if loadLimit <= 0 {
+		loadLimit = 100
+	}
+	if loadLimit < 5000 {
+		loadLimit = 5000
+	}
+
+	var source []domain.Finding
+	var err error
+	if strings.TrimSpace(filter.ScanID) != "" {
+		source, err = s.Store.ListFindingsByScan(ctx, strings.TrimSpace(filter.ScanID), loadLimit)
+	} else {
+		source, err = s.Store.ListFindings(ctx, loadLimit)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	severity := strings.ToLower(strings.TrimSpace(filter.Severity))
+	findingType := strings.ToLower(strings.TrimSpace(filter.Type))
+	result := make([]domain.Finding, 0, len(source))
+	for _, item := range source {
+		if severity != "" && strings.ToLower(string(item.Severity)) != severity {
+			continue
+		}
+		if findingType != "" && strings.ToLower(string(item.Type)) != findingType {
+			continue
+		}
+		result = append(result, item)
+		if limit > 0 && len(result) >= limit {
+			break
+		}
+	}
+	return result, nil
+}
+
+// GetFinding returns one finding by id, optionally scoped to one scan.
+func (s *Service) GetFinding(ctx context.Context, findingID string, scanID string) (domain.Finding, error) {
+	id := strings.TrimSpace(findingID)
+	if id == "" {
+		return domain.Finding{}, db.ErrNotFound
+	}
+	filtered, err := s.ListFindingsFiltered(ctx, 5000, FindingsFilter{ScanID: strings.TrimSpace(scanID)})
+	if err != nil {
+		return domain.Finding{}, err
+	}
+	for _, item := range filtered {
+		if item.ID == id {
+			return item, nil
+		}
+	}
+	return domain.Finding{}, db.ErrNotFound
+}
+
 // ListScans returns persisted scans.
 func (s *Service) ListScans(ctx context.Context, limit int) ([]db.ScanRecord, error) {
 	return s.Store.ListScans(ctx, limit)
@@ -175,7 +244,27 @@ func (s *Service) GetFindingsSummary(ctx context.Context, limit int) (FindingsSu
 
 // ListScanEvents returns recent scan events for one scan id.
 func (s *Service) ListScanEvents(ctx context.Context, scanID string, limit int) ([]db.ScanEvent, error) {
-	return s.Store.ListScanEvents(ctx, scanID, limit)
+	return s.ListScanEventsFiltered(ctx, scanID, "", limit)
+}
+
+// ListScanEventsFiltered returns recent scan events with optional level filtering.
+func (s *Service) ListScanEventsFiltered(ctx context.Context, scanID string, level string, limit int) ([]db.ScanEvent, error) {
+	events, err := s.Store.ListScanEvents(ctx, scanID, limit)
+	if err != nil {
+		return nil, err
+	}
+	normalizedLevel := strings.ToLower(strings.TrimSpace(level))
+	if normalizedLevel == "" {
+		return events, nil
+	}
+	result := make([]db.ScanEvent, 0, len(events))
+	for _, event := range events {
+		if strings.ToLower(strings.TrimSpace(event.Level)) != normalizedLevel {
+			continue
+		}
+		result = append(result, event)
+	}
+	return result, nil
 }
 
 // ListIdentities returns identities for given filters, defaulting scan_id to latest scan.
@@ -216,6 +305,11 @@ func (s *Service) ListRelationships(ctx context.Context, scanID string, relation
 
 // GetFindingsTrend returns findings totals by severity across recent scans.
 func (s *Service) GetFindingsTrend(ctx context.Context, points int) ([]TrendPoint, error) {
+	return s.GetFindingsTrendFiltered(ctx, points, "", "")
+}
+
+// GetFindingsTrendFiltered returns findings trend with optional severity/type filters.
+func (s *Service) GetFindingsTrendFiltered(ctx context.Context, points int, severity string, findingType string) ([]TrendPoint, error) {
 	if points <= 0 {
 		points = 10
 	}
@@ -226,6 +320,8 @@ func (s *Service) GetFindingsTrend(ctx context.Context, points int) ([]TrendPoin
 	// Return oldest->newest for chart consumers.
 	sort.Slice(scans, func(i, j int) bool { return scans[i].StartedAt.Before(scans[j].StartedAt) })
 	result := make([]TrendPoint, 0, len(scans))
+	normalizedSeverity := strings.ToLower(strings.TrimSpace(severity))
+	normalizedType := strings.ToLower(strings.TrimSpace(findingType))
 	for _, scan := range scans {
 		findings, err := s.Store.ListFindingsByScan(ctx, scan.ID, 5000)
 		if err != nil {
@@ -237,11 +333,17 @@ func (s *Service) GetFindingsTrend(ctx context.Context, points int) ([]TrendPoin
 		point := TrendPoint{
 			ScanID:     scan.ID,
 			StartedAt:  scan.StartedAt,
-			Total:      len(findings),
 			BySeverity: map[string]int{},
 		}
 		for _, finding := range findings {
+			if normalizedSeverity != "" && strings.ToLower(string(finding.Severity)) != normalizedSeverity {
+				continue
+			}
+			if normalizedType != "" && strings.ToLower(string(finding.Type)) != normalizedType {
+				continue
+			}
 			point.BySeverity[string(finding.Severity)]++
+			point.Total++
 		}
 		result = append(result, point)
 	}
