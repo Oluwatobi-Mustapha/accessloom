@@ -108,6 +108,20 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 		t.Fatalf("expected valid json findings body: %s", findingsW.Body.String())
 	}
 
+	filteredFindingsReq := httptest.NewRequest(http.MethodGet, "/v1/findings?severity=high&type=risky_trust_policy", nil)
+	filteredFindingsW := httptest.NewRecorder()
+	r.ServeHTTP(filteredFindingsW, filteredFindingsReq)
+	if filteredFindingsW.Code != http.StatusOK {
+		t.Fatalf("expected filtered findings 200, got %d", filteredFindingsW.Code)
+	}
+
+	findingReq := httptest.NewRequest(http.MethodGet, "/v1/findings/f1", nil)
+	findingW := httptest.NewRecorder()
+	r.ServeHTTP(findingW, findingReq)
+	if findingW.Code != http.StatusOK {
+		t.Fatalf("expected finding by id 200, got %d", findingW.Code)
+	}
+
 	scansReq := httptest.NewRequest(http.MethodGet, "/v1/scans", nil)
 	scansW := httptest.NewRecorder()
 	r.ServeHTTP(scansW, scansReq)
@@ -127,6 +141,13 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 	r.ServeHTTP(trendsW, trendsReq)
 	if trendsW.Code != http.StatusOK {
 		t.Fatalf("expected trends 200, got %d", trendsW.Code)
+	}
+
+	trendsFilteredReq := httptest.NewRequest(http.MethodGet, "/v1/findings/trends?severity=high&type=risky_trust_policy", nil)
+	trendsFilteredW := httptest.NewRecorder()
+	r.ServeHTTP(trendsFilteredW, trendsFilteredReq)
+	if trendsFilteredW.Code != http.StatusOK {
+		t.Fatalf("expected filtered trends 200, got %d", trendsFilteredW.Code)
 	}
 
 	identitiesReq := httptest.NewRequest(http.MethodGet, "/v1/identities", nil)
@@ -156,6 +177,13 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 	if eventsW.Code != http.StatusOK {
 		t.Fatalf("expected events 200, got %d", eventsW.Code)
 	}
+
+	eventsFilteredReq := httptest.NewRequest(http.MethodGet, "/v1/scans/"+postBody.Scan.ID+"/events?level=info", nil)
+	eventsFilteredW := httptest.NewRecorder()
+	r.ServeHTTP(eventsFilteredW, eventsFilteredReq)
+	if eventsFilteredW.Code != http.StatusOK {
+		t.Fatalf("expected filtered events 200, got %d", eventsFilteredW.Code)
+	}
 }
 
 func TestRouterUnavailableWhenServiceMissing(t *testing.T) {
@@ -175,6 +203,13 @@ func TestRouterUnavailableWhenServiceMissing(t *testing.T) {
 	r.ServeHTTP(summaryW, summaryReq)
 	if summaryW.Code != http.StatusOK {
 		t.Fatalf("expected summary 200 without service, got %d", summaryW.Code)
+	}
+
+	findingReq := httptest.NewRequest(http.MethodGet, "/v1/findings/f1", nil)
+	findingW := httptest.NewRecorder()
+	r.ServeHTTP(findingW, findingReq)
+	if findingW.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected finding-by-id 503 without service, got %d", findingW.Code)
 	}
 
 	identityReq := httptest.NewRequest(http.MethodGet, "/v1/identities", nil)
@@ -451,5 +486,19 @@ func TestRouterScanDiffAndEventsNotFound(t *testing.T) {
 	r.ServeHTTP(relationshipsW, relationshipsReq)
 	if relationshipsW.Code != http.StatusNotFound {
 		t.Fatalf("expected relationships 404 for missing scan, got %d", relationshipsW.Code)
+	}
+
+	findingsReq := httptest.NewRequest(http.MethodGet, "/v1/findings?scan_id=missing", nil)
+	findingsW := httptest.NewRecorder()
+	r.ServeHTTP(findingsW, findingsReq)
+	if findingsW.Code != http.StatusNotFound {
+		t.Fatalf("expected findings 404 for missing scan, got %d", findingsW.Code)
+	}
+
+	findingReq := httptest.NewRequest(http.MethodGet, "/v1/findings/missing", nil)
+	findingW := httptest.NewRecorder()
+	r.ServeHTTP(findingW, findingReq)
+	if findingW.Code != http.StatusNotFound {
+		t.Fatalf("expected finding-by-id 404 for missing finding, got %d", findingW.Code)
 	}
 }

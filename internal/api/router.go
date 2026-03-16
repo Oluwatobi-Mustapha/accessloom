@@ -68,6 +68,9 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		v1.GET("/findings", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
+		v1.GET("/findings/:finding_id", func(c *gin.Context) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan service unavailable"})
+		})
 		v1.GET("/findings/trends", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
@@ -101,8 +104,16 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 
 	v1.GET("/findings", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
-		items, err := svc.ListFindings(c.Request.Context(), limit)
+		items, err := svc.ListFindingsFiltered(c.Request.Context(), limit, FindingsFilter{
+			ScanID:   strings.TrimSpace(c.Query("scan_id")),
+			Severity: strings.TrimSpace(c.Query("severity")),
+			Type:     strings.TrimSpace(c.Query("type")),
+		})
 		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "scan not found"})
+				return
+			}
 			logger.Error("list findings", telemetry.ZapError(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list findings"})
 			return
@@ -121,9 +132,32 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, summary)
 	})
 
+	v1.GET("/findings/:finding_id", func(c *gin.Context) {
+		item, err := svc.GetFinding(
+			c.Request.Context(),
+			strings.TrimSpace(c.Param("finding_id")),
+			strings.TrimSpace(c.Query("scan_id")),
+		)
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "finding not found"})
+				return
+			}
+			logger.Error("get finding", telemetry.ZapError(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get finding"})
+			return
+		}
+		c.JSON(http.StatusOK, item)
+	})
+
 	v1.GET("/findings/trends", func(c *gin.Context) {
 		points := parseLimit(c.Query("points"), 10, 100)
-		items, err := svc.GetFindingsTrend(c.Request.Context(), points)
+		items, err := svc.GetFindingsTrendFiltered(
+			c.Request.Context(),
+			points,
+			strings.TrimSpace(c.Query("severity")),
+			strings.TrimSpace(c.Query("type")),
+		)
 		if err != nil {
 			logger.Error("findings trends", telemetry.ZapError(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build findings trends"})
@@ -204,7 +238,12 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 
 	v1.GET("/scans/:scan_id/events", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultEventsLimit, maxListLimit)
-		items, err := svc.ListScanEvents(c.Request.Context(), strings.TrimSpace(c.Param("scan_id")), limit)
+		items, err := svc.ListScanEventsFiltered(
+			c.Request.Context(),
+			strings.TrimSpace(c.Param("scan_id")),
+			strings.TrimSpace(c.Query("level")),
+			limit,
+		)
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "scan not found"})
