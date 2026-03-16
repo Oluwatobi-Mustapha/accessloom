@@ -127,6 +127,16 @@ Simple threat list for current system.
 - Fix: Bounded retry/backoff for transient failures.
 - Status: Implemented.
 
+## 26) Insecure Audit Forwarding Transport
+- Threat: Forwarding audit events over insecure transport can leak sensitive request metadata.
+- Fix: Require `https` for remote audit forwarding URLs (allow `http` only for localhost).
+- Status: Implemented.
+
+## 27) Weak Scan Event Semantics
+- Threat: Unbounded/invalid event level values reduce operational signal quality.
+- Fix: Enforce typed scan event levels (`debug`, `info`, `warn`, `error`).
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and external KMS guidance.
 - Add audit sink forwarding guide for centralized log pipelines.

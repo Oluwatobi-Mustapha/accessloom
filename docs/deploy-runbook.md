@@ -15,6 +15,10 @@ Simple operational runbook for Identrail API/worker deploys.
   - optional `IDENTRAIL_ALERT_HMAC_SECRET`
   - `IDENTRAIL_ALERT_MAX_RETRIES`
   - `IDENTRAIL_ALERT_RETRY_BACKOFF`
+- Confirm audit forwarding config (if enabled):
+  - `IDENTRAIL_AUDIT_FORWARD_URL`
+  - `IDENTRAIL_AUDIT_FORWARD_TIMEOUT`
+  - optional `IDENTRAIL_AUDIT_FORWARD_HMAC_SECRET`
 
 ## 2) Deploy Sequence
 
@@ -26,6 +30,7 @@ Simple operational runbook for Identrail API/worker deploys.
 6. Verify:
    - findings list (`GET /v1/findings`)
    - findings summary (`GET /v1/findings/summary`)
+   - findings trends (`GET /v1/findings/trends`)
    - scan diff (`GET /v1/scans/:scan_id/diff`)
    - scan events (`GET /v1/scans/:scan_id/events`)
 

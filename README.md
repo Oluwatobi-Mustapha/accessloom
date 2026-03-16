@@ -5,6 +5,7 @@ Identrail is a machine identity security platform.
 It discovers machine and workload identities across cloud environments, maps who can assume what, analyzes privilege paths, and surfaces risky identities.
 
 Operational runbook: `docs/deploy-runbook.md`.
+Web shell scaffold: `web/` (React + TypeScript + Vite).
 
 ## Current Capabilities
 
@@ -19,6 +20,9 @@ Operational runbook: `docs/deploy-runbook.md`.
   - `GET /v1/scans/:scan_id/events`
   - `GET /v1/findings`
   - `GET /v1/findings/summary`
+  - `GET /v1/findings/trends`
+  - `GET /v1/identities`
+  - `GET /v1/relationships`
 - Worker workflow:
   - `worker` runs scheduled scans
 - Persistence:
@@ -41,6 +45,7 @@ Operational runbook: `docs/deploy-runbook.md`.
   - scan timeout
   - security response headers
   - audit log middleware for `/v1/*` + optional file sink (`IDENTRAIL_AUDIT_LOG_FILE`)
+  - optional audit forwarding sink (`IDENTRAIL_AUDIT_FORWARD_URL`)
   - audit events use API key fingerprints (`api_key_id`), not raw keys
 - Startup migration support:
   - `IDENTRAIL_RUN_MIGRATIONS`

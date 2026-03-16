@@ -139,3 +139,27 @@ This file tracks major decisions in simple terms.
 - Decision: Retry alert webhook delivery on network errors and 5xx responses with bounded backoff.
 - Why: Improve delivery reliability without blocking scan completion.
 - Tradeoff: Slightly increased outbound request volume during receiver instability.
+
+## ADR-024: Add Explorer-Oriented Identity and Relationship APIs
+- Date: 2026-03-16
+- Decision: Add `GET /v1/identities` and `GET /v1/relationships` with scan-aware filters.
+- Why: Support graph/explorer UI slices without requiring direct database access.
+- Tradeoff: Additional query/filter logic in store layer.
+
+## ADR-025: Add Findings Trend API
+- Date: 2026-03-16
+- Decision: Add `GET /v1/findings/trends` returning scan-aligned severity buckets.
+- Why: Enable lightweight trend chart rendering in dashboard clients.
+- Tradeoff: Per-request aggregation cost over recent scans.
+
+## ADR-026: Add Optional HTTP Audit Forwarding Sink
+- Date: 2026-03-16
+- Decision: Allow forwarding audit events to remote collectors with optional HMAC signing.
+- Why: Enable centralized audit pipelines before full SIEM integration.
+- Tradeoff: Additional outbound dependency and delivery failure handling.
+
+## ADR-027: Establish sqlc Query Contract Scaffolding
+- Date: 2026-03-16
+- Decision: Add sqlc config/query files now, then migrate runtime store calls to generated code incrementally.
+- Why: Introduce typed SQL contract without disruptive refactor in one release.
+- Tradeoff: Temporary dual state (manual queries + sqlc scaffolding) until migration is complete.

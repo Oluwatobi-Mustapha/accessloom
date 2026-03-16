@@ -14,6 +14,8 @@ Updated only at major milestones.
 - Startup guardrails: invalid write-key setup now fails fast.
 - Config hardening: invalid scoped scopes and oversized alert payload settings fail fast.
 - Analyst workflows: findings summary, scan diff, and scan event timeline APIs added.
+- Explorer workflows: identities, relationships, and findings trend endpoints added.
+- Audit forwarding: optional HTTP forward sink with signing guardrails.
 - Worker: scheduled process runs scans with shared runtime bootstrap.
 - Migrations: startup migration runner added for Postgres mode.
 - Test health: `go test ./... -cover` passing, coverage above 80%.

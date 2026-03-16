@@ -22,9 +22,12 @@
 - Startup security config validation and warning coverage (scopes, write-key mapping, alert bounds)
 - Scan diff, findings summary, and scan event timeline service behavior
 - Router coverage for summary/diff/events endpoints and missing-scan handling
+- Router coverage for trends/identities/relationships endpoints and missing-scan handling
 - Webhook retry/backoff behavior for transient failures
+- HTTP audit forwarding sink behavior and multi-sink fanout behavior
 - Memory/Postgres persistence logic
 - Migration runner behavior
+- Integration lane (build tag `integration`) for Postgres-backed run-scan + diff flow
 - Artifact and finding idempotent upserts
 - Scheduler lock/runner behavior
 - Worker startup and cancellation behavior
