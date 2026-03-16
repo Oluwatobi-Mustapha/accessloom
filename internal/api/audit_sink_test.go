@@ -81,7 +81,7 @@ func TestHTTPAuditSinkWritesEvent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sink, err := NewHTTPAuditSink(server.URL, 2*time.Second, "secret")
+	sink, err := NewHTTPAuditSink(server.URL, 2*time.Second, "secret", 1, 10*time.Millisecond)
 	if err != nil {
 		t.Fatalf("new http audit sink: %v", err)
 	}
@@ -95,8 +95,54 @@ func TestHTTPAuditSinkWritesEvent(t *testing.T) {
 }
 
 func TestHTTPAuditSinkRejectsInsecureURL(t *testing.T) {
-	if _, err := NewHTTPAuditSink("http://example.com/audit", 2*time.Second, ""); err == nil {
+	if _, err := NewHTTPAuditSink("http://example.com/audit", 2*time.Second, "", 1, 10*time.Millisecond); err == nil {
 		t.Fatal("expected insecure url error")
+	}
+}
+
+func TestHTTPAuditSinkRetriesOnTransientFailure(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("retry"))
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	sink, err := NewHTTPAuditSink(server.URL, 2*time.Second, "secret", 3, time.Millisecond)
+	if err != nil {
+		t.Fatalf("new http audit sink: %v", err)
+	}
+	if err := sink.Write(AuditEvent{Method: "GET", Path: "/v1/scans", Timestamp: time.Now().UTC()}); err != nil {
+		t.Fatalf("write http audit event with retries: %v", err)
+	}
+	if requests != 3 {
+		t.Fatalf("expected 3 requests, got %d", requests)
+	}
+}
+
+func TestHTTPAuditSinkDoesNotRetryOnClientError(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte("bad request"))
+	}))
+	defer server.Close()
+
+	sink, err := NewHTTPAuditSink(server.URL, 2*time.Second, "", 3, time.Millisecond)
+	if err != nil {
+		t.Fatalf("new http audit sink: %v", err)
+	}
+	if err := sink.Write(AuditEvent{Method: "GET", Path: "/v1/scans", Timestamp: time.Now().UTC()}); err == nil {
+		t.Fatal("expected client error")
+	}
+	if requests != 1 {
+		t.Fatalf("expected no retries for client error, got %d requests", requests)
 	}
 }
 
