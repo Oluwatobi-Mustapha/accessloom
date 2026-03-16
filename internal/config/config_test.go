@@ -25,6 +25,8 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_AUDIT_LOG_FILE", "")
 	t.Setenv("IDENTRAIL_AUDIT_FORWARD_URL", "")
 	t.Setenv("IDENTRAIL_AUDIT_FORWARD_TIMEOUT", "")
+	t.Setenv("IDENTRAIL_AUDIT_FORWARD_MAX_RETRIES", "")
+	t.Setenv("IDENTRAIL_AUDIT_FORWARD_RETRY_BACKOFF", "")
 	t.Setenv("IDENTRAIL_AUDIT_FORWARD_HMAC_SECRET", "")
 	t.Setenv("IDENTRAIL_ALERT_WEBHOOK_URL", "")
 	t.Setenv("IDENTRAIL_ALERT_MIN_SEVERITY", "")
@@ -86,6 +88,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AuditForwardTimeout != 3*time.Second {
 		t.Fatalf("expected default audit forward timeout 3s, got %v", cfg.AuditForwardTimeout)
 	}
+	if cfg.AuditForwardMaxRetries != 1 {
+		t.Fatalf("expected default audit forward max retries 1, got %d", cfg.AuditForwardMaxRetries)
+	}
+	if cfg.AuditForwardRetryBackoff != 1*time.Second {
+		t.Fatalf("expected default audit forward retry backoff 1s, got %v", cfg.AuditForwardRetryBackoff)
+	}
 	if cfg.AuditForwardHMACSecret != "" {
 		t.Fatalf("expected empty audit forward hmac secret, got %q", cfg.AuditForwardHMACSecret)
 	}
@@ -131,6 +139,8 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_AUDIT_LOG_FILE", "/tmp/audit.log")
 	t.Setenv("IDENTRAIL_AUDIT_FORWARD_URL", "https://audit.example.com/events")
 	t.Setenv("IDENTRAIL_AUDIT_FORWARD_TIMEOUT", "8s")
+	t.Setenv("IDENTRAIL_AUDIT_FORWARD_MAX_RETRIES", "4")
+	t.Setenv("IDENTRAIL_AUDIT_FORWARD_RETRY_BACKOFF", "2s")
 	t.Setenv("IDENTRAIL_AUDIT_FORWARD_HMAC_SECRET", "audit-secret")
 	t.Setenv("IDENTRAIL_ALERT_WEBHOOK_URL", "https://alerts.example.com/hooks/identrail")
 	t.Setenv("IDENTRAIL_ALERT_MIN_SEVERITY", "critical")
@@ -191,6 +201,12 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.AuditForwardTimeout != 8*time.Second {
 		t.Fatalf("unexpected audit forward timeout: %v", cfg.AuditForwardTimeout)
+	}
+	if cfg.AuditForwardMaxRetries != 4 {
+		t.Fatalf("unexpected audit forward max retries: %d", cfg.AuditForwardMaxRetries)
+	}
+	if cfg.AuditForwardRetryBackoff != 2*time.Second {
+		t.Fatalf("unexpected audit forward retry backoff: %v", cfg.AuditForwardRetryBackoff)
 	}
 	if cfg.AuditForwardHMACSecret != "audit-secret" {
 		t.Fatalf("unexpected audit forward hmac secret: %q", cfg.AuditForwardHMACSecret)
