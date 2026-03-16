@@ -8,9 +8,11 @@ import (
 )
 
 const (
-	maxAlertFindingsLimit = 500
-	maxAlertRetriesLimit  = 10
-	maxAlertBackoffLimit  = 30
+	maxAlertFindingsLimit       = 500
+	maxAlertRetriesLimit        = 10
+	maxAlertBackoffLimit        = 30
+	maxAuditForwardRetriesLimit = 10
+	maxAuditForwardBackoffLimit = 30
 )
 
 var allowedKeyScopes = map[string]struct{}{
@@ -83,6 +85,12 @@ func ValidateSecurity(cfg Config) error {
 	}
 	if cfg.AuditForwardTimeout > 30*time.Second {
 		return fmt.Errorf("IDENTRAIL_AUDIT_FORWARD_TIMEOUT must be <= 30s")
+	}
+	if cfg.AuditForwardMaxRetries > maxAuditForwardRetriesLimit {
+		return fmt.Errorf("IDENTRAIL_AUDIT_FORWARD_MAX_RETRIES must be <= %d", maxAuditForwardRetriesLimit)
+	}
+	if cfg.AuditForwardRetryBackoff > time.Duration(maxAuditForwardBackoffLimit)*time.Second {
+		return fmt.Errorf("IDENTRAIL_AUDIT_FORWARD_RETRY_BACKOFF must be <= %ds", maxAuditForwardBackoffLimit)
 	}
 	if strings.TrimSpace(cfg.AuditForwardURL) != "" {
 		if err := validateForwardURL(cfg.AuditForwardURL); err != nil {

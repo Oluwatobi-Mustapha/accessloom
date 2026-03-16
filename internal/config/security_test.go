@@ -109,6 +109,24 @@ func TestValidateSecurityRejectsLargeAuditForwardTimeout(t *testing.T) {
 	}
 }
 
+func TestValidateSecurityRejectsLargeAuditForwardRetries(t *testing.T) {
+	cfg := Config{
+		AuditForwardMaxRetries: maxAuditForwardRetriesLimit + 1,
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected audit forward retries validation error")
+	}
+}
+
+func TestValidateSecurityRejectsLargeAuditForwardBackoff(t *testing.T) {
+	cfg := Config{
+		AuditForwardRetryBackoff: time.Duration(maxAuditForwardBackoffLimit+1) * time.Second,
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected audit forward retry backoff validation error")
+	}
+}
+
 func TestSecurityWarnings(t *testing.T) {
 	cfg := Config{
 		APIKeys:         []string{"legacy-key"},
