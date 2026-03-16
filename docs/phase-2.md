@@ -7,6 +7,7 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 ## Implemented in this milestone series
 
 - PostgreSQL baseline migration set (`migrations/000001_init.up.sql`)
+- Scan event migration set (`migrations/000002_scan_events.up.sql`)
 - Storage layer (`internal/db`):
   - `MemoryStore` for local/dev execution
   - `PostgresStore` for production persistence
@@ -25,8 +26,14 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
   - `GET /v1/scans/:scan_id/events`
   - `GET /v1/findings`
   - `GET /v1/findings/summary`
+  - `GET /v1/findings/trends`
+  - `GET /v1/identities`
+  - `GET /v1/relationships`
 - Full artifact persistence:
   - raw assets, identities, policies, relationships, permissions, findings
+- SQL query scaffolding:
+  - `sqlc/sqlc.yaml`
+  - query contracts under `sqlc/queries/`
 - Scheduler and worker:
   - keyed in-memory scan lock
   - periodic runner abstraction
@@ -41,6 +48,7 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
   - request timeout and security headers
   - audit request logging
   - optional audit log file export sink
+  - optional audit forwarding sink (HTTP)
   - API key fingerprinting in audit events (no raw key logging)
 - Alerting:
   - high-severity finding webhook notifications
@@ -68,6 +76,9 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 - `IDENTRAIL_RUN_MIGRATIONS`
 - `IDENTRAIL_MIGRATIONS_DIR`
 - `IDENTRAIL_AUDIT_LOG_FILE`
+- `IDENTRAIL_AUDIT_FORWARD_URL`
+- `IDENTRAIL_AUDIT_FORWARD_TIMEOUT`
+- `IDENTRAIL_AUDIT_FORWARD_HMAC_SECRET`
 - `IDENTRAIL_ALERT_WEBHOOK_URL`
 - `IDENTRAIL_ALERT_MIN_SEVERITY`
 - `IDENTRAIL_ALERT_TIMEOUT`
@@ -84,6 +95,6 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 
 ## Next milestones
 
-1. audit sink shipping path to centralized log systems
+1. migrate Postgres store queries to generated sqlc package
 2. role/scope policy hardening guide for key rotation
-3. findings history trend endpoints for dashboard charts
+3. dashboard UI consumption for trends/explorer endpoints
