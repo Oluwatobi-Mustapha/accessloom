@@ -74,6 +74,9 @@ type TrendPoint struct {
 // ErrScanInProgress is returned when a scan for the same provider is already running.
 var ErrScanInProgress = errors.New("scan already in progress")
 
+// ErrInvalidScanDiffBaseline is returned when previous_scan_id is incompatible.
+var ErrInvalidScanDiffBaseline = errors.New("invalid scan diff baseline")
+
 // NewService creates an API service with defaults.
 func NewService(store db.Store, scanner ScannerRunner, provider string) *Service {
 	return &Service{
@@ -352,6 +355,11 @@ func (s *Service) GetFindingsTrendFiltered(ctx context.Context, points int, seve
 
 // GetScanDiff compares findings between this scan and previous scan of same provider.
 func (s *Service) GetScanDiff(ctx context.Context, scanID string, limit int) (ScanDiff, error) {
+	return s.GetScanDiffAgainst(ctx, scanID, "", limit)
+}
+
+// GetScanDiffAgainst compares findings between one scan and an optional baseline scan.
+func (s *Service) GetScanDiffAgainst(ctx context.Context, scanID string, previousScanID string, limit int) (ScanDiff, error) {
 	currentScan, err := s.Store.GetScan(ctx, scanID)
 	if err != nil {
 		return ScanDiff{}, err
@@ -361,34 +369,50 @@ func (s *Service) GetScanDiff(ctx context.Context, scanID string, limit int) (Sc
 	if err != nil {
 		return ScanDiff{}, err
 	}
-	previousScanID := ""
-	scans, err := s.Store.ListScans(ctx, 500)
-	if err != nil {
-		return ScanDiff{}, err
-	}
-	for _, scan := range scans {
-		if scan.ID == currentScan.ID || scan.Provider != currentScan.Provider {
-			continue
+	normalizedPreviousScanID := strings.TrimSpace(previousScanID)
+	if normalizedPreviousScanID != "" {
+		if normalizedPreviousScanID == currentScan.ID {
+			return ScanDiff{}, ErrInvalidScanDiffBaseline
 		}
-		if scan.StartedAt.Before(currentScan.StartedAt) {
-			previousScanID = scan.ID
-			break
+		baselineScan, err := s.Store.GetScan(ctx, normalizedPreviousScanID)
+		if err != nil {
+			return ScanDiff{}, err
+		}
+		if baselineScan.Provider != currentScan.Provider {
+			return ScanDiff{}, ErrInvalidScanDiffBaseline
+		}
+		if !baselineScan.StartedAt.Before(currentScan.StartedAt) {
+			return ScanDiff{}, ErrInvalidScanDiffBaseline
+		}
+	} else {
+		scans, err := s.Store.ListScans(ctx, 500)
+		if err != nil {
+			return ScanDiff{}, err
+		}
+		for _, scan := range scans {
+			if scan.ID == currentScan.ID || scan.Provider != currentScan.Provider {
+				continue
+			}
+			if scan.StartedAt.Before(currentScan.StartedAt) {
+				normalizedPreviousScanID = scan.ID
+				break
+			}
 		}
 	}
 
-	diff := ScanDiff{ScanID: scanID, PreviousScanID: previousScanID}
+	diff := ScanDiff{ScanID: scanID, PreviousScanID: normalizedPreviousScanID}
 	currentByID := map[string]domain.Finding{}
 	for _, finding := range currentFindings {
 		currentByID[finding.ID] = finding
 	}
-	if previousScanID == "" {
+	if normalizedPreviousScanID == "" {
 		diff.Added = currentFindings
 		diff.AddedCount = len(currentFindings)
 		diff.applyLimit(limit)
 		return diff, nil
 	}
 
-	previousFindings, err := s.Store.ListFindingsByScan(ctx, previousScanID, 5000)
+	previousFindings, err := s.Store.ListFindingsByScan(ctx, normalizedPreviousScanID, 5000)
 	if err != nil {
 		return ScanDiff{}, err
 	}

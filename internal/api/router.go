@@ -223,10 +223,19 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 
 	v1.GET("/scans/:scan_id/diff", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
-		diff, err := svc.GetScanDiff(c.Request.Context(), strings.TrimSpace(c.Param("scan_id")), limit)
+		diff, err := svc.GetScanDiffAgainst(
+			c.Request.Context(),
+			strings.TrimSpace(c.Param("scan_id")),
+			strings.TrimSpace(c.Query("previous_scan_id")),
+			limit,
+		)
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "scan not found"})
+				return
+			}
+			if errors.Is(err, ErrInvalidScanDiffBaseline) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid previous_scan_id"})
 				return
 			}
 			logger.Error("scan diff", telemetry.ZapError(err))

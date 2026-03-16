@@ -97,6 +97,23 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 	if postBody.Scan.ID == "" {
 		t.Fatal("expected scan id in post response")
 	}
+	firstScanID := postBody.Scan.ID
+
+	postReq2 := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	postW2 := httptest.NewRecorder()
+	r.ServeHTTP(postW2, postReq2)
+	if postW2.Code != http.StatusAccepted {
+		t.Fatalf("expected second scan status 202, got %d", postW2.Code)
+	}
+	var postBody2 struct {
+		Scan db.ScanRecord `json:"scan"`
+	}
+	if err := json.Unmarshal(postW2.Body.Bytes(), &postBody2); err != nil {
+		t.Fatalf("decode second post body: %v", err)
+	}
+	if postBody2.Scan.ID == "" {
+		t.Fatal("expected second scan id in post response")
+	}
 
 	findingsReq := httptest.NewRequest(http.MethodGet, "/v1/findings", nil)
 	findingsW := httptest.NewRecorder()
@@ -164,7 +181,11 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 		t.Fatalf("expected relationships 200, got %d", relationshipsW.Code)
 	}
 
-	diffReq := httptest.NewRequest(http.MethodGet, "/v1/scans/"+postBody.Scan.ID+"/diff", nil)
+	diffReq := httptest.NewRequest(
+		http.MethodGet,
+		"/v1/scans/"+postBody2.Scan.ID+"/diff?previous_scan_id="+firstScanID,
+		nil,
+	)
 	diffW := httptest.NewRecorder()
 	r.ServeHTTP(diffW, diffReq)
 	if diffW.Code != http.StatusOK {
@@ -500,5 +521,20 @@ func TestRouterScanDiffAndEventsNotFound(t *testing.T) {
 	r.ServeHTTP(findingW, findingReq)
 	if findingW.Code != http.StatusNotFound {
 		t.Fatalf("expected finding-by-id 404 for missing finding, got %d", findingW.Code)
+	}
+
+	scan, err := store.CreateScan(context.Background(), "aws", time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("create scan: %v", err)
+	}
+	invalidBaselineReq := httptest.NewRequest(
+		http.MethodGet,
+		"/v1/scans/"+scan.ID+"/diff?previous_scan_id="+scan.ID,
+		nil,
+	)
+	invalidBaselineW := httptest.NewRecorder()
+	r.ServeHTTP(invalidBaselineW, invalidBaselineReq)
+	if invalidBaselineW.Code != http.StatusBadRequest {
+		t.Fatalf("expected diff 400 for invalid baseline scan, got %d", invalidBaselineW.Code)
 	}
 }

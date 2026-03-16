@@ -273,6 +273,56 @@ func TestServiceGetScanDiff(t *testing.T) {
 	}
 }
 
+func TestServiceGetScanDiffAgainst(t *testing.T) {
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
+
+	first, _ := store.CreateScan(context.Background(), "aws", now)
+	_ = store.UpsertFindings(context.Background(), first.ID, []domain.Finding{
+		{ID: "persist", Severity: domain.SeverityHigh, CreatedAt: now.Add(1 * time.Second)},
+		{ID: "resolved", Severity: domain.SeverityMedium, CreatedAt: now.Add(2 * time.Second)},
+	})
+	second, _ := store.CreateScan(context.Background(), "aws", now.Add(5*time.Minute))
+	_ = store.UpsertFindings(context.Background(), second.ID, []domain.Finding{
+		{ID: "persist", Severity: domain.SeverityHigh, CreatedAt: now.Add(5 * time.Minute)},
+		{ID: "added", Severity: domain.SeverityCritical, CreatedAt: now.Add(6 * time.Minute)},
+	})
+
+	svc := NewService(store, fakeScanner{}, "aws")
+	diff, err := svc.GetScanDiffAgainst(context.Background(), second.ID, first.ID, 10)
+	if err != nil {
+		t.Fatalf("get scan diff against baseline: %v", err)
+	}
+	if diff.PreviousScanID != first.ID || diff.AddedCount != 1 || diff.ResolvedCount != 1 {
+		t.Fatalf("unexpected diff against baseline: %+v", diff)
+	}
+}
+
+func TestServiceGetScanDiffAgainstRejectsInvalidBaseline(t *testing.T) {
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
+
+	current, _ := store.CreateScan(context.Background(), "aws", now)
+	previous, _ := store.CreateScan(context.Background(), "aws", now.Add(-5*time.Minute))
+	wrongProvider, _ := store.CreateScan(context.Background(), "azure", now.Add(-10*time.Minute))
+	newerBaseline, _ := store.CreateScan(context.Background(), "aws", now.Add(10*time.Minute))
+
+	svc := NewService(store, fakeScanner{}, "aws")
+
+	if _, err := svc.GetScanDiffAgainst(context.Background(), current.ID, current.ID, 10); !errors.Is(err, ErrInvalidScanDiffBaseline) {
+		t.Fatalf("expected invalid baseline when baseline==current, got %v", err)
+	}
+	if _, err := svc.GetScanDiffAgainst(context.Background(), current.ID, wrongProvider.ID, 10); !errors.Is(err, ErrInvalidScanDiffBaseline) {
+		t.Fatalf("expected invalid baseline provider error, got %v", err)
+	}
+	if _, err := svc.GetScanDiffAgainst(context.Background(), current.ID, newerBaseline.ID, 10); !errors.Is(err, ErrInvalidScanDiffBaseline) {
+		t.Fatalf("expected invalid baseline time ordering error, got %v", err)
+	}
+	if _, err := svc.GetScanDiffAgainst(context.Background(), current.ID, previous.ID, 10); err != nil {
+		t.Fatalf("expected valid older baseline, got %v", err)
+	}
+}
+
 func TestServiceListScanEvents(t *testing.T) {
 	store := db.NewMemoryStore()
 	svc := NewService(store, fakeScanner{result: app.ScanResult{}}, "aws")
