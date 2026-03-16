@@ -11,6 +11,7 @@ import (
 	"github.com/Oluwatobi-Mustapha/identrail/internal/app"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/domain"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/scheduler"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/telemetry"
 	"go.uber.org/zap"
 )
@@ -97,5 +98,29 @@ func TestRouterUnavailableWhenServiceMissing(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected status 503, got %d", w.Code)
+	}
+}
+
+func TestRouterScanConflictWhenLocked(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	metrics := telemetry.NewMetrics()
+	store := db.NewMemoryStore()
+	svc := NewService(store, routerScanner{}, "aws")
+
+	locker := scheduler.NewInMemoryLocker()
+	release, ok := locker.TryAcquire("scan:aws")
+	if !ok {
+		t.Fatal("expected lock acquire")
+	}
+	defer release()
+	svc.Locker = locker
+
+	r := NewRouter(logger, metrics, svc)
+	req := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d", w.Code)
 	}
 }

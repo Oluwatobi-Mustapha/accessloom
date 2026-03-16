@@ -9,6 +9,7 @@ import (
 	"github.com/Oluwatobi-Mustapha/identrail/internal/app"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/domain"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/scheduler"
 )
 
 type fakeScanner struct {
@@ -67,5 +68,23 @@ func TestServiceRunScanFailure(t *testing.T) {
 	}
 	if len(scans) != 1 || scans[0].Status != "failed" {
 		t.Fatalf("expected failed scan record, got %+v", scans)
+	}
+}
+
+func TestServiceRunScanLocked(t *testing.T) {
+	store := db.NewMemoryStore()
+	locker := scheduler.NewInMemoryLocker()
+	release, ok := locker.TryAcquire("scan:aws")
+	if !ok {
+		t.Fatal("expected lock acquire")
+	}
+	defer release()
+
+	svc := NewService(store, fakeScanner{}, "aws")
+	svc.Locker = locker
+
+	_, err := svc.RunScan(context.Background())
+	if !errors.Is(err, ErrScanInProgress) {
+		t.Fatalf("expected ErrScanInProgress, got %v", err)
 	}
 }

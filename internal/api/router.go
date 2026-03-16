@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -71,6 +72,10 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service) *gi
 
 		result, err := svc.RunScan(c.Request.Context())
 		if err != nil {
+			if errors.Is(err, ErrScanInProgress) {
+				c.JSON(http.StatusConflict, gin.H{"error": "scan already in progress"})
+				return
+			}
 			logger.Error("run scan", telemetry.ZapError(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to run scan"})
 			return
