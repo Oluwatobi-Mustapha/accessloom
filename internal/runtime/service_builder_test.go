@@ -25,3 +25,18 @@ func TestBuildScanServiceMemoryStore(t *testing.T) {
 		t.Fatalf("close failed: %v", err)
 	}
 }
+
+func TestNewStoreMemoryAndInvalidPostgres(t *testing.T) {
+	store, err := NewStore("")
+	if err != nil {
+		t.Fatalf("expected memory store, got err: %v", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("close memory store: %v", err)
+	}
+
+	_, err = NewStore("postgres://user:pass@127.0.0.1:1/identrail?sslmode=disable&connect_timeout=1")
+	if err == nil {
+		t.Fatal("expected postgres init error")
+	}
+}
