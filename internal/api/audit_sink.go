@@ -81,13 +81,15 @@ func (s *FileAuditSink) Close() error {
 
 // HTTPAuditSink posts audit events to a remote collector endpoint.
 type HTTPAuditSink struct {
-	client     *http.Client
-	url        string
-	hmacSecret string
+	client       *http.Client
+	url          string
+	hmacSecret   string
+	maxRetries   int
+	retryBackoff time.Duration
 }
 
 // NewHTTPAuditSink builds an HTTP audit sink with URL safety checks.
-func NewHTTPAuditSink(endpoint string, timeout time.Duration, hmacSecret string) (*HTTPAuditSink, error) {
+func NewHTTPAuditSink(endpoint string, timeout time.Duration, hmacSecret string, maxRetries int, retryBackoff time.Duration) (*HTTPAuditSink, error) {
 	trimmed := strings.TrimSpace(endpoint)
 	if trimmed == "" {
 		return nil, fmt.Errorf("audit forward url is required")
@@ -98,10 +100,18 @@ func NewHTTPAuditSink(endpoint string, timeout time.Duration, hmacSecret string)
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
+	if maxRetries < 0 {
+		maxRetries = 1
+	}
+	if retryBackoff <= 0 {
+		retryBackoff = 1 * time.Second
+	}
 	return &HTTPAuditSink{
-		client:     &http.Client{Timeout: timeout},
-		url:        trimmed,
-		hmacSecret: strings.TrimSpace(hmacSecret),
+		client:       &http.Client{Timeout: timeout},
+		url:          trimmed,
+		hmacSecret:   strings.TrimSpace(hmacSecret),
+		maxRetries:   maxRetries,
+		retryBackoff: retryBackoff,
 	}, nil
 }
 
@@ -110,29 +120,20 @@ func (s *HTTPAuditSink) Write(event AuditEvent) error {
 	if err != nil {
 		return fmt.Errorf("marshal audit event: %w", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), s.client.Timeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url, bytes.NewReader(payload))
-	if err != nil {
-		return fmt.Errorf("build audit forward request: %w", err)
+	var lastErr error
+	attempts := s.maxRetries + 1
+	for attempt := 0; attempt < attempts; attempt++ {
+		retryable, err := s.send(payload)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !retryable || attempt == attempts-1 {
+			break
+		}
+		time.Sleep(backoffDuration(s.retryBackoff, attempt))
 	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "identrail-audit/1.0")
-	if s.hmacSecret != "" {
-		req.Header.Set("X-Identrail-Signature", computeHMAC(payload, s.hmacSecret))
-	}
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return fmt.Errorf("send audit event: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
-		return fmt.Errorf("audit forward status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	return nil
+	return lastErr
 }
 
 func (s *HTTPAuditSink) Close() error { return nil }
@@ -201,4 +202,31 @@ func validateAuditForwardURL(raw string) error {
 	default:
 		return fmt.Errorf("unsupported audit forward url scheme %q", parsed.Scheme)
 	}
+}
+
+func (s *HTTPAuditSink) send(payload []byte) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.client.Timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.url, bytes.NewReader(payload))
+	if err != nil {
+		return false, fmt.Errorf("build audit forward request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "identrail-audit/1.0")
+	if s.hmacSecret != "" {
+		req.Header.Set("X-Identrail-Signature", computeHMAC(payload, s.hmacSecret))
+	}
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return true, fmt.Errorf("send audit event: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
+		retryable := resp.StatusCode >= http.StatusInternalServerError
+		return retryable, fmt.Errorf("audit forward status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return false, nil
 }
