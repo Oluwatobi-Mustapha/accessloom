@@ -122,6 +122,27 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 		t.Fatalf("expected summary 200, got %d", summaryW.Code)
 	}
 
+	trendsReq := httptest.NewRequest(http.MethodGet, "/v1/findings/trends", nil)
+	trendsW := httptest.NewRecorder()
+	r.ServeHTTP(trendsW, trendsReq)
+	if trendsW.Code != http.StatusOK {
+		t.Fatalf("expected trends 200, got %d", trendsW.Code)
+	}
+
+	identitiesReq := httptest.NewRequest(http.MethodGet, "/v1/identities", nil)
+	identitiesW := httptest.NewRecorder()
+	r.ServeHTTP(identitiesW, identitiesReq)
+	if identitiesW.Code != http.StatusOK {
+		t.Fatalf("expected identities 200, got %d", identitiesW.Code)
+	}
+
+	relationshipsReq := httptest.NewRequest(http.MethodGet, "/v1/relationships", nil)
+	relationshipsW := httptest.NewRecorder()
+	r.ServeHTTP(relationshipsW, relationshipsReq)
+	if relationshipsW.Code != http.StatusOK {
+		t.Fatalf("expected relationships 200, got %d", relationshipsW.Code)
+	}
+
 	diffReq := httptest.NewRequest(http.MethodGet, "/v1/scans/"+postBody.Scan.ID+"/diff", nil)
 	diffW := httptest.NewRecorder()
 	r.ServeHTTP(diffW, diffReq)
@@ -154,6 +175,13 @@ func TestRouterUnavailableWhenServiceMissing(t *testing.T) {
 	r.ServeHTTP(summaryW, summaryReq)
 	if summaryW.Code != http.StatusOK {
 		t.Fatalf("expected summary 200 without service, got %d", summaryW.Code)
+	}
+
+	identityReq := httptest.NewRequest(http.MethodGet, "/v1/identities", nil)
+	identityW := httptest.NewRecorder()
+	r.ServeHTTP(identityW, identityReq)
+	if identityW.Code != http.StatusOK {
+		t.Fatalf("expected identities 200 without service, got %d", identityW.Code)
 	}
 }
 
@@ -409,5 +437,19 @@ func TestRouterScanDiffAndEventsNotFound(t *testing.T) {
 	r.ServeHTTP(eventsW, eventsReq)
 	if eventsW.Code != http.StatusNotFound {
 		t.Fatalf("expected events 404 for missing scan, got %d", eventsW.Code)
+	}
+
+	identitiesReq := httptest.NewRequest(http.MethodGet, "/v1/identities?scan_id=missing", nil)
+	identitiesW := httptest.NewRecorder()
+	r.ServeHTTP(identitiesW, identitiesReq)
+	if identitiesW.Code != http.StatusNotFound {
+		t.Fatalf("expected identities 404 for missing scan, got %d", identitiesW.Code)
+	}
+
+	relationshipsReq := httptest.NewRequest(http.MethodGet, "/v1/relationships?scan_id=missing", nil)
+	relationshipsW := httptest.NewRecorder()
+	r.ServeHTTP(relationshipsW, relationshipsReq)
+	if relationshipsW.Code != http.StatusNotFound {
+		t.Fatalf("expected relationships 404 for missing scan, got %d", relationshipsW.Code)
 	}
 }
