@@ -1,0 +1,6 @@
+{
+  "arn": "arn:aws:iam::123456789012:role/analytics-app",
+  "name": "analytics-app",
+  "assume_role_policy_document": "%7B%22Version%22%3A%222012-10-17%22%2C%22Statement%22%3A%5B%7B%22Effect%22%3A%22Allow%22%2C%22Principal%22%3A%7B%22AWS%22%3A%22arn%3Aaws%3Aiam%3A%3A123456789012%3Arole%2Fetl-runner%22%7D%2C%22Action%22%3A%22sts%3AAssumeRole%22%7D%5D%7D",
+  "permission_policies": []
+}

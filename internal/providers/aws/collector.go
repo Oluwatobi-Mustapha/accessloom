@@ -21,15 +21,16 @@ const (
 
 // IAMRole represents the minimum AWS IAM role fields required for normalization.
 type IAMRole struct {
-	ARN                      string            `json:"arn"`
-	Name                     string            `json:"name"`
-	Path                     string            `json:"path,omitempty"`
-	AssumeRolePolicyDocument string            `json:"assume_role_policy_document,omitempty"`
-	Description              string            `json:"description,omitempty"`
-	CreatedAt                *time.Time        `json:"created_at,omitempty"`
-	LastUsedAt               *time.Time        `json:"last_used_at,omitempty"`
-	MaxSessionDuration       int32             `json:"max_session_duration,omitempty"`
-	Tags                     map[string]string `json:"tags,omitempty"`
+	ARN                      string                `json:"arn"`
+	Name                     string                `json:"name"`
+	Path                     string                `json:"path,omitempty"`
+	AssumeRolePolicyDocument string                `json:"assume_role_policy_document,omitempty"`
+	PermissionPolicies       []IAMPermissionPolicy `json:"permission_policies,omitempty"`
+	Description              string                `json:"description,omitempty"`
+	CreatedAt                *time.Time            `json:"created_at,omitempty"`
+	LastUsedAt               *time.Time            `json:"last_used_at,omitempty"`
+	MaxSessionDuration       int32                 `json:"max_session_duration,omitempty"`
+	Tags                     map[string]string     `json:"tags,omitempty"`
 }
 
 // ListRolesPage is one paged response from IAM ListRoles.

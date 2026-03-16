@@ -1,0 +1,20 @@
+{
+  "arn": "arn:aws:iam::123456789012:role/payments-app",
+  "name": "payments-app",
+  "path": "/service/",
+  "assume_role_policy_document": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":[\"arn:aws:iam::123456789012:role/eks-irsa\",\"arn:aws:iam::111122223333:role/external-ci\"]},\"Action\":\"sts:AssumeRole\"}]}",
+  "description": "Payments workload role",
+  "created_at": "2025-07-01T10:00:00Z",
+  "last_used_at": "2026-03-12T09:15:00Z",
+  "max_session_duration": 3600,
+  "tags": {
+    "team": "payments",
+    "env": "prod"
+  },
+  "permission_policies": [
+    {
+      "name": "payments-readwrite",
+      "document": "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":[\"s3:GetObject\",\"s3:PutObject\"],\"Resource\":\"arn:aws:s3:::payments-data/*\"},{\"Effect\":\"Allow\",\"Action\":\"kms:Decrypt\",\"Resource\":\"arn:aws:kms:us-east-1:123456789012:key/abcd\"}]}"
+    }
+  ]
+}

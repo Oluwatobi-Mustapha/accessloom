@@ -15,3 +15,4 @@
 - API routing health and scan schedule endpoints
 - Scan orchestration success and failure paths
 - AWS collector pagination, throttling retries, dedup idempotency, and cancellation handling
+- AWS normalizer and graph behavior (trust parsing, permission expansion, relationship materialization)

@@ -14,7 +14,7 @@ Deliver a usable AWS scanner that collects IAM identity data, normalizes relatio
 
 - AWS collector for IAM roles, policies, and trust relationships
 - Normalized domain mapping
-- Graph edge construction (`can_assume`, `attached_policy`, `bound_to`)
+- Graph edge construction (`can_assume`, `attached_policy`, `can_access`)
 - Deterministic risk rules for core identity risks
 - CLI commands for `scan` and `findings`
 
@@ -36,8 +36,12 @@ Deliver a usable AWS scanner that collects IAM identity data, normalizes relatio
    - retry/backoff for throttling and transient failures
    - idempotent deduplication by role ARN
    - fixture-based and edge-case unit tests
-3. Normalizer + Graph: next
-4. Risk Engine: pending
+3. Normalizer + Graph: completed
+   - role normalization into provider-agnostic identities and policies
+   - permission tuple expansion for analysis
+   - trust + attachment + access relationship generation
+   - deterministic IDs and deduplication for idempotent reruns
+4. Risk Engine: next
 5. CLI UX pass: pending
 
 ## Phase Diagram
