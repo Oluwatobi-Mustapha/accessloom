@@ -25,15 +25,22 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
   - `GET /v1/scans/:scan_id/diff`
   - `GET /v1/scans/:scan_id/events`
   - `GET /v1/findings`
+  - `GET /v1/findings/:finding_id`
   - `GET /v1/findings/summary`
   - `GET /v1/findings/trends`
   - `GET /v1/identities`
   - `GET /v1/relationships`
+- API filters and drill-down:
+  - findings filters: `scan_id`, `severity`, `type`
+  - trends filters: `severity`, `type`
+  - scan event filters: `level`
+  - finding drill-down by id, with optional `scan_id` scope
 - Full artifact persistence:
   - raw assets, identities, policies, relationships, permissions, findings
 - SQL query scaffolding:
   - `sqlc/sqlc.yaml`
   - query contracts under `sqlc/queries/`
+  - typed query wrapper consumed by Postgres read paths (`GetScan`, scan list, findings list, scan events)
 - Scheduler and worker:
   - keyed in-memory scan lock
   - periodic runner abstraction
@@ -78,6 +85,8 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 - `IDENTRAIL_AUDIT_LOG_FILE`
 - `IDENTRAIL_AUDIT_FORWARD_URL`
 - `IDENTRAIL_AUDIT_FORWARD_TIMEOUT`
+- `IDENTRAIL_AUDIT_FORWARD_MAX_RETRIES`
+- `IDENTRAIL_AUDIT_FORWARD_RETRY_BACKOFF`
 - `IDENTRAIL_AUDIT_FORWARD_HMAC_SECRET`
 - `IDENTRAIL_ALERT_WEBHOOK_URL`
 - `IDENTRAIL_ALERT_MIN_SEVERITY`

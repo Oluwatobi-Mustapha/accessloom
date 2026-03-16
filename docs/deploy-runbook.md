@@ -18,6 +18,8 @@ Simple operational runbook for Identrail API/worker deploys.
 - Confirm audit forwarding config (if enabled):
   - `IDENTRAIL_AUDIT_FORWARD_URL`
   - `IDENTRAIL_AUDIT_FORWARD_TIMEOUT`
+  - `IDENTRAIL_AUDIT_FORWARD_MAX_RETRIES`
+  - `IDENTRAIL_AUDIT_FORWARD_RETRY_BACKOFF`
   - optional `IDENTRAIL_AUDIT_FORWARD_HMAC_SECRET`
 
 ## 2) Deploy Sequence

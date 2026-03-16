@@ -163,3 +163,21 @@ This file tracks major decisions in simple terms.
 - Decision: Add sqlc config/query files now, then migrate runtime store calls to generated code incrementally.
 - Why: Introduce typed SQL contract without disruptive refactor in one release.
 - Tradeoff: Temporary dual state (manual queries + sqlc scaffolding) until migration is complete.
+
+## ADR-028: Add Filter-First Findings and Trend APIs
+- Date: 2026-03-16
+- Decision: Support server-side filters for findings, trends, and scan events, plus finding-by-id drill-down.
+- Why: Keep dashboard and CLI queries simple and reduce client-side filtering logic.
+- Tradeoff: Additional service-layer filtering logic and response-shape tests.
+
+## ADR-029: Retry Audit Forwarding on Transient Failures
+- Date: 2026-03-16
+- Decision: Retry audit forwarding on network errors and 5xx responses using bounded retry/backoff settings.
+- Why: Reduce audit-event loss during short remote collector outages.
+- Tradeoff: Slightly higher outbound requests during failures.
+
+## ADR-030: Start Postgres Read Migration to Typed Query Layer
+- Date: 2026-03-16
+- Decision: Move scan/finding/event read methods to typed query wrappers aligned with sqlc contracts.
+- Why: Reduce manual SQL row mapping risk and prepare smooth sqlc generation adoption.
+- Tradeoff: Temporary adapter layer before full generated-code cutover.

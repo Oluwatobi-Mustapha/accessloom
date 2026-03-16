@@ -43,6 +43,7 @@ Collector -> Raw Assets -> Normalizer -> Domain Entities
 - Observability is integrated from day one with structured logs, Prometheus metrics, and tracing hooks.
 - Persistence supports local memory mode and PostgreSQL mode behind a single store interface.
 - Scan execution persists both raw and normalized artifacts for auditability and explainability.
+- Postgres read paths are moving to typed query contracts first, then full sqlc generation.
 
 ## Initial Runtime Components
 
