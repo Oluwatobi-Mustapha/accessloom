@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/app"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/domain"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/scheduler"
 )
 
 // ScannerRunner is the scan execution dependency required by API service.
@@ -21,6 +23,7 @@ type Service struct {
 	Scanner  ScannerRunner
 	Provider string
 	Now      func() time.Time
+	Locker   scheduler.Locker
 }
 
 // RunScanResult is returned after a scan API trigger.
@@ -30,6 +33,9 @@ type RunScanResult struct {
 	FindingCount int           `json:"finding_count"`
 }
 
+// ErrScanInProgress is returned when a scan for the same provider is already running.
+var ErrScanInProgress = errors.New("scan already in progress")
+
 // NewService creates an API service with defaults.
 func NewService(store db.Store, scanner ScannerRunner, provider string) *Service {
 	return &Service{
@@ -37,11 +43,20 @@ func NewService(store db.Store, scanner ScannerRunner, provider string) *Service
 		Scanner:  scanner,
 		Provider: provider,
 		Now:      time.Now,
+		Locker:   scheduler.NewInMemoryLocker(),
 	}
 }
 
 // RunScan executes one scan and persists metadata + findings.
 func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
+	if s.Locker != nil {
+		release, ok := s.Locker.TryAcquire("scan:" + s.Provider)
+		if !ok {
+			return RunScanResult{}, ErrScanInProgress
+		}
+		defer release()
+	}
+
 	started := s.Now().UTC()
 	record, err := s.Store.CreateScan(ctx, s.Provider, started)
 	if err != nil {

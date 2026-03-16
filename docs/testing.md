@@ -20,3 +20,4 @@
 - CLI scan/findings workflows (table/json output, state persistence, invalid modes)
 - storage layer behavior (memory + postgres via sqlmock)
 - migration baseline smoke validation
+- scheduler locking and periodic runner behavior
