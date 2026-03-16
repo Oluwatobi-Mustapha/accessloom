@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -80,6 +81,14 @@ func ValidateSecurity(cfg Config) error {
 	if cfg.AlertRetryBackoff > time.Duration(maxAlertBackoffLimit)*time.Second {
 		return fmt.Errorf("IDENTRAIL_ALERT_RETRY_BACKOFF must be <= %ds", maxAlertBackoffLimit)
 	}
+	if cfg.AuditForwardTimeout > 30*time.Second {
+		return fmt.Errorf("IDENTRAIL_AUDIT_FORWARD_TIMEOUT must be <= 30s")
+	}
+	if strings.TrimSpace(cfg.AuditForwardURL) != "" {
+		if err := validateForwardURL(cfg.AuditForwardURL); err != nil {
+			return err
+		}
+	}
 
 	if strings.TrimSpace(cfg.AlertWebhookURL) != "" {
 		severity := strings.ToLower(strings.TrimSpace(cfg.AlertMinSeverity))
@@ -102,8 +111,30 @@ func SecurityWarnings(cfg Config) []string {
 	if strings.TrimSpace(cfg.AuditLogFile) == "" {
 		warnings = append(warnings, "audit file sink is disabled; configure IDENTRAIL_AUDIT_LOG_FILE for durable local audit records")
 	}
+	if strings.TrimSpace(cfg.AuditForwardURL) != "" && strings.TrimSpace(cfg.AuditForwardHMACSecret) == "" {
+		warnings = append(warnings, "audit forward signing is disabled; set IDENTRAIL_AUDIT_FORWARD_HMAC_SECRET to enable receiver signature verification")
+	}
 	if strings.TrimSpace(cfg.AlertWebhookURL) != "" && strings.TrimSpace(cfg.AlertHMACSecret) == "" {
 		warnings = append(warnings, "alert webhook signing is disabled; set IDENTRAIL_ALERT_HMAC_SECRET to enable request signature verification")
 	}
 	return warnings
+}
+
+func validateForwardURL(raw string) error {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("parse audit forward url: %w", err)
+	}
+	host := strings.ToLower(parsed.Hostname())
+	switch strings.ToLower(parsed.Scheme) {
+	case "https":
+		return nil
+	case "http":
+		if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+			return nil
+		}
+		return fmt.Errorf("insecure audit forward url scheme http is only allowed for localhost")
+	default:
+		return fmt.Errorf("unsupported audit forward url scheme %q", parsed.Scheme)
+	}
 }

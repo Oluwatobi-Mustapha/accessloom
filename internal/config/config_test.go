@@ -23,6 +23,9 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_RUN_MIGRATIONS", "")
 	t.Setenv("IDENTRAIL_MIGRATIONS_DIR", "")
 	t.Setenv("IDENTRAIL_AUDIT_LOG_FILE", "")
+	t.Setenv("IDENTRAIL_AUDIT_FORWARD_URL", "")
+	t.Setenv("IDENTRAIL_AUDIT_FORWARD_TIMEOUT", "")
+	t.Setenv("IDENTRAIL_AUDIT_FORWARD_HMAC_SECRET", "")
 	t.Setenv("IDENTRAIL_ALERT_WEBHOOK_URL", "")
 	t.Setenv("IDENTRAIL_ALERT_MIN_SEVERITY", "")
 	t.Setenv("IDENTRAIL_ALERT_TIMEOUT", "")
@@ -77,6 +80,15 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AuditLogFile != "" {
 		t.Fatalf("expected empty audit log file, got %q", cfg.AuditLogFile)
 	}
+	if cfg.AuditForwardURL != "" {
+		t.Fatalf("expected empty audit forward url, got %q", cfg.AuditForwardURL)
+	}
+	if cfg.AuditForwardTimeout != 3*time.Second {
+		t.Fatalf("expected default audit forward timeout 3s, got %v", cfg.AuditForwardTimeout)
+	}
+	if cfg.AuditForwardHMACSecret != "" {
+		t.Fatalf("expected empty audit forward hmac secret, got %q", cfg.AuditForwardHMACSecret)
+	}
 	if cfg.AlertWebhookURL != "" {
 		t.Fatalf("expected empty alert webhook url, got %q", cfg.AlertWebhookURL)
 	}
@@ -117,6 +129,9 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_RUN_MIGRATIONS", "false")
 	t.Setenv("IDENTRAIL_MIGRATIONS_DIR", "db/migrations")
 	t.Setenv("IDENTRAIL_AUDIT_LOG_FILE", "/tmp/audit.log")
+	t.Setenv("IDENTRAIL_AUDIT_FORWARD_URL", "https://audit.example.com/events")
+	t.Setenv("IDENTRAIL_AUDIT_FORWARD_TIMEOUT", "8s")
+	t.Setenv("IDENTRAIL_AUDIT_FORWARD_HMAC_SECRET", "audit-secret")
 	t.Setenv("IDENTRAIL_ALERT_WEBHOOK_URL", "https://alerts.example.com/hooks/identrail")
 	t.Setenv("IDENTRAIL_ALERT_MIN_SEVERITY", "critical")
 	t.Setenv("IDENTRAIL_ALERT_TIMEOUT", "12s")
@@ -170,6 +185,15 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.AuditLogFile != "/tmp/audit.log" {
 		t.Fatalf("unexpected audit log file: %q", cfg.AuditLogFile)
+	}
+	if cfg.AuditForwardURL != "https://audit.example.com/events" {
+		t.Fatalf("unexpected audit forward url: %q", cfg.AuditForwardURL)
+	}
+	if cfg.AuditForwardTimeout != 8*time.Second {
+		t.Fatalf("unexpected audit forward timeout: %v", cfg.AuditForwardTimeout)
+	}
+	if cfg.AuditForwardHMACSecret != "audit-secret" {
+		t.Fatalf("unexpected audit forward hmac secret: %q", cfg.AuditForwardHMACSecret)
 	}
 	if cfg.AlertWebhookURL != "https://alerts.example.com/hooks/identrail" {
 		t.Fatalf("unexpected alert webhook url: %q", cfg.AlertWebhookURL)

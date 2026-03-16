@@ -90,6 +90,25 @@ func TestValidateSecurityRejectsLargeAlertBackoff(t *testing.T) {
 	}
 }
 
+func TestValidateSecurityRejectsInsecureAuditForwardURL(t *testing.T) {
+	cfg := Config{
+		AuditForwardURL: "http://example.com/events",
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected audit forward url validation error")
+	}
+}
+
+func TestValidateSecurityRejectsLargeAuditForwardTimeout(t *testing.T) {
+	cfg := Config{
+		AuditForwardURL:     "https://audit.example.com/events",
+		AuditForwardTimeout: 31 * time.Second,
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected audit forward timeout validation error")
+	}
+}
+
 func TestSecurityWarnings(t *testing.T) {
 	cfg := Config{
 		APIKeys:         []string{"legacy-key"},
