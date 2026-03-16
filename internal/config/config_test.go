@@ -28,6 +28,8 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_ALERT_TIMEOUT", "")
 	t.Setenv("IDENTRAIL_ALERT_HMAC_SECRET", "")
 	t.Setenv("IDENTRAIL_ALERT_MAX_FINDINGS", "")
+	t.Setenv("IDENTRAIL_ALERT_MAX_RETRIES", "")
+	t.Setenv("IDENTRAIL_ALERT_RETRY_BACKOFF", "")
 
 	cfg := Load()
 	if cfg.HTTPAddr != defaultHTTPAddr {
@@ -90,6 +92,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AlertMaxFindings != 25 {
 		t.Fatalf("expected default alert max findings 25, got %d", cfg.AlertMaxFindings)
 	}
+	if cfg.AlertMaxRetries != 2 {
+		t.Fatalf("expected default alert max retries 2, got %d", cfg.AlertMaxRetries)
+	}
+	if cfg.AlertRetryBackoff != 1*time.Second {
+		t.Fatalf("expected default alert retry backoff 1s, got %v", cfg.AlertRetryBackoff)
+	}
 }
 
 func TestLoadFromEnv(t *testing.T) {
@@ -114,6 +122,8 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_ALERT_TIMEOUT", "12s")
 	t.Setenv("IDENTRAIL_ALERT_HMAC_SECRET", "top-secret")
 	t.Setenv("IDENTRAIL_ALERT_MAX_FINDINGS", "40")
+	t.Setenv("IDENTRAIL_ALERT_MAX_RETRIES", "4")
+	t.Setenv("IDENTRAIL_ALERT_RETRY_BACKOFF", "3s")
 
 	cfg := Load()
 	if cfg.HTTPAddr != "127.0.0.1:9090" {
@@ -175,6 +185,12 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.AlertMaxFindings != 40 {
 		t.Fatalf("unexpected alert max findings: %d", cfg.AlertMaxFindings)
+	}
+	if cfg.AlertMaxRetries != 4 {
+		t.Fatalf("unexpected alert max retries: %d", cfg.AlertMaxRetries)
+	}
+	if cfg.AlertRetryBackoff != 3*time.Second {
+		t.Fatalf("unexpected alert retry backoff: %v", cfg.AlertRetryBackoff)
 	}
 }
 

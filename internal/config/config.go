@@ -19,53 +19,57 @@ const (
 // Config centralizes process-level configuration. It keeps module wiring simple
 // and deterministic for API, worker, and CLI binaries.
 type Config struct {
-	HTTPAddr         string
-	LogLevel         string
-	Provider         string
-	ServiceName      string
-	DatabaseURL      string
-	AWSFixturePath   []string
-	ScanInterval     time.Duration
-	WorkerRunNow     bool
-	APIKeys          []string
-	WriteAPIKeys     []string
-	APIKeyScopes     map[string][]string
-	RateLimitRPM     int
-	RateLimitBurst   int
-	RunMigrations    bool
-	MigrationsDir    string
-	AuditLogFile     string
-	AlertWebhookURL  string
-	AlertMinSeverity string
-	AlertTimeout     time.Duration
-	AlertHMACSecret  string
-	AlertMaxFindings int
+	HTTPAddr          string
+	LogLevel          string
+	Provider          string
+	ServiceName       string
+	DatabaseURL       string
+	AWSFixturePath    []string
+	ScanInterval      time.Duration
+	WorkerRunNow      bool
+	APIKeys           []string
+	WriteAPIKeys      []string
+	APIKeyScopes      map[string][]string
+	RateLimitRPM      int
+	RateLimitBurst    int
+	RunMigrations     bool
+	MigrationsDir     string
+	AuditLogFile      string
+	AlertWebhookURL   string
+	AlertMinSeverity  string
+	AlertTimeout      time.Duration
+	AlertHMACSecret   string
+	AlertMaxFindings  int
+	AlertMaxRetries   int
+	AlertRetryBackoff time.Duration
 }
 
 // Load reads environment variables and applies safe defaults for local and CI use.
 func Load() Config {
 	return Config{
-		HTTPAddr:         getEnv("IDENTRAIL_HTTP_ADDR", defaultHTTPAddr),
-		LogLevel:         strings.ToLower(getEnv("IDENTRAIL_LOG_LEVEL", defaultLogLevel)),
-		Provider:         strings.ToLower(getEnv("IDENTRAIL_PROVIDER", defaultProvider)),
-		ServiceName:      getEnv("IDENTRAIL_SERVICE_NAME", defaultServiceName),
-		DatabaseURL:      getEnv("IDENTRAIL_DATABASE_URL", ""),
-		AWSFixturePath:   parseCommaSeparated(getEnv("IDENTRAIL_AWS_FIXTURES", defaultAWSFixtures)),
-		ScanInterval:     parseDuration(getEnv("IDENTRAIL_SCAN_INTERVAL", defaultScanInterval.String()), defaultScanInterval),
-		WorkerRunNow:     parseBool(getEnv("IDENTRAIL_WORKER_RUN_NOW", "true"), true),
-		APIKeys:          parseCommaSeparated(getEnv("IDENTRAIL_API_KEYS", "")),
-		WriteAPIKeys:     parseCommaSeparated(getEnv("IDENTRAIL_WRITE_API_KEYS", "")),
-		APIKeyScopes:     parseKeyScopes(getEnv("IDENTRAIL_API_KEY_SCOPES", "")),
-		RateLimitRPM:     parseInt(getEnv("IDENTRAIL_RATE_LIMIT_RPM", "120"), 120),
-		RateLimitBurst:   parseInt(getEnv("IDENTRAIL_RATE_LIMIT_BURST", "20"), 20),
-		RunMigrations:    parseBool(getEnv("IDENTRAIL_RUN_MIGRATIONS", "true"), true),
-		MigrationsDir:    getEnv("IDENTRAIL_MIGRATIONS_DIR", "migrations"),
-		AuditLogFile:     getEnv("IDENTRAIL_AUDIT_LOG_FILE", ""),
-		AlertWebhookURL:  getEnv("IDENTRAIL_ALERT_WEBHOOK_URL", ""),
-		AlertMinSeverity: strings.ToLower(getEnv("IDENTRAIL_ALERT_MIN_SEVERITY", "high")),
-		AlertTimeout:     parseDuration(getEnv("IDENTRAIL_ALERT_TIMEOUT", "5s"), 5*time.Second),
-		AlertHMACSecret:  getEnv("IDENTRAIL_ALERT_HMAC_SECRET", ""),
-		AlertMaxFindings: parseInt(getEnv("IDENTRAIL_ALERT_MAX_FINDINGS", "25"), 25),
+		HTTPAddr:          getEnv("IDENTRAIL_HTTP_ADDR", defaultHTTPAddr),
+		LogLevel:          strings.ToLower(getEnv("IDENTRAIL_LOG_LEVEL", defaultLogLevel)),
+		Provider:          strings.ToLower(getEnv("IDENTRAIL_PROVIDER", defaultProvider)),
+		ServiceName:       getEnv("IDENTRAIL_SERVICE_NAME", defaultServiceName),
+		DatabaseURL:       getEnv("IDENTRAIL_DATABASE_URL", ""),
+		AWSFixturePath:    parseCommaSeparated(getEnv("IDENTRAIL_AWS_FIXTURES", defaultAWSFixtures)),
+		ScanInterval:      parseDuration(getEnv("IDENTRAIL_SCAN_INTERVAL", defaultScanInterval.String()), defaultScanInterval),
+		WorkerRunNow:      parseBool(getEnv("IDENTRAIL_WORKER_RUN_NOW", "true"), true),
+		APIKeys:           parseCommaSeparated(getEnv("IDENTRAIL_API_KEYS", "")),
+		WriteAPIKeys:      parseCommaSeparated(getEnv("IDENTRAIL_WRITE_API_KEYS", "")),
+		APIKeyScopes:      parseKeyScopes(getEnv("IDENTRAIL_API_KEY_SCOPES", "")),
+		RateLimitRPM:      parseInt(getEnv("IDENTRAIL_RATE_LIMIT_RPM", "120"), 120),
+		RateLimitBurst:    parseInt(getEnv("IDENTRAIL_RATE_LIMIT_BURST", "20"), 20),
+		RunMigrations:     parseBool(getEnv("IDENTRAIL_RUN_MIGRATIONS", "true"), true),
+		MigrationsDir:     getEnv("IDENTRAIL_MIGRATIONS_DIR", "migrations"),
+		AuditLogFile:      getEnv("IDENTRAIL_AUDIT_LOG_FILE", ""),
+		AlertWebhookURL:   getEnv("IDENTRAIL_ALERT_WEBHOOK_URL", ""),
+		AlertMinSeverity:  strings.ToLower(getEnv("IDENTRAIL_ALERT_MIN_SEVERITY", "high")),
+		AlertTimeout:      parseDuration(getEnv("IDENTRAIL_ALERT_TIMEOUT", "5s"), 5*time.Second),
+		AlertHMACSecret:   getEnv("IDENTRAIL_ALERT_HMAC_SECRET", ""),
+		AlertMaxFindings:  parseInt(getEnv("IDENTRAIL_ALERT_MAX_FINDINGS", "25"), 25),
+		AlertMaxRetries:   parseInt(getEnv("IDENTRAIL_ALERT_MAX_RETRIES", "2"), 2),
+		AlertRetryBackoff: parseDuration(getEnv("IDENTRAIL_ALERT_RETRY_BACKOFF", "1s"), 1*time.Second),
 	}
 }
 

@@ -49,6 +49,8 @@ func BuildScanService(cfg config.Config) (*api.Service, func() error, error) {
 			cfg.AlertMinSeverity,
 			cfg.AlertHMACSecret,
 			cfg.AlertMaxFindings,
+			cfg.AlertMaxRetries,
+			cfg.AlertRetryBackoff,
 		)
 		if alertErr != nil {
 			_ = store.Close()
