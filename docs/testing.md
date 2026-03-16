@@ -11,7 +11,8 @@
 
 - Config defaults and env parsing
 - API routes and scan trigger behavior
-- API auth and rate-limit middleware behavior
+- API auth and write-authorization middleware behavior
+- API rate-limit and audit-log middleware behavior
 - Memory/Postgres persistence logic
 - Migration runner behavior
 - Artifact and finding idempotent upserts

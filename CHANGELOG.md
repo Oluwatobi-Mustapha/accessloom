@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Added write authorization keys for scan trigger endpoint (`IDENTRAIL_WRITE_API_KEYS`).
+- Added API audit logging middleware for `/v1/*` requests.
 - Added API key authentication middleware for `/v1/*` endpoints.
 - Added per-IP rate limiter middleware.
 - Added startup migration runner for Postgres mode.
