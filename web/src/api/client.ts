@@ -77,7 +77,17 @@ export type ScanEvent = {
   created_at: string;
 };
 
-const baseURL = (import.meta.env.VITE_IDENTRAIL_API_URL as string | undefined) ?? 'http://localhost:8080';
+const configuredURL = import.meta.env.VITE_IDENTRAIL_API_URL as string | undefined;
+if (import.meta.env.PROD) {
+  if (!configuredURL) {
+    throw new Error('VITE_IDENTRAIL_API_URL must be set in production builds');
+  }
+  const parsed = new URL(configuredURL);
+  if (parsed.protocol === 'http:' && parsed.hostname !== 'localhost') {
+    throw new Error('VITE_IDENTRAIL_API_URL must use HTTPS in production (HTTP only allowed for localhost)');
+  }
+}
+const baseURL = configuredURL ?? 'http://localhost:8080';
 
 async function request<T>(path: string, apiKey?: string): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };

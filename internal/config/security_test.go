@@ -5,6 +5,13 @@ import (
 	"time"
 )
 
+func TestValidateSecurityRejectsNoAPIKeys(t *testing.T) {
+	cfg := Config{} // no APIKeys or APIKeyScopes
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected error when no API keys configured")
+	}
+}
+
 func TestValidateSecurityWriteKeyMustBeInAPIKeys(t *testing.T) {
 	cfg := Config{
 		APIKeys:      []string{"reader"},

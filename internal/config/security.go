@@ -104,6 +104,9 @@ func ValidateSecurity(cfg Config) error {
 			return fmt.Errorf("invalid IDENTRAIL_ALERT_MIN_SEVERITY %q", cfg.AlertMinSeverity)
 		}
 	}
+	if len(cfg.APIKeys) == 0 && len(cfg.APIKeyScopes) == 0 {
+		return fmt.Errorf("no API keys configured: set IDENTRAIL_API_KEYS or IDENTRAIL_API_KEY_SCOPES to enable authentication")
+	}
 	return nil
 }
 
@@ -112,9 +115,6 @@ func SecurityWarnings(cfg Config) []string {
 	warnings := []string{}
 	if len(cfg.APIKeys) > 0 && len(cfg.APIKeyScopes) > 0 {
 		warnings = append(warnings, "IDENTRAIL_API_KEYS is ignored when IDENTRAIL_API_KEY_SCOPES is configured")
-	}
-	if len(cfg.APIKeys) == 0 && len(cfg.APIKeyScopes) == 0 {
-		warnings = append(warnings, "v1 API authentication is disabled (no API keys configured)")
 	}
 	if strings.TrimSpace(cfg.AuditLogFile) == "" {
 		warnings = append(warnings, "audit file sink is disabled; configure IDENTRAIL_AUDIT_LOG_FILE for durable local audit records")
