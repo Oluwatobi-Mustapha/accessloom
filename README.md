@@ -20,3 +20,4 @@ The goal is simple: give security and IAM teams clear visibility and actionable 
   - `GET /v1/findings`
 - Persistence layer with memory mode (default) and PostgreSQL mode (`IDENTRAIL_DATABASE_URL`)
 - Idempotent storage of raw + normalized scan artifacts and typed findings
+- Security guardrails: single-flight scan lock, bounded API list limits, scan request timeout, security response headers

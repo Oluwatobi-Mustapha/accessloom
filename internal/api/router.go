@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -13,11 +14,19 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	defaultFindingsLimit = 100
+	defaultScansLimit    = 20
+	maxListLimit         = 500
+	scanRequestTimeout   = 2 * time.Minute
+)
+
 // NewRouter builds the REST surface area and observability endpoints.
 func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(securityHeadersMiddleware())
 
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(metrics.ScanRunsTotal, metrics.ScanDurationMS, metrics.FindingsGenerated)
@@ -45,7 +54,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service) *gi
 	}
 
 	r.GET("/v1/findings", func(c *gin.Context) {
-		limit := parseLimit(c.Query("limit"), 100)
+		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		items, err := svc.ListFindings(c.Request.Context(), limit)
 		if err != nil {
 			logger.Error("list findings", telemetry.ZapError(err))
@@ -56,7 +65,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service) *gi
 	})
 
 	r.GET("/v1/scans", func(c *gin.Context) {
-		limit := parseLimit(c.Query("limit"), 20)
+		limit := parseLimit(c.Query("limit"), defaultScansLimit, maxListLimit)
 		items, err := svc.ListScans(c.Request.Context(), limit)
 		if err != nil {
 			logger.Error("list scans", telemetry.ZapError(err))
@@ -70,7 +79,10 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service) *gi
 		start := time.Now()
 		metrics.ScanRunsTotal.Inc()
 
-		result, err := svc.RunScan(c.Request.Context())
+		requestCtx, cancel := context.WithTimeout(c.Request.Context(), scanRequestTimeout)
+		defer cancel()
+
+		result, err := svc.RunScan(requestCtx)
 		if err != nil {
 			if errors.Is(err, ErrScanInProgress) {
 				c.JSON(http.StatusConflict, gin.H{"error": "scan already in progress"})
@@ -93,7 +105,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service) *gi
 	return r
 }
 
-func parseLimit(raw string, fallback int) int {
+func parseLimit(raw string, fallback int, max int) int {
 	if raw == "" {
 		return fallback
 	}
@@ -101,5 +113,18 @@ func parseLimit(raw string, fallback int) int {
 	if err != nil || parsed <= 0 {
 		return fallback
 	}
+	if max > 0 && parsed > max {
+		return max
+	}
 	return parsed
+}
+
+func securityHeadersMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("Referrer-Policy", "no-referrer")
+		c.Header("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		c.Next()
+	}
 }

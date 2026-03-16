@@ -54,6 +54,9 @@ func TestRouterHealthz(t *testing.T) {
 	if body["status"] != "ok" {
 		t.Fatalf("unexpected status body: %+v", body)
 	}
+	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("expected security header nosniff, got %q", got)
+	}
 }
 
 func TestRouterRunsScanAndListsData(t *testing.T) {
@@ -122,5 +125,20 @@ func TestRouterScanConflictWhenLocked(t *testing.T) {
 
 	if w.Code != http.StatusConflict {
 		t.Fatalf("expected status 409, got %d", w.Code)
+	}
+}
+
+func TestParseLimit(t *testing.T) {
+	if got := parseLimit("", 10, 500); got != 10 {
+		t.Fatalf("expected fallback 10, got %d", got)
+	}
+	if got := parseLimit("invalid", 10, 500); got != 10 {
+		t.Fatalf("expected fallback 10, got %d", got)
+	}
+	if got := parseLimit("1000", 10, 500); got != 500 {
+		t.Fatalf("expected clamp 500, got %d", got)
+	}
+	if got := parseLimit("25", 10, 500); got != 25 {
+		t.Fatalf("expected 25, got %d", got)
 	}
 }
