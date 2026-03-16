@@ -68,12 +68,21 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		v1.GET("/findings", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
+		v1.GET("/findings/trends", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"items": []any{}})
+		})
 		v1.GET("/findings/summary", func(c *gin.Context) {
 			c.JSON(http.StatusOK, FindingsSummary{
 				Total:      0,
 				BySeverity: map[string]int{},
 				ByType:     map[string]int{},
 			})
+		})
+		v1.GET("/identities", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"items": []any{}})
+		})
+		v1.GET("/relationships", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
 		v1.GET("/scans", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
@@ -110,6 +119,61 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			return
 		}
 		c.JSON(http.StatusOK, summary)
+	})
+
+	v1.GET("/findings/trends", func(c *gin.Context) {
+		points := parseLimit(c.Query("points"), 10, 100)
+		items, err := svc.GetFindingsTrend(c.Request.Context(), points)
+		if err != nil {
+			logger.Error("findings trends", telemetry.ZapError(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to build findings trends"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"items": items})
+	})
+
+	v1.GET("/identities", func(c *gin.Context) {
+		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
+		items, err := svc.ListIdentities(
+			c.Request.Context(),
+			strings.TrimSpace(c.Query("scan_id")),
+			strings.TrimSpace(c.Query("provider")),
+			strings.TrimSpace(c.Query("type")),
+			strings.TrimSpace(c.Query("name_prefix")),
+			limit,
+		)
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "scan not found"})
+				return
+			}
+			logger.Error("list identities", telemetry.ZapError(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list identities"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"items": items})
+	})
+
+	v1.GET("/relationships", func(c *gin.Context) {
+		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
+		items, err := svc.ListRelationships(
+			c.Request.Context(),
+			strings.TrimSpace(c.Query("scan_id")),
+			strings.TrimSpace(c.Query("type")),
+			strings.TrimSpace(c.Query("from_node_id")),
+			strings.TrimSpace(c.Query("to_node_id")),
+			limit,
+		)
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "scan not found"})
+				return
+			}
+			logger.Error("list relationships", telemetry.ZapError(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list relationships"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"items": items})
 	})
 
 	v1.GET("/scans", func(c *gin.Context) {
