@@ -62,7 +62,16 @@ Simple threat list for current system.
 - Fix: Startup migration runner for Postgres mode.
 - Status: Implemented.
 
+## 13) Scope Confusion in API Key Authorization
+- Threat: Mixed legacy key lists and scoped keys can produce wrong access behavior.
+- Fix: Scoped key map takes precedence when configured (`IDENTRAIL_API_KEY_SCOPES`).
+- Status: Implemented.
+
+## 14) Missing Durable Audit Export
+- Threat: Request logs in process output can be lost during log rotation or collection issues.
+- Fix: Optional JSONL audit file sink (`IDENTRAIL_AUDIT_LOG_FILE`) with append-only writes.
+- Status: Implemented.
+
 ## Current Gaps (Next)
-- Add role/scope-based auth model.
-- Add audit log export to external sink.
-- Add secret encryption policy and key management guide.
+- Add encrypted secret management and key rotation runbook.
+- Add audit sink forwarding guide for centralized log pipelines.

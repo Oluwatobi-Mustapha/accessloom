@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Added scoped API key authorization config (`IDENTRAIL_API_KEY_SCOPES`) with legacy fallback behavior.
+- Added optional audit file export sink (`IDENTRAIL_AUDIT_LOG_FILE`) for durable API request audit events.
 - Added write authorization keys for scan trigger endpoint (`IDENTRAIL_WRITE_API_KEYS`).
 - Added API audit logging middleware for `/v1/*` requests.
 - Added API key authentication middleware for `/v1/*` endpoints.

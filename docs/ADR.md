@@ -73,3 +73,15 @@ This file tracks major decisions in simple terms.
 - Decision: Log each `/v1/*` request with method, path, status, IP, and latency.
 - Why: Improve forensic visibility and operational tracing.
 - Tradeoff: Must manage log volume and retention.
+
+## ADR-013: Scoped API Keys Override Legacy Lists
+- Date: 2026-03-16
+- Decision: When scoped keys are configured, use them as the source of truth for authorization.
+- Why: Remove ambiguity between read/write key lists and per-key scopes.
+- Tradeoff: Migration from legacy key lists needs coordination.
+
+## ADR-014: File Audit Sink for Durable Local Export
+- Date: 2026-03-16
+- Decision: Support optional JSONL append sink for API audit events.
+- Why: Keep a durable audit trail even when centralized logging is not yet connected.
+- Tradeoff: Requires file retention and secure file access controls.
