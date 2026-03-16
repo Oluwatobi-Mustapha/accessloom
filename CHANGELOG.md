@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- Added production CI workflow (`.github/workflows/ci.yml`) with:
+  - Go format and vet gates
+  - Go test + coverage threshold (>= 80%)
+  - Postgres-backed integration test gate
+  - Frontend dependency install and build gate
+- Added deterministic web lockfile (`web/package-lock.json`) for reproducible CI installs.
 - Added findings trends endpoint (`GET /v1/findings/trends`).
 - Added explorer endpoints (`GET /v1/identities`, `GET /v1/relationships`).
 - Added finding detail endpoint (`GET /v1/findings/:finding_id`).

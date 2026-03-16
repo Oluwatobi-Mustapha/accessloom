@@ -24,12 +24,13 @@ Simple operational runbook for Identrail API/worker deploys.
 
 ## 2) Deploy Sequence
 
-1. Deploy API service with `IDENTRAIL_RUN_MIGRATIONS=true`.
-2. Verify health endpoint: `GET /healthz`.
-3. Verify migrations were applied.
-4. Deploy worker with same DB + provider config.
-5. Trigger one scan (`POST /v1/scans`) with write-authorized key.
-6. Verify:
+1. Ensure CI is green on `main` (`Go Quality`, `Go Tests`, `Go Integration (Postgres)`, `Web Build`).
+2. Deploy API service with `IDENTRAIL_RUN_MIGRATIONS=true`.
+3. Verify health endpoint: `GET /healthz`.
+4. Verify migrations were applied.
+5. Deploy worker with same DB + provider config.
+6. Trigger one scan (`POST /v1/scans`) with write-authorized key.
+7. Verify:
    - findings list (`GET /v1/findings`)
    - findings summary (`GET /v1/findings/summary`)
    - findings trends (`GET /v1/findings/trends`)

@@ -147,6 +147,11 @@ Simple threat list for current system.
 - Fix: Add server-side filters (`scan_id`, `severity`, `type`, `level`) and finding detail endpoint.
 - Status: Implemented.
 
+## 30) Regressions Reach Production Due to Missing Release Gates
+- Threat: Undetected code quality, database, or frontend build issues can ship to production.
+- Fix: Enforce CI gates for formatting, static checks, coverage floor, Postgres integration tests, and web build.
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and external KMS guidance.
 - Add audit sink forwarding guide for centralized log pipelines.

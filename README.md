@@ -50,3 +50,5 @@ Web shell scaffold: `web/` (React + TypeScript + Vite).
 - Startup migration support:
   - `IDENTRAIL_RUN_MIGRATIONS`
   - `IDENTRAIL_MIGRATIONS_DIR`
+- CI gates:
+  - GitHub Actions pipeline for Go quality checks, coverage, Postgres integration tests, and web build validation

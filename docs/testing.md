@@ -6,6 +6,7 @@
 - Fixture-based tests for provider collection/normalization/rules
 - Sqlmock tests for Postgres store behavior
 - Scheduler and worker tests for run safety
+- CI must fail fast on formatting, static checks, integration failures, or coverage regressions
 
 ## Current Focus
 
@@ -31,3 +32,20 @@
 - Artifact and finding idempotent upserts
 - Scheduler lock/runner behavior
 - Worker startup and cancellation behavior
+
+## CI Pipeline Gates
+
+GitHub Actions workflow: `.github/workflows/ci.yml`
+
+- `go-quality`
+  - `gofmt` enforcement
+  - `go vet ./...`
+- `go-test`
+  - `go test ./... -coverprofile=coverage.out`
+  - coverage floor: total >= 80%
+- `go-integration`
+  - Postgres service container
+  - `go test -tags=integration ./internal/integration -count=1 -v`
+- `web-build`
+  - `npm ci --prefix web`
+  - `npm run build --prefix web`

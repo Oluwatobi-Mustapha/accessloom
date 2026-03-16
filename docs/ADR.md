@@ -181,3 +181,9 @@ This file tracks major decisions in simple terms.
 - Decision: Move scan/finding/event read methods to typed query wrappers aligned with sqlc contracts.
 - Why: Reduce manual SQL row mapping risk and prepare smooth sqlc generation adoption.
 - Tradeoff: Temporary adapter layer before full generated-code cutover.
+
+## ADR-031: Enforce Multi-Stage CI Gates on Every Mainline Change
+- Date: 2026-03-16
+- Decision: Add GitHub Actions CI with Go quality checks, coverage gate, Postgres integration tests, and web build checks.
+- Why: Catch regressions before deploy and keep backend/frontend contracts stable.
+- Tradeoff: Slightly longer feedback cycle for large pull requests.

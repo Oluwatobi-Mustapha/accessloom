@@ -19,6 +19,7 @@ Updated only at major milestones.
 - API drill-down: finding-by-id endpoint and server-side findings/trend/event filters added.
 - Postgres reads: scan/finding/event reads now use typed query wrappers aligned with sqlc contracts.
 - Audit reliability: audit forwarding retries/backoff added with bounded startup validation.
+- Delivery gate: production-grade CI pipeline added (quality, coverage, integration, web build).
 - Worker: scheduled process runs scans with shared runtime bootstrap.
 - Migrations: startup migration runner added for Postgres mode.
 - Test health: `go test ./... -cover` passing, coverage above 80%.
