@@ -29,3 +29,15 @@ func TestInitialMigrationContainsCoreTables(t *testing.T) {
 		}
 	}
 }
+
+func TestSecondMigrationContainsScanEvents(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "000002_scan_events.up.sql")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "CREATE TABLE IF NOT EXISTS scan_events") {
+		t.Fatal("expected scan_events table creation in second migration")
+	}
+}

@@ -64,6 +64,25 @@ func (p *PostgresStore) CreateScan(ctx context.Context, provider string, started
 	return record, nil
 }
 
+// GetScan returns one scan by id.
+func (p *PostgresStore) GetScan(ctx context.Context, scanID string) (ScanRecord, error) {
+	var record ScanRecord
+	err := p.db.QueryRowContext(
+		ctx,
+		`SELECT id, provider, status, started_at, finished_at, asset_count, finding_count, COALESCE(error_message, '')
+		 FROM scans
+		 WHERE id = $1`,
+		scanID,
+	).Scan(&record.ID, &record.Provider, &record.Status, &record.StartedAt, &record.FinishedAt, &record.AssetCount, &record.FindingCount, &record.ErrorMessage)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return ScanRecord{}, ErrNotFound
+		}
+		return ScanRecord{}, fmt.Errorf("query scan: %w", err)
+	}
+	return record, nil
+}
+
 // CompleteScan updates scan completion metadata.
 func (p *PostgresStore) CompleteScan(ctx context.Context, scanID string, status string, finishedAt time.Time, assetCount int, findingCount int, errorMessage string) error {
 	_, err := p.db.ExecContext(
@@ -251,6 +270,118 @@ func (p *PostgresStore) ListFindings(ctx context.Context, limit int) ([]domain.F
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("finding rows: %w", err)
+	}
+	return result, nil
+}
+
+// ListFindingsByScan returns latest findings first for one scan id.
+func (p *PostgresStore) ListFindingsByScan(ctx context.Context, scanID string, limit int) ([]domain.Finding, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := p.db.QueryContext(
+		ctx,
+		`SELECT scan_id, finding_id, type, severity, title, human_summary, path, evidence, remediation, created_at
+		 FROM findings
+		 WHERE scan_id = $1
+		 ORDER BY created_at DESC
+		 LIMIT $2`,
+		scanID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query findings by scan: %w", err)
+	}
+	defer rows.Close()
+
+	result := []domain.Finding{}
+	for rows.Next() {
+		var finding domain.Finding
+		var findingType string
+		var severity string
+		var pathJSON []byte
+		var evidenceJSON []byte
+		if err := rows.Scan(&finding.ScanID, &finding.ID, &findingType, &severity, &finding.Title, &finding.HumanSummary, &pathJSON, &evidenceJSON, &finding.Remediation, &finding.CreatedAt); err != nil {
+			return nil, fmt.Errorf("finding row: %w", err)
+		}
+		finding.Type = domain.FindingType(findingType)
+		finding.Severity = domain.FindingSeverity(severity)
+		if len(pathJSON) > 0 {
+			if err := json.Unmarshal(pathJSON, &finding.Path); err != nil {
+				return nil, fmt.Errorf("decode finding path: %w", err)
+			}
+		}
+		if len(evidenceJSON) > 0 {
+			if err := json.Unmarshal(evidenceJSON, &finding.Evidence); err != nil {
+				return nil, fmt.Errorf("decode finding evidence: %w", err)
+			}
+		}
+		result = append(result, finding)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("finding rows: %w", err)
+	}
+	return result, nil
+}
+
+// AppendScanEvent writes one scan event row.
+func (p *PostgresStore) AppendScanEvent(ctx context.Context, scanID string, level string, message string, metadata map[string]any) error {
+	payload, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("marshal scan event metadata: %w", err)
+	}
+	_, err = p.db.ExecContext(
+		ctx,
+		`INSERT INTO scan_events (id, scan_id, level, message, metadata, created_at)
+		 VALUES ($1, $2, $3, $4, $5, NOW())`,
+		uuid.NewString(),
+		scanID,
+		level,
+		message,
+		payload,
+	)
+	if err != nil {
+		return fmt.Errorf("insert scan event: %w", err)
+	}
+	return nil
+}
+
+// ListScanEvents returns latest event entries for one scan.
+func (p *PostgresStore) ListScanEvents(ctx context.Context, scanID string, limit int) ([]ScanEvent, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := p.db.QueryContext(
+		ctx,
+		`SELECT id, scan_id, level, message, metadata, created_at
+		 FROM scan_events
+		 WHERE scan_id = $1
+		 ORDER BY created_at DESC
+		 LIMIT $2`,
+		scanID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query scan events: %w", err)
+	}
+	defer rows.Close()
+
+	result := []ScanEvent{}
+	for rows.Next() {
+		var event ScanEvent
+		var metadataJSON []byte
+		if err := rows.Scan(&event.ID, &event.ScanID, &event.Level, &event.Message, &metadataJSON, &event.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan event row: %w", err)
+		}
+		if len(metadataJSON) > 0 {
+			if err := json.Unmarshal(metadataJSON, &event.Metadata); err != nil {
+				return nil, fmt.Errorf("decode scan event metadata: %w", err)
+			}
+		}
+		result = append(result, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("scan event rows: %w", err)
 	}
 	return result, nil
 }

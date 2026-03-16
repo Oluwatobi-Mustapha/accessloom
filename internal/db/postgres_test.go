@@ -158,6 +158,79 @@ func TestPostgresStoreListScansAndFindings(t *testing.T) {
 	}
 }
 
+func TestPostgresStoreGetScanAndFindingsByScan(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	now := time.Now().UTC()
+
+	scanRow := sqlmock.NewRows([]string{"id", "provider", "status", "started_at", "finished_at", "asset_count", "finding_count", "error_message"}).
+		AddRow("scan-1", "aws", "completed", now, now, 2, 1, "")
+	mock.ExpectQuery("SELECT id, provider, status").WithArgs("scan-1").WillReturnRows(scanRow)
+
+	scan, err := store.GetScan(context.Background(), "scan-1")
+	if err != nil {
+		t.Fatalf("get scan failed: %v", err)
+	}
+	if scan.ID != "scan-1" {
+		t.Fatalf("unexpected scan: %+v", scan)
+	}
+
+	findingsRows := sqlmock.NewRows([]string{"scan_id", "finding_id", "type", "severity", "title", "human_summary", "path", "evidence", "remediation", "created_at"}).
+		AddRow("scan-1", "f1", "ownerless_identity", "medium", "Ownerless", "summary", []byte("[\"x\"]"), []byte("{\"a\":1}"), "fix", now)
+	mock.ExpectQuery("SELECT scan_id, finding_id, type").WithArgs("scan-1", 100).WillReturnRows(findingsRows)
+
+	findings, err := store.ListFindingsByScan(context.Background(), "scan-1", 100)
+	if err != nil {
+		t.Fatalf("list findings by scan failed: %v", err)
+	}
+	if len(findings) != 1 || findings[0].ID != "f1" {
+		t.Fatalf("unexpected findings: %+v", findings)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreScanEvents(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	mock.ExpectExec("INSERT INTO scan_events").
+		WithArgs(sqlmock.AnyArg(), "scan-1", "info", "scan started", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if err := store.AppendScanEvent(context.Background(), "scan-1", "info", "scan started", map[string]any{"provider": "aws"}); err != nil {
+		t.Fatalf("append scan event failed: %v", err)
+	}
+
+	now := time.Now().UTC()
+	rows := sqlmock.NewRows([]string{"id", "scan_id", "level", "message", "metadata", "created_at"}).
+		AddRow("event-1", "scan-1", "info", "scan started", []byte(`{"provider":"aws"}`), now)
+	mock.ExpectQuery("SELECT id, scan_id, level, message, metadata, created_at").WithArgs("scan-1", 10).WillReturnRows(rows)
+
+	events, err := store.ListScanEvents(context.Background(), "scan-1", 10)
+	if err != nil {
+		t.Fatalf("list scan events failed: %v", err)
+	}
+	if len(events) != 1 || events[0].ID != "event-1" {
+		t.Fatalf("unexpected events: %+v", events)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestNewPostgresStoreWithDB(t *testing.T) {
 	store := NewPostgresStoreWithDB(&sql.DB{})
 	if store == nil {
