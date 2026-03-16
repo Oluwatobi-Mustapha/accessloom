@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"regexp"
 	"strings"
 
@@ -40,7 +41,9 @@ func principalNodeID(principalARN string, arnToIdentity map[string]string) strin
 }
 
 func accessNodeID(action, resource string) string {
-	return fmt.Sprintf("aws:access:%s:%s", strings.TrimSpace(action), strings.TrimSpace(resource))
+	escapedAction := url.QueryEscape(strings.TrimSpace(action))
+	escapedResource := url.QueryEscape(strings.TrimSpace(resource))
+	return fmt.Sprintf("aws:access:%s:%s", escapedAction, escapedResource)
 }
 
 func relationshipID(relationshipType domain.RelationshipType, fromNodeID, toNodeID string) string {

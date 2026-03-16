@@ -41,8 +41,11 @@ Deliver a usable AWS scanner that collects IAM identity data, normalizes relatio
    - permission tuple expansion for analysis
    - trust + attachment + access relationship generation
    - deterministic IDs and deduplication for idempotent reruns
-4. Risk Engine: next
-5. CLI UX pass: pending
+4. Risk Engine: completed
+   - typed findings: overprivileged, risky trust, escalation, stale, ownerless
+   - deterministic finding IDs and stable severity ordering
+   - evidence-rich and remediation-focused output shape
+5. CLI UX pass: next
 
 ## Phase Diagram
 
