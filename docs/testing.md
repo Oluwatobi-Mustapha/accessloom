@@ -3,7 +3,7 @@
 ## Principles
 
 - Unit tests for every core package and orchestration path
-- Fixture-based tests for provider payload normalization
+- Fixture-based tests for provider payload normalization and collection behavior
 - Integration tests against Postgres in Phase 2
 - Mock provider dependencies for deterministic rule testing
 
@@ -14,3 +14,4 @@
 - Telemetry setup and instrumentation behavior
 - API routing health and scan schedule endpoints
 - Scan orchestration success and failure paths
+- AWS collector pagination, throttling retries, dedup idempotency, and cancellation handling
