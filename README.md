@@ -25,6 +25,10 @@ Web shell scaffold: `web/` (React + TypeScript + Vite).
   - `GET /v1/relationships`
 - Worker workflow:
   - `worker` runs scheduled scans
+- Dashboard workflow (`web/`):
+  - findings table with severity/type filters
+  - scan selector with diff snapshot
+  - identity/relationship/event explorer snapshot
 - Persistence:
   - memory mode (default)
   - PostgreSQL mode (`IDENTRAIL_DATABASE_URL`)
