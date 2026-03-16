@@ -18,6 +18,7 @@ type MemoryStore struct {
 	scans    map[string]ScanRecord
 	scanIDs  []string
 	findings map[string]domain.Finding
+	events   map[string][]ScanEvent
 
 	rawAssets     map[string]providers.RawAsset
 	identities    map[string]domain.Identity
@@ -32,6 +33,7 @@ func NewMemoryStore() *MemoryStore {
 		scans:    map[string]ScanRecord{},
 		scanIDs:  []string{},
 		findings: map[string]domain.Finding{},
+		events:   map[string][]ScanEvent{},
 
 		rawAssets:     map[string]providers.RawAsset{},
 		identities:    map[string]domain.Identity{},
@@ -54,6 +56,18 @@ func (m *MemoryStore) CreateScan(_ context.Context, provider string, startedAt t
 	}
 	m.scans[record.ID] = record
 	m.scanIDs = append(m.scanIDs, record.ID)
+	return record, nil
+}
+
+// GetScan returns one persisted scan by id.
+func (m *MemoryStore) GetScan(_ context.Context, scanID string) (ScanRecord, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	record, exists := m.scans[scanID]
+	if !exists {
+		return ScanRecord{}, ErrNotFound
+	}
 	return record, nil
 }
 
@@ -159,6 +173,68 @@ func (m *MemoryStore) ListFindings(_ context.Context, limit int) ([]domain.Findi
 		result = result[:limit]
 	}
 	return result, nil
+}
+
+// ListFindingsByScan returns latest findings first for one scan.
+func (m *MemoryStore) ListFindingsByScan(_ context.Context, scanID string, limit int) ([]domain.Finding, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if _, exists := m.scans[scanID]; !exists {
+		return nil, ErrNotFound
+	}
+
+	result := []domain.Finding{}
+	for _, finding := range m.findings {
+		if finding.ScanID != scanID {
+			continue
+		}
+		result = append(result, finding)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+// AppendScanEvent appends one scan event entry.
+func (m *MemoryStore) AppendScanEvent(_ context.Context, scanID string, level string, message string, metadata map[string]any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.scans[scanID]; !exists {
+		return ErrNotFound
+	}
+	m.events[scanID] = append(m.events[scanID], ScanEvent{
+		ID:        uuid.NewString(),
+		ScanID:    scanID,
+		Level:     level,
+		Message:   message,
+		Metadata:  metadata,
+		CreatedAt: time.Now().UTC(),
+	})
+	return nil
+}
+
+// ListScanEvents returns most recent scan events first.
+func (m *MemoryStore) ListScanEvents(_ context.Context, scanID string, limit int) ([]ScanEvent, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if _, exists := m.scans[scanID]; !exists {
+		return nil, ErrNotFound
+	}
+	events := append([]ScanEvent(nil), m.events[scanID]...)
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].CreatedAt.After(events[j].CreatedAt)
+	})
+	if limit > 0 && len(events) > limit {
+		events = events[:limit]
+	}
+	return events, nil
 }
 
 // Close closes store resources.

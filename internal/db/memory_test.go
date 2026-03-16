@@ -80,4 +80,71 @@ func TestMemoryStoreErrorsForUnknownScan(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
+	_, err = store.GetScan(context.Background(), "missing")
+	if err == nil {
+		t.Fatal("expected get scan error")
+	}
+	_, err = store.ListFindingsByScan(context.Background(), "missing", 10)
+	if err == nil {
+		t.Fatal("expected findings-by-scan error")
+	}
+	err = store.AppendScanEvent(context.Background(), "missing", "info", "msg", nil)
+	if err == nil {
+		t.Fatal("expected append scan event error")
+	}
+	_, err = store.ListScanEvents(context.Background(), "missing", 10)
+	if err == nil {
+		t.Fatal("expected list scan events error")
+	}
+}
+
+func TestMemoryStoreScanDetails(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
+
+	scanA, err := store.CreateScan(context.Background(), "aws", now)
+	if err != nil {
+		t.Fatalf("create scan A: %v", err)
+	}
+	scanB, err := store.CreateScan(context.Background(), "aws", now.Add(1*time.Minute))
+	if err != nil {
+		t.Fatalf("create scan B: %v", err)
+	}
+
+	if err := store.UpsertFindings(context.Background(), scanA.ID, []domain.Finding{
+		{ID: "f1", ScanID: scanA.ID, CreatedAt: now.Add(1 * time.Second)},
+		{ID: "f2", ScanID: scanA.ID, CreatedAt: now.Add(2 * time.Second)},
+	}); err != nil {
+		t.Fatalf("upsert findings: %v", err)
+	}
+
+	gotScan, err := store.GetScan(context.Background(), scanA.ID)
+	if err != nil {
+		t.Fatalf("get scan: %v", err)
+	}
+	if gotScan.ID != scanA.ID {
+		t.Fatalf("unexpected scan id: %q", gotScan.ID)
+	}
+
+	findings, err := store.ListFindingsByScan(context.Background(), scanA.ID, 10)
+	if err != nil {
+		t.Fatalf("list findings by scan: %v", err)
+	}
+	if len(findings) != 2 || findings[0].ID != "f2" {
+		t.Fatalf("unexpected findings: %+v", findings)
+	}
+
+	if err := store.AppendScanEvent(context.Background(), scanB.ID, "info", "scan started", map[string]any{"provider": "aws"}); err != nil {
+		t.Fatalf("append scan event 1: %v", err)
+	}
+	if err := store.AppendScanEvent(context.Background(), scanB.ID, "info", "scan completed", nil); err != nil {
+		t.Fatalf("append scan event 2: %v", err)
+	}
+	events, err := store.ListScanEvents(context.Background(), scanB.ID, 10)
+	if err != nil {
+		t.Fatalf("list scan events: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events, got %d", len(events))
+	}
 }
