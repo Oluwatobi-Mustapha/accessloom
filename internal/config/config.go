@@ -29,10 +29,12 @@ type Config struct {
 	WorkerRunNow   bool
 	APIKeys        []string
 	WriteAPIKeys   []string
+	APIKeyScopes   map[string][]string
 	RateLimitRPM   int
 	RateLimitBurst int
 	RunMigrations  bool
 	MigrationsDir  string
+	AuditLogFile   string
 }
 
 // Load reads environment variables and applies safe defaults for local and CI use.
@@ -48,10 +50,12 @@ func Load() Config {
 		WorkerRunNow:   parseBool(getEnv("IDENTRAIL_WORKER_RUN_NOW", "true"), true),
 		APIKeys:        parseCommaSeparated(getEnv("IDENTRAIL_API_KEYS", "")),
 		WriteAPIKeys:   parseCommaSeparated(getEnv("IDENTRAIL_WRITE_API_KEYS", "")),
+		APIKeyScopes:   parseKeyScopes(getEnv("IDENTRAIL_API_KEY_SCOPES", "")),
 		RateLimitRPM:   parseInt(getEnv("IDENTRAIL_RATE_LIMIT_RPM", "120"), 120),
 		RateLimitBurst: parseInt(getEnv("IDENTRAIL_RATE_LIMIT_BURST", "20"), 20),
 		RunMigrations:  parseBool(getEnv("IDENTRAIL_RUN_MIGRATIONS", "true"), true),
 		MigrationsDir:  getEnv("IDENTRAIL_MIGRATIONS_DIR", "migrations"),
+		AuditLogFile:   getEnv("IDENTRAIL_AUDIT_LOG_FILE", ""),
 	}
 }
 
@@ -98,4 +102,28 @@ func parseInt(value string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func parseKeyScopes(value string) map[string][]string {
+	result := map[string][]string{}
+	for _, entry := range strings.Split(value, ";") {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed == "" {
+			continue
+		}
+		parts := strings.SplitN(trimmed, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(parts[0])
+		if key == "" {
+			continue
+		}
+		scopes := parseCommaSeparated(parts[1])
+		if len(scopes) == 0 {
+			continue
+		}
+		result[key] = scopes
+	}
+	return result
 }

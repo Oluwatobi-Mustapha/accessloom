@@ -17,10 +17,12 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_WORKER_RUN_NOW", "")
 	t.Setenv("IDENTRAIL_API_KEYS", "")
 	t.Setenv("IDENTRAIL_WRITE_API_KEYS", "")
+	t.Setenv("IDENTRAIL_API_KEY_SCOPES", "")
 	t.Setenv("IDENTRAIL_RATE_LIMIT_RPM", "")
 	t.Setenv("IDENTRAIL_RATE_LIMIT_BURST", "")
 	t.Setenv("IDENTRAIL_RUN_MIGRATIONS", "")
 	t.Setenv("IDENTRAIL_MIGRATIONS_DIR", "")
+	t.Setenv("IDENTRAIL_AUDIT_LOG_FILE", "")
 
 	cfg := Load()
 	if cfg.HTTPAddr != defaultHTTPAddr {
@@ -53,6 +55,9 @@ func TestLoadDefaults(t *testing.T) {
 	if len(cfg.WriteAPIKeys) != 0 {
 		t.Fatalf("expected no write api keys by default, got %+v", cfg.WriteAPIKeys)
 	}
+	if len(cfg.APIKeyScopes) != 0 {
+		t.Fatalf("expected no scoped keys by default, got %+v", cfg.APIKeyScopes)
+	}
 	if cfg.RateLimitRPM != 120 || cfg.RateLimitBurst != 20 {
 		t.Fatalf("unexpected default rate limit settings: rpm=%d burst=%d", cfg.RateLimitRPM, cfg.RateLimitBurst)
 	}
@@ -61,6 +66,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.MigrationsDir != "migrations" {
 		t.Fatalf("unexpected migrations dir: %q", cfg.MigrationsDir)
+	}
+	if cfg.AuditLogFile != "" {
+		t.Fatalf("expected empty audit log file, got %q", cfg.AuditLogFile)
 	}
 }
 
@@ -75,10 +83,12 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_WORKER_RUN_NOW", "false")
 	t.Setenv("IDENTRAIL_API_KEYS", "key1,key2")
 	t.Setenv("IDENTRAIL_WRITE_API_KEYS", "key2")
+	t.Setenv("IDENTRAIL_API_KEY_SCOPES", "key1:read;key2:read,write")
 	t.Setenv("IDENTRAIL_RATE_LIMIT_RPM", "300")
 	t.Setenv("IDENTRAIL_RATE_LIMIT_BURST", "50")
 	t.Setenv("IDENTRAIL_RUN_MIGRATIONS", "false")
 	t.Setenv("IDENTRAIL_MIGRATIONS_DIR", "db/migrations")
+	t.Setenv("IDENTRAIL_AUDIT_LOG_FILE", "/tmp/audit.log")
 
 	cfg := Load()
 	if cfg.HTTPAddr != "127.0.0.1:9090" {
@@ -111,6 +121,9 @@ func TestLoadFromEnv(t *testing.T) {
 	if len(cfg.WriteAPIKeys) != 1 || cfg.WriteAPIKeys[0] != "key2" {
 		t.Fatalf("unexpected write api keys: %+v", cfg.WriteAPIKeys)
 	}
+	if len(cfg.APIKeyScopes) != 2 || cfg.APIKeyScopes["key1"][0] != "read" || len(cfg.APIKeyScopes["key2"]) != 2 {
+		t.Fatalf("unexpected key scopes: %+v", cfg.APIKeyScopes)
+	}
 	if cfg.RateLimitRPM != 300 || cfg.RateLimitBurst != 50 {
 		t.Fatalf("unexpected rate limit settings: rpm=%d burst=%d", cfg.RateLimitRPM, cfg.RateLimitBurst)
 	}
@@ -119,6 +132,9 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.MigrationsDir != "db/migrations" {
 		t.Fatalf("unexpected migrations dir: %q", cfg.MigrationsDir)
+	}
+	if cfg.AuditLogFile != "/tmp/audit.log" {
+		t.Fatalf("unexpected audit log file: %q", cfg.AuditLogFile)
 	}
 }
 
@@ -169,5 +185,15 @@ func TestParseInt(t *testing.T) {
 	}
 	if got := parseInt("bad", 9); got != 9 {
 		t.Fatalf("expected fallback 9, got %d", got)
+	}
+}
+
+func TestParseKeyScopes(t *testing.T) {
+	scopes := parseKeyScopes("key1:read;key2:read,write;invalid;:missing")
+	if len(scopes) != 2 {
+		t.Fatalf("expected 2 scoped keys, got %d", len(scopes))
+	}
+	if len(scopes["key2"]) != 2 {
+		t.Fatalf("expected key2 to have 2 scopes, got %+v", scopes["key2"])
 	}
 }

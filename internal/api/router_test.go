@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,6 +35,20 @@ func (routerScanner) Run(_ context.Context) (app.ScanResult, error) {
 		Completed: now,
 	}, nil
 }
+
+type recordingAuditSink struct {
+	mu     sync.Mutex
+	events []AuditEvent
+}
+
+func (s *recordingAuditSink) Write(event AuditEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+	return nil
+}
+
+func (*recordingAuditSink) Close() error { return nil }
 
 func TestRouterHealthz(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
@@ -185,6 +200,53 @@ func TestRouterWriteAuthorization(t *testing.T) {
 	}
 }
 
+func TestRouterScopedAuthorizationPrefersScopeMap(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	metrics := telemetry.NewMetrics()
+	store := db.NewMemoryStore()
+	svc := NewService(store, routerScanner{}, "aws")
+	r := NewRouter(logger, metrics, svc, RouterOptions{
+		APIKeys:      []string{"legacy-key"},
+		WriteAPIKeys: []string{"legacy-key"},
+		APIKeyScopes: map[string][]string{
+			"reader-key": {"read"},
+			"writer-key": {"read", scopeWrite},
+		},
+	})
+
+	legacyReq := httptest.NewRequest(http.MethodGet, "/v1/scans", nil)
+	legacyReq.Header.Set("X-API-Key", "legacy-key")
+	legacyW := httptest.NewRecorder()
+	r.ServeHTTP(legacyW, legacyReq)
+	if legacyW.Code != http.StatusUnauthorized {
+		t.Fatalf("expected legacy key rejected when scoped keys set, got %d", legacyW.Code)
+	}
+
+	readReq := httptest.NewRequest(http.MethodGet, "/v1/scans", nil)
+	readReq.Header.Set("X-API-Key", "reader-key")
+	readW := httptest.NewRecorder()
+	r.ServeHTTP(readW, readReq)
+	if readW.Code != http.StatusOK {
+		t.Fatalf("expected read with reader-key to pass, got %d", readW.Code)
+	}
+
+	readWriteDeniedReq := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	readWriteDeniedReq.Header.Set("X-API-Key", "reader-key")
+	readWriteDeniedW := httptest.NewRecorder()
+	r.ServeHTTP(readWriteDeniedW, readWriteDeniedReq)
+	if readWriteDeniedW.Code != http.StatusForbidden {
+		t.Fatalf("expected writer action to fail with reader-key, got %d", readWriteDeniedW.Code)
+	}
+
+	writeReq := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	writeReq.Header.Set("Authorization", "Bearer writer-key")
+	writeW := httptest.NewRecorder()
+	r.ServeHTTP(writeW, writeReq)
+	if writeW.Code != http.StatusAccepted {
+		t.Fatalf("expected write with writer-key to pass, got %d", writeW.Code)
+	}
+}
+
 func TestRouterRateLimitExceeded(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	metrics := telemetry.NewMetrics()
@@ -243,5 +305,31 @@ func TestRouterEmitsAuditLog(t *testing.T) {
 	}
 	if got := last.ContextMap()["method"]; got != "GET" {
 		t.Fatalf("expected method GET, got %v", got)
+	}
+}
+
+func TestRouterWritesAuditSink(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	metrics := telemetry.NewMetrics()
+	sink := &recordingAuditSink{}
+	r := NewRouter(logger, metrics, nil, RouterOptions{AuditSink: sink})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/scans", nil)
+	req.RemoteAddr = "127.0.0.1:34567"
+	req.Header.Set("User-Agent", "router-test")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.events) == 0 {
+		t.Fatal("expected sink to capture at least one event")
+	}
+	event := sink.events[len(sink.events)-1]
+	if event.Path != "/v1/scans" || event.Method != http.MethodGet {
+		t.Fatalf("unexpected sink event: %+v", event)
+	}
+	if event.UserAgent != "router-test" {
+		t.Fatalf("unexpected user agent in event: %q", event.UserAgent)
 	}
 }

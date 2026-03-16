@@ -22,14 +22,18 @@ const (
 	defaultScansLimit    = 20
 	maxListLimit         = 500
 	scanRequestTimeout   = 2 * time.Minute
+	scopeWrite           = "write"
+	scopeAdmin           = "admin"
 )
 
 // RouterOptions controls API middleware behavior.
 type RouterOptions struct {
 	APIKeys        []string
 	WriteAPIKeys   []string
+	APIKeyScopes   map[string][]string
 	RateLimitRPM   int
 	RateLimitBurst int
+	AuditSink      AuditSink
 }
 
 // NewRouter builds the REST surface area and observability endpoints.
@@ -52,9 +56,9 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	r.GET("/metrics", gin.WrapH(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
 
 	v1 := r.Group("/v1")
-	v1.Use(apiKeyAuthMiddleware(opts.APIKeys))
+	v1.Use(apiKeyAuthMiddleware(opts.APIKeys, opts.APIKeyScopes))
 	v1.Use(rateLimitMiddleware(opts.RateLimitRPM, opts.RateLimitBurst))
-	v1.Use(auditLogMiddleware(logger))
+	v1.Use(auditLogMiddleware(logger, opts.AuditSink))
 
 	if svc == nil {
 		v1.GET("/findings", func(c *gin.Context) {
@@ -91,7 +95,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, gin.H{"items": items})
 	})
 
-	v1.POST("/scans", requireWriteKeyMiddleware(opts.WriteAPIKeys), func(c *gin.Context) {
+	v1.POST("/scans", requireWriteKeyMiddleware(opts.WriteAPIKeys, opts.APIKeyScopes), func(c *gin.Context) {
 		start := time.Now()
 		metrics.ScanRunsTotal.Inc()
 
@@ -145,7 +149,32 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 	}
 }
 
-func apiKeyAuthMiddleware(keys []string) gin.HandlerFunc {
+func apiKeyAuthMiddleware(keys []string, scopedKeys map[string][]string) gin.HandlerFunc {
+	if len(scopedKeys) > 0 {
+		allowed := map[string]scopeSet{}
+		for key, scopes := range scopedKeys {
+			trimmed := strings.TrimSpace(key)
+			if trimmed == "" {
+				continue
+			}
+			allowed[trimmed] = newScopeSet(scopes)
+		}
+		if len(allowed) == 0 {
+			return func(c *gin.Context) { c.Next() }
+		}
+		return func(c *gin.Context) {
+			candidate := readAPIKey(c)
+			scopeSet, ok := allowed[candidate]
+			if !ok {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+				return
+			}
+			c.Set("auth.api_key", candidate)
+			c.Set("auth.scope_set", scopeSet)
+			c.Next()
+		}
+	}
+
 	allowed := map[string]struct{}{}
 	for _, key := range keys {
 		trimmed := strings.TrimSpace(key)
@@ -159,13 +188,7 @@ func apiKeyAuthMiddleware(keys []string) gin.HandlerFunc {
 	}
 
 	return func(c *gin.Context) {
-		candidate := strings.TrimSpace(c.GetHeader("X-API-Key"))
-		if candidate == "" {
-			authz := strings.TrimSpace(c.GetHeader("Authorization"))
-			if strings.HasPrefix(strings.ToLower(authz), "bearer ") {
-				candidate = strings.TrimSpace(authz[7:])
-			}
-		}
+		candidate := readAPIKey(c)
 		if _, ok := allowed[candidate]; !ok {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
 			return
@@ -175,7 +198,23 @@ func apiKeyAuthMiddleware(keys []string) gin.HandlerFunc {
 	}
 }
 
-func requireWriteKeyMiddleware(writeKeys []string) gin.HandlerFunc {
+func requireWriteKeyMiddleware(writeKeys []string, scopedKeys map[string][]string) gin.HandlerFunc {
+	if len(scopedKeys) > 0 {
+		return func(c *gin.Context) {
+			scopeSetValue, exists := c.Get("auth.scope_set")
+			if !exists {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+				return
+			}
+			scopes, ok := scopeSetValue.(scopeSet)
+			if !ok || !scopes.has(scopeWrite) {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+				return
+			}
+			c.Next()
+		}
+	}
+
 	allowed := map[string]struct{}{}
 	for _, key := range writeKeys {
 		trimmed := strings.TrimSpace(key)
@@ -251,17 +290,75 @@ func rateLimitMiddleware(rpm int, burst int) gin.HandlerFunc {
 	}
 }
 
-func auditLogMiddleware(logger *zap.Logger) gin.HandlerFunc {
+func auditLogMiddleware(logger *zap.Logger, sink AuditSink) gin.HandlerFunc {
+	if sink == nil {
+		sink = NopAuditSink{}
+	}
 	return func(c *gin.Context) {
 		start := time.Now()
 		c.Next()
+		event := AuditEvent{
+			Timestamp:  time.Now().UTC(),
+			Method:     c.Request.Method,
+			Path:       c.Request.URL.Path,
+			Status:     c.Writer.Status(),
+			ClientIP:   c.ClientIP(),
+			DurationMS: time.Since(start).Milliseconds(),
+			UserAgent:  c.Request.UserAgent(),
+		}
+		if apiKeyValue, exists := c.Get("auth.api_key"); exists {
+			if apiKey, ok := apiKeyValue.(string); ok {
+				event.APIKey = apiKey
+			}
+		}
 		logger.Info(
 			"api request",
-			zap.String("method", c.Request.Method),
-			zap.String("path", c.Request.URL.Path),
-			zap.Int("status", c.Writer.Status()),
-			zap.String("client_ip", c.ClientIP()),
-			zap.Int64("duration_ms", time.Since(start).Milliseconds()),
+			zap.String("method", event.Method),
+			zap.String("path", event.Path),
+			zap.Int("status", event.Status),
+			zap.String("client_ip", event.ClientIP),
+			zap.Int64("duration_ms", event.DurationMS),
+			zap.String("user_agent", event.UserAgent),
 		)
+		if err := sink.Write(event); err != nil {
+			logger.Warn("audit sink write failed", telemetry.ZapError(err))
+		}
 	}
+}
+
+func readAPIKey(c *gin.Context) string {
+	candidate := strings.TrimSpace(c.GetHeader("X-API-Key"))
+	if candidate != "" {
+		return candidate
+	}
+	authz := strings.TrimSpace(c.GetHeader("Authorization"))
+	if strings.HasPrefix(strings.ToLower(authz), "bearer ") {
+		return strings.TrimSpace(authz[7:])
+	}
+	return ""
+}
+
+type scopeSet map[string]struct{}
+
+func newScopeSet(scopes []string) scopeSet {
+	set := scopeSet{}
+	for _, raw := range scopes {
+		normalized := strings.ToLower(strings.TrimSpace(raw))
+		if normalized == "" {
+			continue
+		}
+		set[normalized] = struct{}{}
+	}
+	return set
+}
+
+func (s scopeSet) has(required string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	if _, ok := s[scopeAdmin]; ok {
+		return true
+	}
+	_, ok := s[required]
+	return ok
 }
