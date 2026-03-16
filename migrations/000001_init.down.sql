@@ -1,0 +1,8 @@
+DROP TABLE IF EXISTS ownership_signals;
+DROP TABLE IF EXISTS findings;
+DROP TABLE IF EXISTS permissions;
+DROP TABLE IF EXISTS relationships;
+DROP TABLE IF EXISTS policies;
+DROP TABLE IF EXISTS identities;
+DROP TABLE IF EXISTS raw_assets;
+DROP TABLE IF EXISTS scans;

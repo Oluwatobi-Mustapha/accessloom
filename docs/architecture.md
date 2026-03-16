@@ -12,7 +12,8 @@ Identrail starts as a modular monolith so we can ship quickly, debug easily, and
 - `analysis`: deterministic risk rules over normalized data + graph edges
 - `findings`: typed finding lifecycle and remediation metadata
 - `ownership`: owner inference and confidence scoring
-- `api`: REST read/write endpoints for scans and findings
+- `api`: REST endpoints for scans and findings
+- `db`: persistence adapters (memory + postgres)
 - `scheduler`: idempotent scan orchestration
 - `telemetry`: logging, metrics, and tracing
 
@@ -28,7 +29,10 @@ Collector -> Raw Assets -> Normalizer -> Domain Entities
                                       Risk Rule Engine
                                             |
                                             v
-                                         Findings
+                                   Store (Scans/Findings)
+                                            |
+                                            v
+                                          API/CLI
 ```
 
 ## Core Design Decisions
@@ -37,12 +41,15 @@ Collector -> Raw Assets -> Normalizer -> Domain Entities
 - Idempotency is a first-class requirement for every scan stage to avoid duplicated records and scan drift.
 - Raw and normalized data are both preserved for auditability and rule explainability.
 - Observability is integrated from day one with structured logs, Prometheus metrics, and tracing hooks.
+- Persistence supports local memory mode and PostgreSQL mode behind a single store interface.
 
 ## Initial Runtime Components
 
 - `cmd/server`: REST API process for health, scans, and findings endpoints.
-- `cmd/cli`: operator-focused local scanner interface.
-- `internal/app.Scanner`: orchestrates deterministic scan execution pipeline.
+- `cmd/cli`: operator-focused scanner interface.
+- `internal/app.Scanner`: deterministic scan execution pipeline.
+- `internal/api.Service`: scan orchestration + persistence bridge.
+- `internal/db`: storage adapters and migration-backed schema.
 
 ## Future Extraction Plan
 

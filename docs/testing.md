@@ -18,3 +18,5 @@
 - AWS normalizer and graph behavior (trust parsing, permission expansion, relationship materialization)
 - AWS risk engine behavior (typed findings, deterministic IDs, severity order, escalation path detection)
 - CLI scan/findings workflows (table/json output, state persistence, invalid modes)
+- storage layer behavior (memory + postgres via sqlmock)
+- migration baseline smoke validation

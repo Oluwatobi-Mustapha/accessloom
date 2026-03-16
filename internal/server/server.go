@@ -9,7 +9,10 @@ import (
 	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/api"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/app"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/config"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
+	awsprovider "github.com/Oluwatobi-Mustapha/identrail/internal/providers/aws"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/telemetry"
 	"go.uber.org/zap"
 )
@@ -20,6 +23,7 @@ type Bootstrap struct {
 	Metrics       *telemetry.Metrics
 	Router        http.Handler
 	TraceShutdown func(context.Context) error
+	StoreClose    func() error
 }
 
 // NewBootstrap initializes logger, metrics, tracing, and router in one place.
@@ -36,12 +40,27 @@ func NewBootstrap(ctx context.Context, cfg config.Config) (Bootstrap, error) {
 		return Bootstrap{}, fmt.Errorf("initialize tracing: %w", err)
 	}
 
-	router := api.NewRouter(logger, metrics)
+	store, err := newStore(cfg.DatabaseURL)
+	if err != nil {
+		_ = logger.Sync()
+		return Bootstrap{}, fmt.Errorf("initialize store: %w", err)
+	}
+
+	scanner := app.Scanner{
+		Collector:            awsprovider.NewFixtureCollector(cfg.AWSFixturePath),
+		Normalizer:           awsprovider.NewRoleNormalizer(),
+		PermissionResolver:   awsprovider.NewPolicyPermissionResolver(),
+		RelationshipResolver: awsprovider.NewRelationshipBuilder(),
+		RiskRuleSet:          awsprovider.NewRuleSet(),
+	}
+	svc := api.NewService(store, scanner, cfg.Provider)
+	router := api.NewRouter(logger, metrics, svc)
 	return Bootstrap{
 		Logger:        logger,
 		Metrics:       metrics,
 		Router:        router,
 		TraceShutdown: traceShutdown,
+		StoreClose:    store.Close,
 	}, nil
 }
 
@@ -63,6 +82,11 @@ func Run(ctx context.Context, cfg config.Config, signals <-chan os.Signal) error
 		return err
 	}
 	defer func() { _ = bootstrap.Logger.Sync() }()
+	defer func() {
+		if bootstrap.StoreClose != nil {
+			_ = bootstrap.StoreClose()
+		}
+	}()
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -97,4 +121,11 @@ func Run(ctx context.Context, cfg config.Config, signals <-chan os.Signal) error
 		return fmt.Errorf("graceful shutdown failed: %w", err)
 	}
 	return nil
+}
+
+func newStore(databaseURL string) (db.Store, error) {
+	if databaseURL == "" {
+		return db.NewMemoryStore(), nil
+	}
+	return db.NewPostgresStore(databaseURL)
 }

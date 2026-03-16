@@ -8,7 +8,14 @@ Initial focus is AWS, with architecture hooks for Kubernetes and Azure.
 
 The goal is simple: give security and IAM teams clear visibility and actionable risk insights before identity issues become incidents.
 
-## Current CLI
+## Current Capabilities
 
-- `identrail scan`: run the AWS phase-1 scanner pipeline (fixture-backed)
-- `identrail findings`: view findings from the latest saved scan state
+- AWS phase-1 scan pipeline (collector -> normalizer -> graph -> risk engine)
+- CLI workflows:
+  - `identrail scan`
+  - `identrail findings`
+- REST API workflows:
+  - `POST /v1/scans`
+  - `GET /v1/scans`
+  - `GET /v1/findings`
+- Persistence layer with memory mode (default) and PostgreSQL mode (`IDENTRAIL_DATABASE_URL`)
