@@ -14,6 +14,7 @@ import (
 	"github.com/Oluwatobi-Mustapha/identrail/internal/scheduler"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/telemetry"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type routerScanner struct{}
@@ -218,5 +219,29 @@ func TestParseLimit(t *testing.T) {
 	}
 	if got := parseLimit("25", 10, 500); got != 25 {
 		t.Fatalf("expected 25, got %d", got)
+	}
+}
+
+func TestRouterEmitsAuditLog(t *testing.T) {
+	core, observed := observer.New(zap.InfoLevel)
+	logger := zap.New(core)
+	metrics := telemetry.NewMetrics()
+	r := NewRouter(logger, metrics, nil, RouterOptions{})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/scans", nil)
+	req.RemoteAddr = "127.0.0.1:54321"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	entries := observed.FilterMessage("api request").All()
+	if len(entries) == 0 {
+		t.Fatal("expected at least one audit log entry")
+	}
+	last := entries[len(entries)-1]
+	if got := last.ContextMap()["path"]; got != "/v1/scans" {
+		t.Fatalf("expected path /v1/scans, got %v", got)
+	}
+	if got := last.ContextMap()["method"]; got != "GET" {
+		t.Fatalf("expected method GET, got %v", got)
 	}
 }

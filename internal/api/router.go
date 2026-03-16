@@ -54,6 +54,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	v1 := r.Group("/v1")
 	v1.Use(apiKeyAuthMiddleware(opts.APIKeys))
 	v1.Use(rateLimitMiddleware(opts.RateLimitRPM, opts.RateLimitBurst))
+	v1.Use(auditLogMiddleware(logger))
 
 	if svc == nil {
 		v1.GET("/findings", func(c *gin.Context) {
@@ -247,5 +248,20 @@ func rateLimitMiddleware(rpm int, burst int) gin.HandlerFunc {
 			return
 		}
 		c.Next()
+	}
+}
+
+func auditLogMiddleware(logger *zap.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		logger.Info(
+			"api request",
+			zap.String("method", c.Request.Method),
+			zap.String("path", c.Request.URL.Path),
+			zap.Int("status", c.Writer.Status()),
+			zap.String("client_ip", c.ClientIP()),
+			zap.Int64("duration_ms", time.Since(start).Milliseconds()),
+		)
 	}
 }
