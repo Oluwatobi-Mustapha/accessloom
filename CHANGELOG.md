@@ -1,6 +1,17 @@
 # Changelog
 
 ## Unreleased
+- Added optional worker-scheduled repository scans:
+  - new worker config controls:
+    - `IDENTRAIL_WORKER_REPO_SCAN_ENABLED`
+    - `IDENTRAIL_WORKER_REPO_SCAN_RUN_NOW`
+    - `IDENTRAIL_WORKER_REPO_SCAN_INTERVAL`
+    - `IDENTRAIL_WORKER_REPO_SCAN_TARGETS`
+    - `IDENTRAIL_WORKER_REPO_SCAN_HISTORY_LIMIT`
+    - `IDENTRAIL_WORKER_REPO_SCAN_MAX_FINDINGS`
+  - startup validation enforces target presence and allowlist compatibility
+  - per-target locking added to service (`repo-scan:<target>`) to prevent API/worker overlap
+  - API now returns `409` for in-flight repo target scans
 - Added dedicated repository scan persistence layer:
   - new migrations: `repo_scans` and `repo_findings` tables
   - store adapters updated for memory and postgres modes

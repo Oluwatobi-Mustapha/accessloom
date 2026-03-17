@@ -247,3 +247,9 @@ This file tracks major decisions in simple terms.
 - Decision: Add `repo_scans` and `repo_findings` tables plus read APIs (`GET /v1/repo-scans`, `GET /v1/repo-findings`) rather than reusing cloud scan tables.
 - Why: Preserve backward compatibility for existing `/v1/scans` consumers while enabling durable repo exposure history.
 - Tradeoff: Additional persistence paths to maintain in memory/postgres adapters.
+
+## ADR-042: Add Optional Scheduled Repo Scans in Worker with Per-Target Locking
+- Date: 2026-03-17
+- Decision: Add opt-in worker scheduler for repository scans (`IDENTRAIL_WORKER_REPO_SCAN_*`) and enforce `repo-scan:<target>` lock in service execution.
+- Why: Keep continuous repo exposure monitoring in-platform while preserving backward compatibility and avoiding same-target overlap between API and worker.
+- Tradeoff: Additional worker configuration and lock semantics to maintain.

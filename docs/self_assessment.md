@@ -31,6 +31,7 @@ Updated only at major milestones.
 - Repository exposure scanner: new read-only `repo-scan` CLI flow detects commit-history secret leaks and HEAD misconfigurations with redacted evidence.
 - Repository exposure API: write-protected `POST /v1/repo-scans` added with configurable bounds and optional target allowlist.
 - Repository exposure persistence: dedicated `repo_scans` and `repo_findings` storage + read endpoints added without changing `/v1/scans` behavior.
+- Continuous repo exposure: optional worker-driven repo scan scheduler added with strict target/allowlist validation and per-target overlap lock.
 - Worker: scheduled process runs scans with shared runtime bootstrap.
 - Migrations: startup migration runner added for Postgres mode.
 - Test health: `go test ./... -cover` passing, coverage above 80%.

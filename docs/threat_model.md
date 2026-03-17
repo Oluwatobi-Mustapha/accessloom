@@ -202,6 +202,16 @@ Simple threat list for current system.
 - Fix: Persist repository scan lifecycle and findings in dedicated tables with dedicated API endpoints.
 - Status: Implemented.
 
+## 41) Concurrent Repo Scans on Same Target
+- Threat: API-triggered and worker-triggered repo scans on the same target can overlap and produce duplicated workload.
+- Fix: Add per-target single-flight lock (`repo-scan:<target>`) and return conflict (`409`) for in-flight target scans.
+- Status: Implemented.
+
+## 42) Misconfigured Scheduled Repo Target Scope
+- Threat: Worker repo schedule can unintentionally scan out-of-scope repositories.
+- Fix: Startup validation enforces explicit target list and allowlist compatibility before worker starts.
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and external KMS guidance.
 - Add audit sink forwarding guide for centralized log pipelines.

@@ -46,6 +46,7 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
   - keyed in-memory scan lock
   - periodic runner abstraction
   - worker binary (`cmd/worker`) for scheduled scans
+  - optional scheduled repository scan batch (`IDENTRAIL_WORKER_REPO_SCAN_*`)
 - API hardening:
   - API key auth middleware
   - write authorization keys for scan trigger
@@ -103,6 +104,18 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 - `IDENTRAIL_ALERT_MAX_FINDINGS`
 - `IDENTRAIL_ALERT_MAX_RETRIES`
 - `IDENTRAIL_ALERT_RETRY_BACKOFF`
+- `IDENTRAIL_REPO_SCAN_ENABLED`
+- `IDENTRAIL_REPO_SCAN_HISTORY_LIMIT`
+- `IDENTRAIL_REPO_SCAN_MAX_FINDINGS`
+- `IDENTRAIL_REPO_SCAN_HISTORY_LIMIT_MAX`
+- `IDENTRAIL_REPO_SCAN_MAX_FINDINGS_MAX`
+- `IDENTRAIL_REPO_SCAN_ALLOWLIST`
+- `IDENTRAIL_WORKER_REPO_SCAN_ENABLED`
+- `IDENTRAIL_WORKER_REPO_SCAN_RUN_NOW`
+- `IDENTRAIL_WORKER_REPO_SCAN_INTERVAL`
+- `IDENTRAIL_WORKER_REPO_SCAN_TARGETS`
+- `IDENTRAIL_WORKER_REPO_SCAN_HISTORY_LIMIT`
+- `IDENTRAIL_WORKER_REPO_SCAN_MAX_FINDINGS`
 
 ## Idempotency approach
 
@@ -115,3 +128,4 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 1. migrate Postgres store queries to generated sqlc package
 2. role/scope policy hardening guide for key rotation
 3. dashboard UI consumption for trends/explorer endpoints
+4. distributed lock strategy for multi-node worker deployments

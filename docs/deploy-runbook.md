@@ -27,6 +27,10 @@ Portable deployment profiles:
   - `IDENTRAIL_AUDIT_FORWARD_MAX_RETRIES`
   - `IDENTRAIL_AUDIT_FORWARD_RETRY_BACKOFF`
   - optional `IDENTRAIL_AUDIT_FORWARD_HMAC_SECRET`
+- If worker repo scans are enabled, confirm:
+  - `IDENTRAIL_WORKER_REPO_SCAN_ENABLED=true`
+  - `IDENTRAIL_WORKER_REPO_SCAN_TARGETS` has intended repositories
+  - targets are covered by `IDENTRAIL_REPO_SCAN_ALLOWLIST` when allowlist is set
 
 ## 2) Deploy Sequence
 
@@ -42,6 +46,10 @@ Portable deployment profiles:
    - findings trends (`GET /v1/findings/trends`)
    - scan diff (`GET /v1/scans/:scan_id/diff`)
    - scan events (`GET /v1/scans/:scan_id/events`)
+8. If repo scan is enabled:
+   - trigger `POST /v1/repo-scans`
+   - verify `GET /v1/repo-scans`
+   - verify `GET /v1/repo-findings?repo_scan_id=<id>`
 
 ## 3) Rollback Sequence
 

@@ -35,7 +35,8 @@ Web shell scaffold: `web/` (React + TypeScript + Vite).
   - `GET /v1/identities`
   - `GET /v1/relationships`
 - Worker workflow:
-  - `worker` runs scheduled scans
+  - `worker` runs scheduled cloud scans
+  - optional scheduled repo scans per configured targets
 - Dashboard workflow (`web/`):
   - findings table with severity/type filters
   - scan selector with diff snapshot
@@ -80,6 +81,13 @@ Web shell scaffold: `web/` (React + TypeScript + Vite).
   - `IDENTRAIL_REPO_SCAN_HISTORY_LIMIT_MAX`
   - `IDENTRAIL_REPO_SCAN_MAX_FINDINGS_MAX`
   - `IDENTRAIL_REPO_SCAN_ALLOWLIST` (comma list, supports `prefix*` wildcard)
+- Worker repo scan schedule config:
+  - `IDENTRAIL_WORKER_REPO_SCAN_ENABLED`
+  - `IDENTRAIL_WORKER_REPO_SCAN_RUN_NOW`
+  - `IDENTRAIL_WORKER_REPO_SCAN_INTERVAL`
+  - `IDENTRAIL_WORKER_REPO_SCAN_TARGETS`
+  - `IDENTRAIL_WORKER_REPO_SCAN_HISTORY_LIMIT` (`0` uses service default)
+  - `IDENTRAIL_WORKER_REPO_SCAN_MAX_FINDINGS` (`0` uses service default)
 - CI gates:
   - GitHub Actions pipeline for Go quality checks, coverage, Postgres integration tests, and web build validation
 

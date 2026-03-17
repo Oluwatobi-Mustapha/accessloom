@@ -90,6 +90,19 @@ Read APIs:
 - `IDENTRAIL_REPO_SCAN_ALLOWLIST`:
   - optional comma-separated list of allowed target patterns
   - supports prefix wildcard with `*` (example: `trusted-org/*`)
+- Optional worker scheduling:
+  - `IDENTRAIL_WORKER_REPO_SCAN_ENABLED` (`false` by default)
+  - `IDENTRAIL_WORKER_REPO_SCAN_RUN_NOW` (`false` by default)
+  - `IDENTRAIL_WORKER_REPO_SCAN_INTERVAL` (`1h` by default)
+  - `IDENTRAIL_WORKER_REPO_SCAN_TARGETS` (required when enabled)
+  - `IDENTRAIL_WORKER_REPO_SCAN_HISTORY_LIMIT` (`0` means use service default)
+  - `IDENTRAIL_WORKER_REPO_SCAN_MAX_FINDINGS` (`0` means use service default)
+
+## Concurrency Behavior
+
+- Cloud scan lock key: `scan:<provider>`
+- Repo scan lock key: `repo-scan:<target>`
+- If a repo target is already running, API returns `409` and worker logs skip for that target.
 
 ## Known Limits
 
