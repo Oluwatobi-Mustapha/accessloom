@@ -384,6 +384,254 @@ func (p *PostgresStore) ListScanEvents(ctx context.Context, scanID string, limit
 	return result, nil
 }
 
+// CreateRepoScan inserts a new repository exposure scan row.
+func (p *PostgresStore) CreateRepoScan(ctx context.Context, repository string, startedAt time.Time) (RepoScanRecord, error) {
+	record := RepoScanRecord{
+		ID:         uuid.NewString(),
+		Repository: strings.TrimSpace(repository),
+		Status:     "running",
+		StartedAt:  startedAt.UTC(),
+	}
+	_, err := p.db.ExecContext(
+		ctx,
+		`INSERT INTO repo_scans (id, repository, status, started_at, commits_scanned, files_scanned, finding_count, truncated)
+		 VALUES ($1, $2, $3, $4, 0, 0, 0, false)`,
+		record.ID,
+		record.Repository,
+		record.Status,
+		record.StartedAt,
+	)
+	if err != nil {
+		return RepoScanRecord{}, fmt.Errorf("insert repo scan: %w", err)
+	}
+	return record, nil
+}
+
+// GetRepoScan returns one repository scan by id.
+func (p *PostgresStore) GetRepoScan(ctx context.Context, repoScanID string) (RepoScanRecord, error) {
+	row := p.db.QueryRowContext(
+		ctx,
+		`SELECT id, repository, status, started_at, finished_at, commits_scanned, files_scanned, finding_count, truncated, COALESCE(error_message, '')
+		 FROM repo_scans
+		 WHERE id = $1`,
+		repoScanID,
+	)
+	var record RepoScanRecord
+	if err := row.Scan(
+		&record.ID,
+		&record.Repository,
+		&record.Status,
+		&record.StartedAt,
+		&record.FinishedAt,
+		&record.CommitsScanned,
+		&record.FilesScanned,
+		&record.FindingCount,
+		&record.Truncated,
+		&record.ErrorMessage,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return RepoScanRecord{}, ErrNotFound
+		}
+		return RepoScanRecord{}, fmt.Errorf("query repo scan: %w", err)
+	}
+	return record, nil
+}
+
+// CompleteRepoScan updates repository scan completion metadata.
+func (p *PostgresStore) CompleteRepoScan(ctx context.Context, repoScanID string, status string, finishedAt time.Time, commitsScanned int, filesScanned int, findingCount int, truncated bool, errorMessage string) error {
+	_, err := p.db.ExecContext(
+		ctx,
+		`UPDATE repo_scans
+		 SET status = $2,
+		     finished_at = $3,
+		     commits_scanned = $4,
+		     files_scanned = $5,
+		     finding_count = $6,
+		     truncated = $7,
+		     error_message = $8
+		 WHERE id = $1`,
+		repoScanID,
+		strings.TrimSpace(status),
+		finishedAt.UTC(),
+		commitsScanned,
+		filesScanned,
+		findingCount,
+		truncated,
+		nullableString(errorMessage),
+	)
+	if err != nil {
+		return fmt.Errorf("complete repo scan: %w", err)
+	}
+	return nil
+}
+
+// UpsertRepoFindings inserts repository findings idempotently.
+func (p *PostgresStore) UpsertRepoFindings(ctx context.Context, repoScanID string, findings []domain.Finding) error {
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin repo findings transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	query := `
+		INSERT INTO repo_findings (repo_scan_id, finding_id, type, severity, title, human_summary, path, evidence, remediation, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (repo_scan_id, finding_id)
+		DO UPDATE SET
+		  type = EXCLUDED.type,
+		  severity = EXCLUDED.severity,
+		  title = EXCLUDED.title,
+		  human_summary = EXCLUDED.human_summary,
+		  path = EXCLUDED.path,
+		  evidence = EXCLUDED.evidence,
+		  remediation = EXCLUDED.remediation,
+		  created_at = EXCLUDED.created_at
+	`
+	for _, finding := range findings {
+		pathJSON, pathErr := json.Marshal(finding.Path)
+		if pathErr != nil {
+			return fmt.Errorf("marshal repo finding path: %w", pathErr)
+		}
+		evidenceJSON, evidenceErr := json.Marshal(finding.Evidence)
+		if evidenceErr != nil {
+			return fmt.Errorf("marshal repo finding evidence: %w", evidenceErr)
+		}
+		createdAt := finding.CreatedAt
+		if createdAt.IsZero() {
+			createdAt = time.Now().UTC()
+		}
+		_, execErr := tx.ExecContext(
+			ctx,
+			query,
+			repoScanID,
+			finding.ID,
+			string(finding.Type),
+			string(finding.Severity),
+			finding.Title,
+			finding.HumanSummary,
+			pathJSON,
+			evidenceJSON,
+			finding.Remediation,
+			createdAt.UTC(),
+		)
+		if execErr != nil {
+			return fmt.Errorf("upsert repo finding %s: %w", finding.ID, execErr)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit repo findings transaction: %w", err)
+	}
+	return nil
+}
+
+// ListRepoScans returns latest repository scans first.
+func (p *PostgresStore) ListRepoScans(ctx context.Context, limit int) ([]RepoScanRecord, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	rows, err := p.db.QueryContext(
+		ctx,
+		`SELECT id, repository, status, started_at, finished_at, commits_scanned, files_scanned, finding_count, truncated, COALESCE(error_message, '')
+		 FROM repo_scans
+		 ORDER BY started_at DESC
+		 LIMIT $1`,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query repo scans: %w", err)
+	}
+	defer rows.Close()
+
+	result := []RepoScanRecord{}
+	for rows.Next() {
+		var record RepoScanRecord
+		if err := rows.Scan(
+			&record.ID,
+			&record.Repository,
+			&record.Status,
+			&record.StartedAt,
+			&record.FinishedAt,
+			&record.CommitsScanned,
+			&record.FilesScanned,
+			&record.FindingCount,
+			&record.Truncated,
+			&record.ErrorMessage,
+		); err != nil {
+			return nil, fmt.Errorf("repo scan row: %w", err)
+		}
+		result = append(result, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo scan rows: %w", err)
+	}
+	return result, nil
+}
+
+// ListRepoFindings returns latest repository findings first with optional filters.
+func (p *PostgresStore) ListRepoFindings(ctx context.Context, filter RepoFindingFilter, limit int) ([]domain.Finding, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := p.db.QueryContext(
+		ctx,
+		`SELECT repo_scan_id, finding_id, type, severity, title, human_summary, path, evidence, remediation, created_at
+		 FROM repo_findings
+		 WHERE ($1 = '' OR repo_scan_id = $1::uuid)
+		   AND ($2 = '' OR severity = $2)
+		   AND ($3 = '' OR type = $3)
+		 ORDER BY created_at DESC
+		 LIMIT $4`,
+		strings.TrimSpace(filter.RepoScanID),
+		strings.TrimSpace(filter.Severity),
+		strings.TrimSpace(filter.Type),
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query repo findings: %w", err)
+	}
+	defer rows.Close()
+
+	result := []domain.Finding{}
+	for rows.Next() {
+		var finding domain.Finding
+		var findingType string
+		var severity string
+		var pathJSON []byte
+		var evidenceJSON []byte
+		if err := rows.Scan(
+			&finding.ScanID,
+			&finding.ID,
+			&findingType,
+			&severity,
+			&finding.Title,
+			&finding.HumanSummary,
+			&pathJSON,
+			&evidenceJSON,
+			&finding.Remediation,
+			&finding.CreatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("repo finding row: %w", err)
+		}
+		finding.Type = domain.FindingType(findingType)
+		finding.Severity = domain.FindingSeverity(severity)
+		if len(pathJSON) > 0 {
+			if err := json.Unmarshal(pathJSON, &finding.Path); err != nil {
+				return nil, fmt.Errorf("decode repo finding path: %w", err)
+			}
+		}
+		if len(evidenceJSON) > 0 {
+			if err := json.Unmarshal(evidenceJSON, &finding.Evidence); err != nil {
+				return nil, fmt.Errorf("decode repo finding evidence: %w", err)
+			}
+		}
+		result = append(result, finding)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("repo finding rows: %w", err)
+	}
+	return result, nil
+}
+
 // Close closes database resources.
 func (p *PostgresStore) Close() error {
 	if p.db == nil {

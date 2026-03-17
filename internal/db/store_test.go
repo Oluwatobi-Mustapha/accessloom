@@ -17,3 +17,15 @@ func TestNormalizeScanEventLevel(t *testing.T) {
 		t.Fatal("expected invalid level error")
 	}
 }
+
+func TestStoreCloseHelpers(t *testing.T) {
+	mem := NewMemoryStore()
+	if err := mem.Close(); err != nil {
+		t.Fatalf("memory close failed: %v", err)
+	}
+
+	postgres := &PostgresStore{}
+	if err := postgres.Close(); err != nil {
+		t.Fatalf("nil postgres close failed: %v", err)
+	}
+}

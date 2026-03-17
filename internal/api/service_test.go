@@ -502,6 +502,52 @@ func TestServiceRunRepoScanSuccess(t *testing.T) {
 	}
 }
 
+func TestServiceRunRepoScanPersistedStoresRecords(t *testing.T) {
+	store := db.NewMemoryStore()
+	svc := NewService(store, fakeScanner{}, "aws")
+	svc.Now = func() time.Time { return time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC) }
+	svc.RepoScannerFactory = func(historyLimit int, maxFindings int) RepoScanExecutor {
+		return &fakeRepoExecutor{
+			result: repoexposure.ScanResult{
+				Repository:     "owner/repo",
+				CommitsScanned: historyLimit,
+				FilesScanned:   5,
+				Findings: []domain.Finding{
+					{ID: "rf-1", Type: domain.FindingSecretExposure, Severity: domain.SeverityHigh, CreatedAt: time.Now().UTC()},
+				},
+				Truncated: false,
+			},
+		}
+	}
+	run, err := svc.RunRepoScanPersisted(context.Background(), RepoScanRequest{
+		Repository:   "owner/repo",
+		HistoryLimit: 10,
+		MaxFindings:  20,
+	})
+	if err != nil {
+		t.Fatalf("run repo scan persisted: %v", err)
+	}
+	if run.RepoScan.ID == "" || run.RepoScan.Status != "completed" || run.RepoScan.FindingCount != 1 {
+		t.Fatalf("unexpected repo scan run result: %+v", run)
+	}
+
+	stored, err := svc.GetRepoScan(context.Background(), run.RepoScan.ID)
+	if err != nil {
+		t.Fatalf("get repo scan: %v", err)
+	}
+	if stored.ID != run.RepoScan.ID || stored.CommitsScanned != 10 {
+		t.Fatalf("unexpected persisted repo scan: %+v", stored)
+	}
+
+	findings, err := svc.ListRepoFindings(context.Background(), 10, db.RepoFindingFilter{RepoScanID: run.RepoScan.ID})
+	if err != nil {
+		t.Fatalf("list repo findings: %v", err)
+	}
+	if len(findings) != 1 || findings[0].ID != "rf-1" {
+		t.Fatalf("unexpected persisted repo findings: %+v", findings)
+	}
+}
+
 func TestServiceRunRepoScanGuards(t *testing.T) {
 	svc := NewService(db.NewMemoryStore(), fakeScanner{}, "aws")
 	svc.RepoScanEnabled = false
@@ -522,6 +568,51 @@ func TestServiceRunRepoScanGuards(t *testing.T) {
 
 	if _, err := svc.RunRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo", HistoryLimit: -1, MaxFindings: 10}); !errors.Is(err, ErrInvalidRepoScanRequest) {
 		t.Fatalf("expected invalid request error for negative history, got %v", err)
+	}
+}
+
+func TestServiceListFindingsWrapperAndRepoScanDetailGuard(t *testing.T) {
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 17, 15, 10, 0, 0, time.UTC)
+	scan, err := store.CreateScan(context.Background(), "aws", now)
+	if err != nil {
+		t.Fatalf("create scan: %v", err)
+	}
+	if err := store.UpsertFindings(context.Background(), scan.ID, []domain.Finding{
+		{ID: "f1", Type: domain.FindingOwnerless, Severity: domain.SeverityHigh, CreatedAt: now},
+	}); err != nil {
+		t.Fatalf("upsert findings: %v", err)
+	}
+	svc := NewService(store, fakeScanner{}, "aws")
+	items, err := svc.ListFindings(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list findings wrapper: %v", err)
+	}
+	if len(items) != 1 || items[0].ID != "f1" {
+		t.Fatalf("unexpected list findings result %+v", items)
+	}
+	if _, err := svc.GetRepoScan(context.Background(), " "); !errors.Is(err, db.ErrNotFound) {
+		t.Fatalf("expected not found for empty repo scan id, got %v", err)
+	}
+}
+
+func TestServiceRunRepoScanPersistedScannerError(t *testing.T) {
+	store := db.NewMemoryStore()
+	svc := NewService(store, fakeScanner{}, "aws")
+	svc.RepoScannerFactory = func(int, int) RepoScanExecutor {
+		return &fakeRepoExecutor{err: errors.New("scanner failed")}
+	}
+	if _, err := svc.RunRepoScanPersisted(context.Background(), RepoScanRequest{
+		Repository: "owner/repo",
+	}); err == nil {
+		t.Fatal("expected scanner error")
+	}
+	repoScans, err := svc.ListRepoScans(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list repo scans: %v", err)
+	}
+	if len(repoScans) != 1 || repoScans[0].Status != "failed" {
+		t.Fatalf("expected failed repo scan record, got %+v", repoScans)
 	}
 }
 

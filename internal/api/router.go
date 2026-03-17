@@ -97,6 +97,15 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		v1.GET("/scans/:scan_id/events", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
+		v1.GET("/repo-scans", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"items": []any{}})
+		})
+		v1.GET("/repo-scans/:repo_scan_id", func(c *gin.Context) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "repo scan service unavailable"})
+		})
+		v1.GET("/repo-findings", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"items": []any{}})
+		})
 		v1.POST("/scans", func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan service unavailable"})
 		})
@@ -269,6 +278,54 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, gin.H{"items": items})
 	})
 
+	v1.GET("/repo-scans", func(c *gin.Context) {
+		limit := parseLimit(c.Query("limit"), defaultScansLimit, maxListLimit)
+		items, err := svc.ListRepoScans(c.Request.Context(), limit)
+		if err != nil {
+			logger.Error("list repo scans", telemetry.ZapError(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repo scans"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"items": items})
+	})
+
+	v1.GET("/repo-scans/:repo_scan_id", func(c *gin.Context) {
+		item, err := svc.GetRepoScan(c.Request.Context(), strings.TrimSpace(c.Param("repo_scan_id")))
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "repo scan not found"})
+				return
+			}
+			logger.Error("get repo scan", telemetry.ZapError(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get repo scan"})
+			return
+		}
+		c.JSON(http.StatusOK, item)
+	})
+
+	v1.GET("/repo-findings", func(c *gin.Context) {
+		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
+		items, err := svc.ListRepoFindings(
+			c.Request.Context(),
+			limit,
+			db.RepoFindingFilter{
+				RepoScanID: strings.TrimSpace(c.Query("repo_scan_id")),
+				Severity:   strings.TrimSpace(c.Query("severity")),
+				Type:       strings.TrimSpace(c.Query("type")),
+			},
+		)
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "repo scan not found"})
+				return
+			}
+			logger.Error("list repo findings", telemetry.ZapError(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repo findings"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"items": items})
+	})
+
 	v1.POST("/scans", requireWriteKeyMiddleware(opts.WriteAPIKeys, opts.APIKeyScopes), func(c *gin.Context) {
 		start := time.Now()
 		metrics.ScanRunsTotal.Inc()
@@ -306,7 +363,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		requestCtx, cancel := context.WithTimeout(c.Request.Context(), repoScanRequestTimeout)
 		defer cancel()
 
-		result, err := svc.RunRepoScan(requestCtx, request)
+		result, err := svc.RunRepoScanPersisted(requestCtx, request)
 		if err != nil {
 			if errors.Is(err, ErrInvalidRepoScanRequest) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repo scan request"})
@@ -325,7 +382,10 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			return
 		}
 
-		c.JSON(http.StatusAccepted, result)
+		c.JSON(http.StatusAccepted, gin.H{
+			"repo_scan": result.RepoScan,
+			"result":    result.Result,
+		})
 	})
 
 	return r

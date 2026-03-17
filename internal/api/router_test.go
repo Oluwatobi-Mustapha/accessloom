@@ -228,6 +228,37 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 	if repoW.Code != http.StatusAccepted {
 		t.Fatalf("expected repo scan 202, got %d", repoW.Code)
 	}
+
+	repoScansReq := httptest.NewRequest(http.MethodGet, "/v1/repo-scans", nil)
+	repoScansW := httptest.NewRecorder()
+	r.ServeHTTP(repoScansW, repoScansReq)
+	if repoScansW.Code != http.StatusOK {
+		t.Fatalf("expected repo scans 200, got %d", repoScansW.Code)
+	}
+	var repoScansBody struct {
+		Items []db.RepoScanRecord `json:"items"`
+	}
+	if err := json.Unmarshal(repoScansW.Body.Bytes(), &repoScansBody); err != nil {
+		t.Fatalf("decode repo scans body: %v", err)
+	}
+	if len(repoScansBody.Items) == 0 {
+		t.Fatal("expected repo scan items")
+	}
+
+	repoScanID := repoScansBody.Items[0].ID
+	repoScanReq := httptest.NewRequest(http.MethodGet, "/v1/repo-scans/"+repoScanID, nil)
+	repoScanW := httptest.NewRecorder()
+	r.ServeHTTP(repoScanW, repoScanReq)
+	if repoScanW.Code != http.StatusOK {
+		t.Fatalf("expected repo scan detail 200, got %d", repoScanW.Code)
+	}
+
+	repoFindingsReq := httptest.NewRequest(http.MethodGet, "/v1/repo-findings?repo_scan_id="+repoScanID, nil)
+	repoFindingsW := httptest.NewRecorder()
+	r.ServeHTTP(repoFindingsW, repoFindingsReq)
+	if repoFindingsW.Code != http.StatusOK {
+		t.Fatalf("expected repo findings 200, got %d", repoFindingsW.Code)
+	}
 }
 
 func TestRouterUnavailableWhenServiceMissing(t *testing.T) {
@@ -269,6 +300,20 @@ func TestRouterUnavailableWhenServiceMissing(t *testing.T) {
 	r.ServeHTTP(repoW, repoReq)
 	if repoW.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected repo scan 503 without service, got %d", repoW.Code)
+	}
+
+	repoScansReq := httptest.NewRequest(http.MethodGet, "/v1/repo-scans", nil)
+	repoScansW := httptest.NewRecorder()
+	r.ServeHTTP(repoScansW, repoScansReq)
+	if repoScansW.Code != http.StatusOK {
+		t.Fatalf("expected repo scans 200 without service, got %d", repoScansW.Code)
+	}
+
+	repoFindingsReq := httptest.NewRequest(http.MethodGet, "/v1/repo-findings", nil)
+	repoFindingsW := httptest.NewRecorder()
+	r.ServeHTTP(repoFindingsW, repoFindingsReq)
+	if repoFindingsW.Code != http.StatusOK {
+		t.Fatalf("expected repo findings 200 without service, got %d", repoFindingsW.Code)
 	}
 }
 

@@ -61,6 +61,12 @@ type RunScanResult struct {
 	FindingCount int           `json:"finding_count"`
 }
 
+// RunRepoScanResult is returned after repo scan API trigger.
+type RunRepoScanResult struct {
+	RepoScan db.RepoScanRecord       `json:"repo_scan"`
+	Result   repoexposure.ScanResult `json:"result"`
+}
+
 // RepoScanRequest captures one repository exposure scan request.
 type RepoScanRequest struct {
 	Repository   string `json:"repository"`
@@ -215,32 +221,91 @@ func (s *Service) ListFindings(ctx context.Context, limit int) ([]domain.Finding
 
 // RunRepoScan performs one repository exposure scan with configured guardrails.
 func (s *Service) RunRepoScan(ctx context.Context, request RepoScanRequest) (repoexposure.ScanResult, error) {
-	if !s.RepoScanEnabled {
-		return repoexposure.ScanResult{}, ErrRepoScanDisabled
-	}
-	target := strings.TrimSpace(request.Repository)
-	if target == "" {
-		return repoexposure.ScanResult{}, ErrInvalidRepoScanRequest
-	}
-	if !repoTargetAllowed(target, s.RepoScanAllowedTargets) {
-		return repoexposure.ScanResult{}, ErrRepoTargetNotAllowed
-	}
-	historyLimit, err := sanitizeRepoScanLimit(request.HistoryLimit, s.RepoScanDefaultHistoryLimit, s.RepoScanMaxHistoryLimit)
-	if err != nil {
-		return repoexposure.ScanResult{}, ErrInvalidRepoScanRequest
-	}
-	maxFindings, err := sanitizeRepoScanLimit(request.MaxFindings, s.RepoScanDefaultMaxFindings, s.RepoScanMaxFindingsLimit)
-	if err != nil {
-		return repoexposure.ScanResult{}, ErrInvalidRepoScanRequest
-	}
-	if s.RepoScannerFactory == nil {
-		return repoexposure.ScanResult{}, fmt.Errorf("repo scanner factory is not configured")
-	}
-	result, err := s.RepoScannerFactory(historyLimit, maxFindings).ScanRepository(ctx, target)
+	runResult, err := s.RunRepoScanPersisted(ctx, request)
 	if err != nil {
 		return repoexposure.ScanResult{}, err
 	}
-	return result, nil
+	return runResult.Result, nil
+}
+
+// RunRepoScanPersisted runs one repository scan and persists repo scan metadata + findings.
+func (s *Service) RunRepoScanPersisted(ctx context.Context, request RepoScanRequest) (RunRepoScanResult, error) {
+	if !s.RepoScanEnabled {
+		return RunRepoScanResult{}, ErrRepoScanDisabled
+	}
+	target := strings.TrimSpace(request.Repository)
+	if target == "" {
+		return RunRepoScanResult{}, ErrInvalidRepoScanRequest
+	}
+	if !repoTargetAllowed(target, s.RepoScanAllowedTargets) {
+		return RunRepoScanResult{}, ErrRepoTargetNotAllowed
+	}
+	historyLimit, err := sanitizeRepoScanLimit(request.HistoryLimit, s.RepoScanDefaultHistoryLimit, s.RepoScanMaxHistoryLimit)
+	if err != nil {
+		return RunRepoScanResult{}, ErrInvalidRepoScanRequest
+	}
+	maxFindings, err := sanitizeRepoScanLimit(request.MaxFindings, s.RepoScanDefaultMaxFindings, s.RepoScanMaxFindingsLimit)
+	if err != nil {
+		return RunRepoScanResult{}, ErrInvalidRepoScanRequest
+	}
+	if s.RepoScannerFactory == nil {
+		return RunRepoScanResult{}, fmt.Errorf("repo scanner factory is not configured")
+	}
+
+	started := s.Now().UTC()
+	record, err := s.Store.CreateRepoScan(ctx, target, started)
+	if err != nil {
+		return RunRepoScanResult{}, fmt.Errorf("create repo scan: %w", err)
+	}
+	result, err := s.RepoScannerFactory(historyLimit, maxFindings).ScanRepository(ctx, target)
+	if err != nil {
+		_ = s.Store.CompleteRepoScan(ctx, record.ID, "failed", s.Now().UTC(), 0, 0, 0, false, err.Error())
+		return RunRepoScanResult{}, err
+	}
+	if err := s.Store.UpsertRepoFindings(ctx, record.ID, result.Findings); err != nil {
+		_ = s.Store.CompleteRepoScan(ctx, record.ID, "failed", s.Now().UTC(), result.CommitsScanned, result.FilesScanned, 0, result.Truncated, err.Error())
+		return RunRepoScanResult{}, fmt.Errorf("persist repo findings: %w", err)
+	}
+	if err := s.Store.CompleteRepoScan(
+		ctx,
+		record.ID,
+		"completed",
+		s.Now().UTC(),
+		result.CommitsScanned,
+		result.FilesScanned,
+		len(result.Findings),
+		result.Truncated,
+		"",
+	); err != nil {
+		return RunRepoScanResult{}, fmt.Errorf("complete repo scan: %w", err)
+	}
+	record.Status = "completed"
+	finished := s.Now().UTC()
+	record.FinishedAt = &finished
+	record.CommitsScanned = result.CommitsScanned
+	record.FilesScanned = result.FilesScanned
+	record.FindingCount = len(result.Findings)
+	record.Truncated = result.Truncated
+	return RunRepoScanResult{RepoScan: record, Result: result}, nil
+}
+
+// ListRepoScans returns persisted repository scans.
+func (s *Service) ListRepoScans(ctx context.Context, limit int) ([]db.RepoScanRecord, error) {
+	return s.Store.ListRepoScans(ctx, limit)
+}
+
+// GetRepoScan returns one repository scan by id.
+func (s *Service) GetRepoScan(ctx context.Context, repoScanID string) (db.RepoScanRecord, error) {
+	id := strings.TrimSpace(repoScanID)
+	if id == "" {
+		return db.RepoScanRecord{}, db.ErrNotFound
+	}
+	return s.Store.GetRepoScan(ctx, id)
+}
+
+// ListRepoFindings returns repository findings using optional filters.
+func (s *Service) ListRepoFindings(ctx context.Context, limit int, filter db.RepoFindingFilter) ([]domain.Finding, error) {
+	return s.Store.ListRepoFindings(ctx, filter, limit)
 }
 
 // ListFindingsFiltered returns findings with optional scan/type/severity filters.

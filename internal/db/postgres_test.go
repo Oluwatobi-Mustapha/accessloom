@@ -293,3 +293,97 @@ func TestNewPostgresStoreWithDB(t *testing.T) {
 		t.Fatal("expected store")
 	}
 }
+
+func TestPostgresStoreRepoScanLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	now := time.Now().UTC()
+
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO repo_scans (id, repository, status, started_at, commits_scanned, files_scanned, finding_count, truncated)
+		 VALUES ($1, $2, $3, $4, 0, 0, 0, false)`)).
+		WithArgs(sqlmock.AnyArg(), "owner/repo", "running", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	record, err := store.CreateRepoScan(context.Background(), "owner/repo", now)
+	if err != nil {
+		t.Fatalf("create repo scan failed: %v", err)
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO repo_findings").
+		WithArgs(record.ID, "rf-1", "secret_exposure", "high", "secret", "summary", sqlmock.AnyArg(), sqlmock.AnyArg(), "fix", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	if err := store.UpsertRepoFindings(context.Background(), record.ID, []domain.Finding{{
+		ID:           "rf-1",
+		Type:         domain.FindingSecretExposure,
+		Severity:     domain.SeverityHigh,
+		Title:        "secret",
+		HumanSummary: "summary",
+		Path:         []string{"app.env"},
+		Evidence:     map[string]any{"k": "v"},
+		Remediation:  "fix",
+		CreatedAt:    now,
+	}}); err != nil {
+		t.Fatalf("upsert repo findings failed: %v", err)
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE repo_scans
+		 SET status = $2,
+		     finished_at = $3,
+		     commits_scanned = $4,
+		     files_scanned = $5,
+		     finding_count = $6,
+		     truncated = $7,
+		     error_message = $8
+		 WHERE id = $1`)).
+		WithArgs(record.ID, "completed", sqlmock.AnyArg(), 12, 8, 1, false, nil).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if err := store.CompleteRepoScan(context.Background(), record.ID, "completed", now, 12, 8, 1, false, ""); err != nil {
+		t.Fatalf("complete repo scan failed: %v", err)
+	}
+
+	repoScanRows := sqlmock.NewRows([]string{"id", "repository", "status", "started_at", "finished_at", "commits_scanned", "files_scanned", "finding_count", "truncated", "error_message"}).
+		AddRow(record.ID, "owner/repo", "completed", now, now, 12, 8, 1, false, "")
+	mock.ExpectQuery("SELECT id, repository, status").WithArgs(20).WillReturnRows(repoScanRows)
+	repoScans, err := store.ListRepoScans(context.Background(), 20)
+	if err != nil {
+		t.Fatalf("list repo scans failed: %v", err)
+	}
+	if len(repoScans) != 1 || repoScans[0].ID != record.ID {
+		t.Fatalf("unexpected repo scans: %+v", repoScans)
+	}
+
+	repoFindingsRows := sqlmock.NewRows([]string{"repo_scan_id", "finding_id", "type", "severity", "title", "human_summary", "path", "evidence", "remediation", "created_at"}).
+		AddRow(record.ID, "rf-1", "secret_exposure", "high", "secret", "summary", []byte(`["app.env"]`), []byte(`{"k":"v"}`), "fix", now)
+	mock.ExpectQuery("SELECT repo_scan_id, finding_id, type").WithArgs(record.ID, "", "", 100).WillReturnRows(repoFindingsRows)
+	repoFindings, err := store.ListRepoFindings(context.Background(), RepoFindingFilter{RepoScanID: record.ID}, 100)
+	if err != nil {
+		t.Fatalf("list repo findings failed: %v", err)
+	}
+	if len(repoFindings) != 1 || repoFindings[0].ID != "rf-1" {
+		t.Fatalf("unexpected repo findings: %+v", repoFindings)
+	}
+
+	repoScanRow := sqlmock.NewRows([]string{"id", "repository", "status", "started_at", "finished_at", "commits_scanned", "files_scanned", "finding_count", "truncated", "error_message"}).
+		AddRow(record.ID, "owner/repo", "completed", now, now, 12, 8, 1, false, "")
+	mock.ExpectQuery("SELECT id, repository, status").WithArgs(record.ID).WillReturnRows(repoScanRow)
+	gotRepoScan, err := store.GetRepoScan(context.Background(), record.ID)
+	if err != nil {
+		t.Fatalf("get repo scan failed: %v", err)
+	}
+	if gotRepoScan.ID != record.ID {
+		t.Fatalf("unexpected repo scan: %+v", gotRepoScan)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}

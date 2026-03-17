@@ -214,3 +214,75 @@ func TestMemoryStoreRejectsInvalidScanEventLevel(t *testing.T) {
 		t.Fatal("expected invalid event level error")
 	}
 }
+
+func TestMemoryStoreRepoScanLifecycle(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 3, 17, 14, 0, 0, 0, time.UTC)
+
+	repoScan, err := store.CreateRepoScan(context.Background(), "owner/repo", now)
+	if err != nil {
+		t.Fatalf("create repo scan: %v", err)
+	}
+	if repoScan.Status != "running" {
+		t.Fatalf("unexpected repo scan status %q", repoScan.Status)
+	}
+
+	findings := []domain.Finding{
+		{ID: "rf-1", Type: domain.FindingSecretExposure, Severity: domain.SeverityHigh, Title: "secret", HumanSummary: "summary", CreatedAt: now},
+		{ID: "rf-2", Type: domain.FindingRepoMisconfig, Severity: domain.SeverityMedium, Title: "misconfig", HumanSummary: "summary", CreatedAt: now.Add(1 * time.Minute)},
+	}
+	if err := store.UpsertRepoFindings(context.Background(), repoScan.ID, findings); err != nil {
+		t.Fatalf("upsert repo findings: %v", err)
+	}
+	if err := store.CompleteRepoScan(context.Background(), repoScan.ID, "completed", now.Add(2*time.Minute), 10, 6, 2, false, ""); err != nil {
+		t.Fatalf("complete repo scan: %v", err)
+	}
+
+	gotScan, err := store.GetRepoScan(context.Background(), repoScan.ID)
+	if err != nil {
+		t.Fatalf("get repo scan: %v", err)
+	}
+	if gotScan.Status != "completed" || gotScan.CommitsScanned != 10 || gotScan.FilesScanned != 6 || gotScan.FindingCount != 2 {
+		t.Fatalf("unexpected repo scan record: %+v", gotScan)
+	}
+
+	storedFindings, err := store.ListRepoFindings(context.Background(), RepoFindingFilter{RepoScanID: repoScan.ID}, 10)
+	if err != nil {
+		t.Fatalf("list repo findings: %v", err)
+	}
+	if len(storedFindings) != 2 || storedFindings[0].ID != "rf-2" {
+		t.Fatalf("unexpected repo findings: %+v", storedFindings)
+	}
+
+	highOnly, err := store.ListRepoFindings(context.Background(), RepoFindingFilter{Severity: "high"}, 10)
+	if err != nil {
+		t.Fatalf("list repo findings high-only: %v", err)
+	}
+	if len(highOnly) != 1 || highOnly[0].ID != "rf-1" {
+		t.Fatalf("unexpected high severity findings: %+v", highOnly)
+	}
+
+	repoScans, err := store.ListRepoScans(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list repo scans: %v", err)
+	}
+	if len(repoScans) != 1 || repoScans[0].ID != repoScan.ID {
+		t.Fatalf("unexpected repo scans: %+v", repoScans)
+	}
+}
+
+func TestMemoryStoreRepoScanErrors(t *testing.T) {
+	store := NewMemoryStore()
+	if _, err := store.GetRepoScan(context.Background(), "missing"); err == nil {
+		t.Fatal("expected missing repo scan error")
+	}
+	if err := store.UpsertRepoFindings(context.Background(), "missing", []domain.Finding{{ID: "x"}}); err == nil {
+		t.Fatal("expected missing repo scan error for findings upsert")
+	}
+	if err := store.CompleteRepoScan(context.Background(), "missing", "failed", time.Now(), 0, 0, 0, false, "boom"); err == nil {
+		t.Fatal("expected missing repo scan error for completion")
+	}
+	if _, err := store.ListRepoFindings(context.Background(), RepoFindingFilter{RepoScanID: "missing"}, 10); err == nil {
+		t.Fatal("expected missing repo scan error for findings list")
+	}
+}

@@ -31,6 +31,20 @@ type ScanRecord struct {
 	ErrorMessage string     `json:"error_message,omitempty"`
 }
 
+// RepoScanRecord tracks persisted repository exposure scan metadata.
+type RepoScanRecord struct {
+	ID             string     `json:"id"`
+	Repository     string     `json:"repository"`
+	Status         string     `json:"status"`
+	StartedAt      time.Time  `json:"started_at"`
+	FinishedAt     *time.Time `json:"finished_at,omitempty"`
+	CommitsScanned int        `json:"commits_scanned"`
+	FilesScanned   int        `json:"files_scanned"`
+	FindingCount   int        `json:"finding_count"`
+	Truncated      bool       `json:"truncated"`
+	ErrorMessage   string     `json:"error_message,omitempty"`
+}
+
 // ScanArtifacts contains raw and normalized scan outputs to persist idempotently.
 type ScanArtifacts struct {
 	RawAssets     []providers.RawAsset
@@ -75,6 +89,13 @@ type RelationshipFilter struct {
 	ToNodeID   string
 }
 
+// RepoFindingFilter controls repository finding list queries.
+type RepoFindingFilter struct {
+	RepoScanID string
+	Severity   string
+	Type       string
+}
+
 // Store defines persistence operations required by API and scheduler orchestration.
 type Store interface {
 	CreateScan(ctx context.Context, provider string, startedAt time.Time) (ScanRecord, error)
@@ -89,5 +110,11 @@ type Store interface {
 	ListRelationships(ctx context.Context, filter RelationshipFilter, limit int) ([]domain.Relationship, error)
 	AppendScanEvent(ctx context.Context, scanID string, level string, message string, metadata map[string]any) error
 	ListScanEvents(ctx context.Context, scanID string, limit int) ([]ScanEvent, error)
+	CreateRepoScan(ctx context.Context, repository string, startedAt time.Time) (RepoScanRecord, error)
+	GetRepoScan(ctx context.Context, repoScanID string) (RepoScanRecord, error)
+	CompleteRepoScan(ctx context.Context, repoScanID string, status string, finishedAt time.Time, commitsScanned int, filesScanned int, findingCount int, truncated bool, errorMessage string) error
+	UpsertRepoFindings(ctx context.Context, repoScanID string, findings []domain.Finding) error
+	ListRepoScans(ctx context.Context, limit int) ([]RepoScanRecord, error)
+	ListRepoFindings(ctx context.Context, filter RepoFindingFilter, limit int) ([]domain.Finding, error)
 	Close() error
 }

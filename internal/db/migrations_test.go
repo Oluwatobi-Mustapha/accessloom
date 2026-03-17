@@ -41,3 +41,18 @@ func TestSecondMigrationContainsScanEvents(t *testing.T) {
 		t.Fatal("expected scan_events table creation in second migration")
 	}
 }
+
+func TestThirdMigrationContainsRepoScanTables(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "000003_repo_scans.up.sql")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	text := string(content)
+	if !strings.Contains(text, "CREATE TABLE IF NOT EXISTS repo_scans") {
+		t.Fatal("expected repo_scans table creation in third migration")
+	}
+	if !strings.Contains(text, "CREATE TABLE IF NOT EXISTS repo_findings") {
+		t.Fatal("expected repo_findings table creation in third migration")
+	}
+}

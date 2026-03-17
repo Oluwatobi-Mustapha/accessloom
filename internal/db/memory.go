@@ -15,11 +15,14 @@ import (
 
 // MemoryStore is a concurrency-safe in-memory persistence adapter.
 type MemoryStore struct {
-	mu       sync.RWMutex
-	scans    map[string]ScanRecord
-	scanIDs  []string
-	findings map[string]domain.Finding
-	events   map[string][]ScanEvent
+	mu           sync.RWMutex
+	scans        map[string]ScanRecord
+	scanIDs      []string
+	findings     map[string]domain.Finding
+	events       map[string][]ScanEvent
+	repoScans    map[string]RepoScanRecord
+	repoScanIDs  []string
+	repoFindings map[string]domain.Finding
 
 	rawAssets     map[string]providers.RawAsset
 	identities    map[string]domain.Identity
@@ -31,10 +34,13 @@ type MemoryStore struct {
 // NewMemoryStore initializes an empty in-memory store.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		scans:    map[string]ScanRecord{},
-		scanIDs:  []string{},
-		findings: map[string]domain.Finding{},
-		events:   map[string][]ScanEvent{},
+		scans:        map[string]ScanRecord{},
+		scanIDs:      []string{},
+		findings:     map[string]domain.Finding{},
+		events:       map[string][]ScanEvent{},
+		repoScans:    map[string]RepoScanRecord{},
+		repoScanIDs:  []string{},
+		repoFindings: map[string]domain.Finding{},
 
 		rawAssets:     map[string]providers.RawAsset{},
 		identities:    map[string]domain.Identity{},
@@ -326,6 +332,125 @@ func scanKeyPrefix(key string) string {
 		return ""
 	}
 	return parts[0]
+}
+
+// CreateRepoScan persists one repository exposure scan start event.
+func (m *MemoryStore) CreateRepoScan(_ context.Context, repository string, startedAt time.Time) (RepoScanRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	record := RepoScanRecord{
+		ID:         uuid.NewString(),
+		Repository: strings.TrimSpace(repository),
+		Status:     "running",
+		StartedAt:  startedAt.UTC(),
+	}
+	m.repoScans[record.ID] = record
+	m.repoScanIDs = append(m.repoScanIDs, record.ID)
+	return record, nil
+}
+
+// GetRepoScan returns one persisted repo scan by id.
+func (m *MemoryStore) GetRepoScan(_ context.Context, repoScanID string) (RepoScanRecord, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	record, exists := m.repoScans[repoScanID]
+	if !exists {
+		return RepoScanRecord{}, ErrNotFound
+	}
+	return record, nil
+}
+
+// CompleteRepoScan finalizes repo scan metadata.
+func (m *MemoryStore) CompleteRepoScan(_ context.Context, repoScanID string, status string, finishedAt time.Time, commitsScanned int, filesScanned int, findingCount int, truncated bool, errorMessage string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	record, exists := m.repoScans[repoScanID]
+	if !exists {
+		return ErrNotFound
+	}
+	finished := finishedAt.UTC()
+	record.Status = strings.TrimSpace(status)
+	record.FinishedAt = &finished
+	record.CommitsScanned = commitsScanned
+	record.FilesScanned = filesScanned
+	record.FindingCount = findingCount
+	record.Truncated = truncated
+	record.ErrorMessage = strings.TrimSpace(errorMessage)
+	m.repoScans[repoScanID] = record
+	return nil
+}
+
+// UpsertRepoFindings persists repository findings idempotently by repo_scan_id + finding_id.
+func (m *MemoryStore) UpsertRepoFindings(_ context.Context, repoScanID string, findings []domain.Finding) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.repoScans[repoScanID]; !exists {
+		return ErrNotFound
+	}
+	for _, finding := range findings {
+		finding.ScanID = repoScanID
+		key := repoScanID + "|" + finding.ID
+		m.repoFindings[key] = finding
+	}
+	return nil
+}
+
+// ListRepoScans returns latest repo scans first.
+func (m *MemoryStore) ListRepoScans(_ context.Context, limit int) ([]RepoScanRecord, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	result := make([]RepoScanRecord, 0, len(m.repoScanIDs))
+	for _, scanID := range m.repoScanIDs {
+		result = append(result, m.repoScans[scanID])
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].StartedAt.After(result[j].StartedAt)
+	})
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
+}
+
+// ListRepoFindings returns repository findings using optional filters.
+func (m *MemoryStore) ListRepoFindings(_ context.Context, filter RepoFindingFilter, limit int) ([]domain.Finding, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	repoScanID := strings.TrimSpace(filter.RepoScanID)
+	if repoScanID != "" {
+		if _, exists := m.repoScans[repoScanID]; !exists {
+			return nil, ErrNotFound
+		}
+	}
+	severity := strings.ToLower(strings.TrimSpace(filter.Severity))
+	findingType := strings.ToLower(strings.TrimSpace(filter.Type))
+
+	result := make([]domain.Finding, 0, len(m.repoFindings))
+	for _, finding := range m.repoFindings {
+		if repoScanID != "" && finding.ScanID != repoScanID {
+			continue
+		}
+		if severity != "" && strings.ToLower(string(finding.Severity)) != severity {
+			continue
+		}
+		if findingType != "" && strings.ToLower(string(finding.Type)) != findingType {
+			continue
+		}
+		result = append(result, finding)
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].CreatedAt.After(result[j].CreatedAt)
+	})
+	if limit > 0 && len(result) > limit {
+		result = result[:limit]
+	}
+	return result, nil
 }
 
 // Close closes store resources.
