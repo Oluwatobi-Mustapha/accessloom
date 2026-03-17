@@ -11,13 +11,19 @@ import (
 	"github.com/Oluwatobi-Mustapha/identrail/internal/server"
 )
 
+var serverRun = server.Run
+var loadConfig = config.Load
+
+func run(ctx context.Context, sigCh <-chan os.Signal) error {
+	return serverRun(ctx, loadConfig(), sigCh)
+}
+
 func main() {
-	cfg := config.Load()
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigCh)
 
-	if err := server.Run(context.Background(), cfg, sigCh); err != nil {
+	if err := run(context.Background(), sigCh); err != nil {
 		log.Fatalf("server failed: %v", err)
 	}
 }
