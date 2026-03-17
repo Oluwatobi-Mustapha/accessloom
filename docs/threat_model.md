@@ -187,6 +187,11 @@ Simple threat list for current system.
 - Fix: Collect `Role`/`ClusterRole` assets and derive policy statements from concrete RBAC `rules`; keep fallback heuristics only when role data is missing.
 - Status: Implemented.
 
+## 38) Secret Value Retention in Repository Leak Findings
+- Threat: Repository leak scanning can accidentally persist raw secret values into logs, scan artifacts, or API payloads.
+- Fix: Store only secret fingerprints and redacted snippets; never store raw secret values in findings evidence.
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and external KMS guidance.
 - Add audit sink forwarding guide for centralized log pipelines.

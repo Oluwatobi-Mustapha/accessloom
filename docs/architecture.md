@@ -12,6 +12,7 @@ Identrail starts as a modular monolith so we can ship quickly, debug easily, and
 - `analysis`: deterministic risk rules over normalized data + graph edges
 - `findings`: typed finding lifecycle and remediation metadata
 - `ownership`: owner inference and confidence scoring
+- `repoexposure`: repository history and HEAD exposure scanner for secret leaks and IaC/CI misconfigurations
 - `api`: REST endpoints for scans and findings
 - `db`: persistence adapters (memory + postgres)
 - `scheduler`: idempotent scan orchestration
@@ -56,6 +57,7 @@ Collector -> Raw Assets -> Normalizer -> Domain Entities
 - `internal/runtime`: shared service bootstrap used by server and worker.
 - `internal/providers/aws`: AWS phase-1 provider pipeline (collector -> normalizer -> graph -> rules).
 - `internal/providers/kubernetes`: Kubernetes phase-4 pipeline with fixture/kubectl collection, RBAC role-rule normalization, graph, and risk rules.
+- `internal/repoexposure`: read-only git history and HEAD scanner with redacted evidence output.
 
 ## Future Extraction Plan
 

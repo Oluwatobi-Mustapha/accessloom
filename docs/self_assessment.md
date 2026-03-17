@@ -28,6 +28,7 @@ Updated only at major milestones.
 - Kubernetes live mode: kubectl-based read-only collector added with source-mode config and fail-fast validation.
 - Kubernetes RBAC semantics: role bindings now resolve from real Role/ClusterRole rules (with safe fallback heuristics).
 - AWS live mode: SDK-based read-only collector added with source-mode and region/profile config validation.
+- Repository exposure scanner: new read-only `repo-scan` CLI flow detects commit-history secret leaks and HEAD misconfigurations with redacted evidence.
 - Worker: scheduled process runs scans with shared runtime bootstrap.
 - Migrations: startup migration runner added for Postgres mode.
 - Test health: `go test ./... -cover` passing, coverage above 80%.

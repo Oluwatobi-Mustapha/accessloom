@@ -229,3 +229,9 @@ This file tracks major decisions in simple terms.
 - Decision: Collect `Role` and `ClusterRole` objects and expand role bindings from their concrete RBAC `rules` first.
 - Why: Avoid false confidence and drift from role-name-only heuristics when custom roles are used.
 - Tradeoff: More collection calls and normalization logic; still keep heuristic fallback when role objects are unavailable.
+
+## ADR-039: Add Repository Exposure Scanner as Separate CLI Module
+- Date: 2026-03-17
+- Decision: Add `repo-scan` as a dedicated, read-only CLI workflow separate from cloud identity scan pipelines.
+- Why: Detect public-repo secret leaks and misconfigurations without coupling repository scanning to AWS/Kubernetes domain models.
+- Tradeoff: Results are currently CLI-driven and not yet persisted through API scan lifecycle endpoints.

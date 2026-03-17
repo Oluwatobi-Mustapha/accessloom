@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- Added repository exposure scanner (`identrail repo-scan`) for public/local git repositories:
+  - scans commit history for added secret material (read-only git operations)
+  - scans HEAD IaC/CI/runtime files for high-signal misconfigurations
+  - redacts secret values and stores only fingerprints/snippets in findings evidence
+  - supports repository target as `owner/repo`, URL, or local git path
+  - includes history and finding caps (`--history-limit`, `--max-findings`)
 - Strengthened Kubernetes RBAC normalization semantics:
   - collector now ingests `roles` and `clusterroles` in kubectl mode
   - fixture mode now supports `Role`/`ClusterRole` assets with stable source IDs

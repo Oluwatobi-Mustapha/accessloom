@@ -6,6 +6,7 @@ It discovers machine and workload identities across cloud environments, maps who
 
 Operational runbook: `docs/deploy-runbook.md`.
 Portable deployment guide: `docs/deployment-anywhere.md`.
+Repository exposure scanner guide: `docs/repo-exposure.md`.
 Web shell scaffold: `web/` (React + TypeScript + Vite).
 
 ## Current Capabilities
@@ -18,6 +19,7 @@ Web shell scaffold: `web/` (React + TypeScript + Vite).
 - CLI workflows:
   - `identrail scan`
   - `identrail findings`
+  - `identrail repo-scan --repo <owner/repo|url|local-path>`
 - REST API workflows:
   - `POST /v1/scans`
   - `GET /v1/scans`
