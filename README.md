@@ -23,6 +23,9 @@ Web shell scaffold: `web/` (React + TypeScript + Vite).
 - REST API workflows:
   - `POST /v1/scans`
   - `POST /v1/repo-scans`
+  - `GET /v1/repo-scans`
+  - `GET /v1/repo-scans/:repo_scan_id`
+  - `GET /v1/repo-findings`
   - `GET /v1/scans`
   - `GET /v1/scans/:scan_id/diff`
   - `GET /v1/scans/:scan_id/events`

@@ -41,6 +41,7 @@ Collector -> Raw Assets -> Normalizer -> Domain Entities
 - Provider abstraction via interfaces (`Collector`, `Normalizer`, `RiskRuleSet`) keeps AWS/K8s/Azure implementations isolated.
 - Idempotency is a first-class requirement for every scan stage to avoid duplicated records and scan drift.
 - Raw and normalized data are both preserved for auditability and rule explainability.
+- Repository exposure scans persist in dedicated repo scan tables to avoid coupling with cloud scan records.
 - Observability is integrated from day one with structured logs, Prometheus metrics, and tracing hooks.
 - Persistence supports local memory mode and PostgreSQL mode behind a single store interface.
 - Scan execution persists both raw and normalized artifacts for auditability and explainability.

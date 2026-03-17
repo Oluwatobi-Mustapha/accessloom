@@ -241,3 +241,9 @@ This file tracks major decisions in simple terms.
 - Decision: Add `POST /v1/repo-scans` with write authorization and configurable safety bounds/allowlist.
 - Why: Enable dashboard/backend integrations to trigger repository exposure scans without shell access.
 - Tradeoff: Endpoint is synchronous and currently returns findings directly (no persistence lifecycle yet).
+
+## ADR-041: Persist Repo Scan Lifecycle in Dedicated Tables
+- Date: 2026-03-17
+- Decision: Add `repo_scans` and `repo_findings` tables plus read APIs (`GET /v1/repo-scans`, `GET /v1/repo-findings`) rather than reusing cloud scan tables.
+- Why: Preserve backward compatibility for existing `/v1/scans` consumers while enabling durable repo exposure history.
+- Tradeoff: Additional persistence paths to maintain in memory/postgres adapters.

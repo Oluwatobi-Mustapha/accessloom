@@ -32,6 +32,12 @@ curl -X POST http://localhost:8080/v1/repo-scans \
   }'
 ```
 
+Read APIs:
+
+- `GET /v1/repo-scans`
+- `GET /v1/repo-scans/:repo_scan_id`
+- `GET /v1/repo-findings?repo_scan_id=&severity=&type=`
+
 ## What It Scans
 
 1. Commit history (all reachable commits, bounded by `--history-limit`):
@@ -66,6 +72,7 @@ curl -X POST http://localhost:8080/v1/repo-scans \
   - redacted line snippets
 - Findings are deterministic and deduplicated by stable IDs/fingerprints.
 - Output is capped by `--max-findings` to prevent runaway payloads.
+- Repo scan metadata/findings are persisted in dedicated storage (`repo_scans`, `repo_findings`) to avoid changing existing cloud scan APIs.
 
 ## Useful Flags
 

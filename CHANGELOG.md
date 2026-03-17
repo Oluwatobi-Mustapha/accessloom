@@ -1,6 +1,15 @@
 # Changelog
 
 ## Unreleased
+- Added dedicated repository scan persistence layer:
+  - new migrations: `repo_scans` and `repo_findings` tables
+  - store adapters updated for memory and postgres modes
+  - new read APIs:
+    - `GET /v1/repo-scans`
+    - `GET /v1/repo-scans/:repo_scan_id`
+    - `GET /v1/repo-findings`
+  - `POST /v1/repo-scans` now persists scan lifecycle + findings
+  - backward compatibility maintained for existing `/v1/scans` and `/v1/findings` workflows
 - Added repository exposure API trigger and runtime guardrails:
   - new endpoint: `POST /v1/repo-scans` (write-protected)
   - configurable defaults/bounds:

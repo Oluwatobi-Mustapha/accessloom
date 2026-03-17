@@ -197,6 +197,11 @@ Simple threat list for current system.
 - Fix: Enforce bounded history/findings limits and optional repo allowlist (`IDENTRAIL_REPO_SCAN_ALLOWLIST`) with write-protected API trigger.
 - Status: Implemented.
 
+## 40) Repo Scan Data Mixing with Cloud Scan Records
+- Threat: Storing repository findings in existing cloud scan tables can break client assumptions and pollute cloud risk workflows.
+- Fix: Persist repository scan lifecycle and findings in dedicated tables with dedicated API endpoints.
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and external KMS guidance.
 - Add audit sink forwarding guide for centralized log pipelines.
