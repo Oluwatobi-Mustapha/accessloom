@@ -46,13 +46,29 @@ func BuildScanService(cfg config.Config) (*api.Service, func() error, error) {
 			RiskRuleSet:          awsprovider.NewRuleSet(),
 		}
 	case "kubernetes":
-		scanner = app.Scanner{
-			Collector:            k8sprovider.NewFixtureCollector(cfg.KubernetesFixturePath),
-			Normalizer:           k8sprovider.NewNormalizer(),
-			PermissionResolver:   k8sprovider.NewPermissionResolver(),
-			RelationshipResolver: k8sprovider.NewRelationshipResolver(),
-			RiskRuleSet:          k8sprovider.NewRuleSet(),
+		var collector app.Scanner
+		switch strings.ToLower(strings.TrimSpace(cfg.KubernetesSource)) {
+		case "", "fixture":
+			collector = app.Scanner{
+				Collector:            k8sprovider.NewFixtureCollector(cfg.KubernetesFixturePath),
+				Normalizer:           k8sprovider.NewNormalizer(),
+				PermissionResolver:   k8sprovider.NewPermissionResolver(),
+				RelationshipResolver: k8sprovider.NewRelationshipResolver(),
+				RiskRuleSet:          k8sprovider.NewRuleSet(),
+			}
+		case "kubectl":
+			collector = app.Scanner{
+				Collector:            k8sprovider.NewKubectlCollector(cfg.KubectlPath, cfg.KubeContext, nil),
+				Normalizer:           k8sprovider.NewNormalizer(),
+				PermissionResolver:   k8sprovider.NewPermissionResolver(),
+				RelationshipResolver: k8sprovider.NewRelationshipResolver(),
+				RiskRuleSet:          k8sprovider.NewRuleSet(),
+			}
+		default:
+			_ = store.Close()
+			return nil, nil, fmt.Errorf("unsupported kubernetes source %q", cfg.KubernetesSource)
 		}
+		scanner = collector
 	default:
 		_ = store.Close()
 		return nil, nil, fmt.Errorf("unsupported provider %q", cfg.Provider)

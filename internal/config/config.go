@@ -14,6 +14,8 @@ const (
 	defaultServiceName  = "identrail"
 	defaultAWSFixtures  = "testdata/aws/role_with_policies.json,testdata/aws/role_with_urlencoded_trust.json"
 	defaultK8sFixtures  = "testdata/kubernetes/service_account_payments.json,testdata/kubernetes/role_binding_cluster_admin.json,testdata/kubernetes/pod_payments.json"
+	defaultK8sSource    = "fixture"
+	defaultKubectlPath  = "kubectl"
 	defaultScanInterval = 15 * time.Minute
 )
 
@@ -27,6 +29,9 @@ type Config struct {
 	DatabaseURL              string
 	AWSFixturePath           []string
 	KubernetesFixturePath    []string
+	KubernetesSource         string
+	KubectlPath              string
+	KubeContext              string
 	ScanInterval             time.Duration
 	WorkerRunNow             bool
 	APIKeys                  []string
@@ -61,6 +66,9 @@ func Load() Config {
 		DatabaseURL:              getEnv("IDENTRAIL_DATABASE_URL", ""),
 		AWSFixturePath:           parseCommaSeparated(getEnv("IDENTRAIL_AWS_FIXTURES", defaultAWSFixtures)),
 		KubernetesFixturePath:    parseCommaSeparated(getEnv("IDENTRAIL_K8S_FIXTURES", defaultK8sFixtures)),
+		KubernetesSource:         strings.ToLower(getEnv("IDENTRAIL_K8S_SOURCE", defaultK8sSource)),
+		KubectlPath:              getEnv("IDENTRAIL_KUBECTL_PATH", defaultKubectlPath),
+		KubeContext:              getEnv("IDENTRAIL_KUBE_CONTEXT", ""),
 		ScanInterval:             parseDuration(getEnv("IDENTRAIL_SCAN_INTERVAL", defaultScanInterval.String()), defaultScanInterval),
 		WorkerRunNow:             parseBool(getEnv("IDENTRAIL_WORKER_RUN_NOW", "true"), true),
 		APIKeys:                  parseCommaSeparated(getEnv("IDENTRAIL_API_KEYS", "")),

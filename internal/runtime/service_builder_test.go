@@ -67,6 +67,32 @@ func TestBuildScanServiceUnsupportedProvider(t *testing.T) {
 	}
 }
 
+func TestBuildScanServiceUnsupportedKubernetesSource(t *testing.T) {
+	cfg := config.Config{
+		Provider:         "kubernetes",
+		KubernetesSource: "unknown",
+	}
+	if _, _, err := BuildScanService(cfg); err == nil {
+		t.Fatal("expected unsupported kubernetes source error")
+	}
+}
+
+func TestBuildScanServiceKubernetesKubectlMode(t *testing.T) {
+	cfg := config.Config{
+		Provider:         "kubernetes",
+		KubernetesSource: "kubectl",
+		KubectlPath:      "/path/does/not/exist/kubectl",
+	}
+	svc, closeFn, err := BuildScanService(cfg)
+	if err != nil {
+		t.Fatalf("build service failed: %v", err)
+	}
+	defer func() { _ = closeFn() }()
+	if _, runErr := svc.RunScan(context.Background()); runErr == nil {
+		t.Fatal("expected kubectl runtime error")
+	}
+}
+
 func TestNewStoreMemoryAndInvalidPostgres(t *testing.T) {
 	store, err := NewStore("")
 	if err != nil {

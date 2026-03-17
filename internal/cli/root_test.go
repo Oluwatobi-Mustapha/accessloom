@@ -132,6 +132,22 @@ func TestExecuteKubernetesScan(t *testing.T) {
 	}
 }
 
+func TestExecuteKubernetesUnsupportedSource(t *testing.T) {
+	cfg := config.Config{
+		ServiceName:      "identrail-test",
+		Provider:         "kubernetes",
+		KubernetesSource: "unknown",
+	}
+	var out bytes.Buffer
+	err := Execute(cfg, []string{"scan", "--no-save"}, &out)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "unsupported kubernetes source") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestExecuteUnknownCommand(t *testing.T) {
 	cfg := config.Config{ServiceName: "identrail-test", Provider: "aws"}
 	var out bytes.Buffer

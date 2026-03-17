@@ -14,6 +14,9 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_DATABASE_URL", "")
 	t.Setenv("IDENTRAIL_AWS_FIXTURES", "")
 	t.Setenv("IDENTRAIL_K8S_FIXTURES", "")
+	t.Setenv("IDENTRAIL_K8S_SOURCE", "")
+	t.Setenv("IDENTRAIL_KUBECTL_PATH", "")
+	t.Setenv("IDENTRAIL_KUBE_CONTEXT", "")
 	t.Setenv("IDENTRAIL_SCAN_INTERVAL", "")
 	t.Setenv("IDENTRAIL_WORKER_RUN_NOW", "")
 	t.Setenv("IDENTRAIL_API_KEYS", "")
@@ -58,6 +61,15 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if len(cfg.KubernetesFixturePath) != 3 {
 		t.Fatalf("expected 3 default k8s fixture paths, got %d", len(cfg.KubernetesFixturePath))
+	}
+	if cfg.KubernetesSource != defaultK8sSource {
+		t.Fatalf("expected default k8s source %q, got %q", defaultK8sSource, cfg.KubernetesSource)
+	}
+	if cfg.KubectlPath != defaultKubectlPath {
+		t.Fatalf("expected default kubectl path %q, got %q", defaultKubectlPath, cfg.KubectlPath)
+	}
+	if cfg.KubeContext != "" {
+		t.Fatalf("expected empty kube context by default, got %q", cfg.KubeContext)
 	}
 	if cfg.ScanInterval != defaultScanInterval {
 		t.Fatalf("expected default scan interval %v, got %v", defaultScanInterval, cfg.ScanInterval)
@@ -132,6 +144,9 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_DATABASE_URL", "postgres://example")
 	t.Setenv("IDENTRAIL_AWS_FIXTURES", "fixtures/a.json,fixtures/b.json")
 	t.Setenv("IDENTRAIL_K8S_FIXTURES", "fixtures/sa.json,fixtures/rb.json")
+	t.Setenv("IDENTRAIL_K8S_SOURCE", "kubectl")
+	t.Setenv("IDENTRAIL_KUBECTL_PATH", "/usr/local/bin/kubectl")
+	t.Setenv("IDENTRAIL_KUBE_CONTEXT", "dev-cluster")
 	t.Setenv("IDENTRAIL_SCAN_INTERVAL", "30m")
 	t.Setenv("IDENTRAIL_WORKER_RUN_NOW", "false")
 	t.Setenv("IDENTRAIL_API_KEYS", "key1,key2")
@@ -176,6 +191,15 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if len(cfg.KubernetesFixturePath) != 2 || cfg.KubernetesFixturePath[0] != "fixtures/sa.json" || cfg.KubernetesFixturePath[1] != "fixtures/rb.json" {
 		t.Fatalf("unexpected k8s fixture paths: %+v", cfg.KubernetesFixturePath)
+	}
+	if cfg.KubernetesSource != "kubectl" {
+		t.Fatalf("unexpected k8s source: %q", cfg.KubernetesSource)
+	}
+	if cfg.KubectlPath != "/usr/local/bin/kubectl" {
+		t.Fatalf("unexpected kubectl path: %q", cfg.KubectlPath)
+	}
+	if cfg.KubeContext != "dev-cluster" {
+		t.Fatalf("unexpected kube context: %q", cfg.KubeContext)
 	}
 	if cfg.ScanInterval != 30*time.Minute {
 		t.Fatalf("unexpected scan interval: %v", cfg.ScanInterval)

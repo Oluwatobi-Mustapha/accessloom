@@ -79,7 +79,7 @@ func buildScanCmd(cfg config.Config, out io.Writer, stateFile *string) *cobra.Co
 				return err
 			}
 
-			scanner, err := buildScannerForProvider(cfg.Provider, fixtures, staleAfterDays)
+			scanner, err := buildScannerForProvider(cfg, fixtures, staleAfterDays)
 			if err != nil {
 				return err
 			}
@@ -171,8 +171,8 @@ func defaultFixturesForProvider(cfg config.Config) []string {
 	}
 }
 
-func buildScannerForProvider(provider string, fixtures []string, staleAfterDays int) (app.Scanner, error) {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
+func buildScannerForProvider(cfg config.Config, fixtures []string, staleAfterDays int) (app.Scanner, error) {
+	switch strings.ToLower(strings.TrimSpace(cfg.Provider)) {
 	case "aws":
 		return app.Scanner{
 			Collector:            awsprovider.NewFixtureCollector(fixtures),
@@ -182,15 +182,28 @@ func buildScannerForProvider(provider string, fixtures []string, staleAfterDays 
 			RiskRuleSet:          awsprovider.NewRuleSet(awsprovider.WithStaleAfter(time.Duration(staleAfterDays) * 24 * time.Hour)),
 		}, nil
 	case "kubernetes":
-		return app.Scanner{
-			Collector:            k8sprovider.NewFixtureCollector(fixtures),
-			Normalizer:           k8sprovider.NewNormalizer(),
-			PermissionResolver:   k8sprovider.NewPermissionResolver(),
-			RelationshipResolver: k8sprovider.NewRelationshipResolver(),
-			RiskRuleSet:          k8sprovider.NewRuleSet(),
-		}, nil
+		switch strings.ToLower(strings.TrimSpace(cfg.KubernetesSource)) {
+		case "", "fixture":
+			return app.Scanner{
+				Collector:            k8sprovider.NewFixtureCollector(fixtures),
+				Normalizer:           k8sprovider.NewNormalizer(),
+				PermissionResolver:   k8sprovider.NewPermissionResolver(),
+				RelationshipResolver: k8sprovider.NewRelationshipResolver(),
+				RiskRuleSet:          k8sprovider.NewRuleSet(),
+			}, nil
+		case "kubectl":
+			return app.Scanner{
+				Collector:            k8sprovider.NewKubectlCollector(cfg.KubectlPath, cfg.KubeContext, nil),
+				Normalizer:           k8sprovider.NewNormalizer(),
+				PermissionResolver:   k8sprovider.NewPermissionResolver(),
+				RelationshipResolver: k8sprovider.NewRelationshipResolver(),
+				RiskRuleSet:          k8sprovider.NewRuleSet(),
+			}, nil
+		default:
+			return app.Scanner{}, fmt.Errorf("unsupported kubernetes source %q", cfg.KubernetesSource)
+		}
 	default:
-		return app.Scanner{}, fmt.Errorf("unsupported provider %q", provider)
+		return app.Scanner{}, fmt.Errorf("unsupported provider %q", cfg.Provider)
 	}
 }
 

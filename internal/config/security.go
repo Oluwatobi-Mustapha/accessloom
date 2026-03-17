@@ -29,6 +29,11 @@ var allowedAlertSeverities = map[string]struct{}{
 	"critical": {},
 }
 
+var allowedKubernetesSources = map[string]struct{}{
+	"fixture": {},
+	"kubectl": {},
+}
+
 // ValidateSecurity checks hard-fail security misconfigurations.
 func ValidateSecurity(cfg Config) error {
 	if len(cfg.APIKeyScopes) > 0 {
@@ -102,6 +107,18 @@ func ValidateSecurity(cfg Config) error {
 		severity := strings.ToLower(strings.TrimSpace(cfg.AlertMinSeverity))
 		if _, ok := allowedAlertSeverities[severity]; !ok {
 			return fmt.Errorf("invalid IDENTRAIL_ALERT_MIN_SEVERITY %q", cfg.AlertMinSeverity)
+		}
+	}
+	if strings.ToLower(strings.TrimSpace(cfg.Provider)) == "kubernetes" {
+		source := strings.ToLower(strings.TrimSpace(cfg.KubernetesSource))
+		if source == "" {
+			source = "fixture"
+		}
+		if _, ok := allowedKubernetesSources[source]; !ok {
+			return fmt.Errorf("invalid IDENTRAIL_K8S_SOURCE %q", cfg.KubernetesSource)
+		}
+		if source == "kubectl" && strings.TrimSpace(cfg.KubectlPath) == "" {
+			return fmt.Errorf("IDENTRAIL_KUBECTL_PATH must be set when IDENTRAIL_K8S_SOURCE=kubectl")
 		}
 	}
 	if len(cfg.APIKeys) == 0 && len(cfg.APIKeyScopes) == 0 {

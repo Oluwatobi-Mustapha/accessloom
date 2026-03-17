@@ -42,6 +42,41 @@ func TestValidateSecuritySuccess(t *testing.T) {
 	}
 }
 
+func TestValidateSecurityRejectsInvalidKubernetesSource(t *testing.T) {
+	cfg := Config{
+		Provider:         "kubernetes",
+		KubernetesSource: "invalid",
+		APIKeys:          []string{"reader"},
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected invalid kubernetes source error")
+	}
+}
+
+func TestValidateSecurityRejectsEmptyKubectlPath(t *testing.T) {
+	cfg := Config{
+		Provider:         "kubernetes",
+		KubernetesSource: "kubectl",
+		KubectlPath:      "",
+		APIKeys:          []string{"reader"},
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected missing kubectl path error")
+	}
+}
+
+func TestValidateSecurityAcceptsKubectlMode(t *testing.T) {
+	cfg := Config{
+		Provider:         "kubernetes",
+		KubernetesSource: "kubectl",
+		KubectlPath:      "/usr/bin/kubectl",
+		APIKeys:          []string{"reader"},
+	}
+	if err := ValidateSecurity(cfg); err != nil {
+		t.Fatalf("expected kubectl mode to be valid, got %v", err)
+	}
+}
+
 func TestValidateSecurityRejectsInvalidScopedKeyScope(t *testing.T) {
 	cfg := Config{
 		APIKeyScopes: map[string][]string{"key1": {"invalid"}},
