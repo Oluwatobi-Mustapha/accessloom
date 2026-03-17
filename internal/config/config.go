@@ -27,6 +27,8 @@ const (
 	defaultWorkerRepoScanEnabled       = false
 	defaultWorkerRepoScanRunNow        = false
 	defaultWorkerRepoScanInterval      = 1 * time.Hour
+	defaultLockBackend                 = "auto"
+	defaultLockNamespace               = "identrail"
 )
 
 // Config centralizes process-level configuration. It keeps module wiring simple
@@ -79,6 +81,8 @@ type Config struct {
 	WorkerRepoScanTargets    []string
 	WorkerRepoScanHistory    int
 	WorkerRepoScanFindings   int
+	LockBackend              string
+	LockNamespace            string
 }
 
 // Load reads environment variables and applies safe defaults for local and CI use.
@@ -131,6 +135,8 @@ func Load() Config {
 		WorkerRepoScanTargets:    parseCommaSeparated(getEnv("IDENTRAIL_WORKER_REPO_SCAN_TARGETS", "")),
 		WorkerRepoScanHistory:    parseInt(getEnv("IDENTRAIL_WORKER_REPO_SCAN_HISTORY_LIMIT", "0"), 0),
 		WorkerRepoScanFindings:   parseInt(getEnv("IDENTRAIL_WORKER_REPO_SCAN_MAX_FINDINGS", "0"), 0),
+		LockBackend:              strings.ToLower(getEnv("IDENTRAIL_LOCK_BACKEND", defaultLockBackend)),
+		LockNamespace:            getEnv("IDENTRAIL_LOCK_NAMESPACE", defaultLockNamespace),
 	}
 }
 

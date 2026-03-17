@@ -12,15 +12,18 @@ import (
 	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
 	awsprovider "github.com/Oluwatobi-Mustapha/identrail/internal/providers/aws"
 	k8sprovider "github.com/Oluwatobi-Mustapha/identrail/internal/providers/kubernetes"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/scheduler"
 )
 
 // BuildScanService constructs store + scanner + API service from runtime config.
 func BuildScanService(cfg config.Config) (*api.Service, func() error, error) {
 	var store db.Store
+	var pgStore *db.PostgresStore
 	if cfg.DatabaseURL == "" {
 		store = db.NewMemoryStore()
 	} else {
-		pgStore, pgErr := db.NewPostgresStore(cfg.DatabaseURL)
+		var pgErr error
+		pgStore, pgErr = db.NewPostgresStore(cfg.DatabaseURL)
 		if pgErr != nil {
 			return nil, nil, fmt.Errorf("initialize postgres store: %w", pgErr)
 		}
@@ -94,6 +97,23 @@ func BuildScanService(cfg config.Config) (*api.Service, func() error, error) {
 	}
 
 	svc := api.NewService(store, scanner, cfg.Provider)
+	svc.LockNamespace = strings.TrimSpace(cfg.LockNamespace)
+	lockBackend := strings.ToLower(strings.TrimSpace(cfg.LockBackend))
+	switch lockBackend {
+	case "", "auto":
+		if pgStore != nil {
+			svc.Locker = scheduler.NewPostgresAdvisoryLocker(pgStore.DB())
+		}
+	case "postgres":
+		if pgStore != nil {
+			svc.Locker = scheduler.NewPostgresAdvisoryLocker(pgStore.DB())
+		}
+	case "inmemory":
+		svc.Locker = scheduler.NewInMemoryLocker()
+	default:
+		// Validation should catch this; keep in-memory as safe fallback.
+		svc.Locker = scheduler.NewInMemoryLocker()
+	}
 	svc.RepoScanEnabled = cfg.RepoScanEnabled
 	if cfg.RepoScanHistoryLimit > 0 {
 		svc.RepoScanDefaultHistoryLimit = cfg.RepoScanHistoryLimit

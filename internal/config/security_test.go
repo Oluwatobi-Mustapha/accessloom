@@ -272,6 +272,46 @@ func TestValidateSecurityWorkerRepoScanSuccess(t *testing.T) {
 	}
 }
 
+func TestValidateSecurityRejectsInvalidLockBackend(t *testing.T) {
+	cfg := Config{
+		APIKeys:     []string{"reader"},
+		LockBackend: "redis",
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected invalid lock backend error")
+	}
+}
+
+func TestValidateSecurityRejectsPostgresLockWithoutDatabase(t *testing.T) {
+	cfg := Config{
+		APIKeys:     []string{"reader"},
+		LockBackend: "postgres",
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected postgres lock database dependency error")
+	}
+}
+
+func TestSecurityWarningsInMemoryLockInDatabaseMode(t *testing.T) {
+	cfg := Config{
+		APIKeys:         []string{"reader"},
+		DatabaseURL:     "postgres://example",
+		LockBackend:     "inmemory",
+		RepoScanEnabled: false,
+	}
+	warnings := SecurityWarnings(cfg)
+	found := false
+	for _, warning := range warnings {
+		if warning == "IDENTRAIL_LOCK_BACKEND is inmemory in database mode; use postgres lock backend for multi-instance deployments" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected lock backend warning, got %+v", warnings)
+	}
+}
+
 func TestSecurityWarningsRepoScanAllowlist(t *testing.T) {
 	cfg := Config{
 		APIKeys:         []string{"reader"},

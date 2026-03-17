@@ -23,6 +23,7 @@ const (
 	defaultScansLimit      = 20
 	defaultEventsLimit     = 100
 	maxListLimit           = 500
+	maxCursorFetchLimit    = 5000
 	scanRequestTimeout     = 2 * time.Minute
 	repoScanRequestTimeout = 5 * time.Minute
 	scopeRead              = "read"
@@ -88,6 +89,9 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		v1.GET("/relationships", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
+		v1.GET("/ownership/signals", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"items": []any{}})
+		})
 		v1.GET("/scans", func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
@@ -117,7 +121,8 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 
 	v1.GET("/findings", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
-		items, err := svc.ListFindingsFiltered(c.Request.Context(), limit, FindingsFilter{
+		offset := parseCursor(c.Query("cursor"))
+		items, err := svc.ListFindingsFiltered(c.Request.Context(), pageFetchLimit(offset, limit), FindingsFilter{
 			ScanID:   strings.TrimSpace(c.Query("scan_id")),
 			Severity: strings.TrimSpace(c.Query("severity")),
 			Type:     strings.TrimSpace(c.Query("type")),
@@ -131,7 +136,12 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list findings"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items})
+		page, next := pageWithCursor(items, offset, limit)
+		response := gin.H{"items": page}
+		if next != "" {
+			response["next_cursor"] = next
+		}
+		c.JSON(http.StatusOK, response)
 	})
 
 	v1.GET("/findings/summary", func(c *gin.Context) {
@@ -181,13 +191,14 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 
 	v1.GET("/identities", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
+		offset := parseCursor(c.Query("cursor"))
 		items, err := svc.ListIdentities(
 			c.Request.Context(),
 			strings.TrimSpace(c.Query("scan_id")),
 			strings.TrimSpace(c.Query("provider")),
 			strings.TrimSpace(c.Query("type")),
 			strings.TrimSpace(c.Query("name_prefix")),
-			limit,
+			pageFetchLimit(offset, limit),
 		)
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
@@ -198,18 +209,24 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list identities"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items})
+		page, next := pageWithCursor(items, offset, limit)
+		response := gin.H{"items": page}
+		if next != "" {
+			response["next_cursor"] = next
+		}
+		c.JSON(http.StatusOK, response)
 	})
 
 	v1.GET("/relationships", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
+		offset := parseCursor(c.Query("cursor"))
 		items, err := svc.ListRelationships(
 			c.Request.Context(),
 			strings.TrimSpace(c.Query("scan_id")),
 			strings.TrimSpace(c.Query("type")),
 			strings.TrimSpace(c.Query("from_node_id")),
 			strings.TrimSpace(c.Query("to_node_id")),
-			limit,
+			pageFetchLimit(offset, limit),
 		)
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
@@ -220,18 +237,54 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list relationships"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items})
+		page, next := pageWithCursor(items, offset, limit)
+		response := gin.H{"items": page}
+		if next != "" {
+			response["next_cursor"] = next
+		}
+		c.JSON(http.StatusOK, response)
+	})
+
+	v1.GET("/ownership/signals", func(c *gin.Context) {
+		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
+		offset := parseCursor(c.Query("cursor"))
+		items, err := svc.ListOwnershipSignals(
+			c.Request.Context(),
+			pageFetchLimit(offset, limit),
+			OwnershipFilter{ScanID: strings.TrimSpace(c.Query("scan_id"))},
+		)
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "scan not found"})
+				return
+			}
+			logger.Error("list ownership signals", telemetry.ZapError(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list ownership signals"})
+			return
+		}
+		page, next := pageWithCursor(items, offset, limit)
+		response := gin.H{"items": page}
+		if next != "" {
+			response["next_cursor"] = next
+		}
+		c.JSON(http.StatusOK, response)
 	})
 
 	v1.GET("/scans", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultScansLimit, maxListLimit)
-		items, err := svc.ListScans(c.Request.Context(), limit)
+		offset := parseCursor(c.Query("cursor"))
+		items, err := svc.ListScans(c.Request.Context(), pageFetchLimit(offset, limit))
 		if err != nil {
 			logger.Error("list scans", telemetry.ZapError(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list scans"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items})
+		page, next := pageWithCursor(items, offset, limit)
+		response := gin.H{"items": page}
+		if next != "" {
+			response["next_cursor"] = next
+		}
+		c.JSON(http.StatusOK, response)
 	})
 
 	v1.GET("/scans/:scan_id/diff", func(c *gin.Context) {
@@ -260,11 +313,12 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 
 	v1.GET("/scans/:scan_id/events", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultEventsLimit, maxListLimit)
+		offset := parseCursor(c.Query("cursor"))
 		items, err := svc.ListScanEventsFiltered(
 			c.Request.Context(),
 			strings.TrimSpace(c.Param("scan_id")),
 			strings.TrimSpace(c.Query("level")),
-			limit,
+			pageFetchLimit(offset, limit),
 		)
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
@@ -275,18 +329,29 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list scan events"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items})
+		page, next := pageWithCursor(items, offset, limit)
+		response := gin.H{"items": page}
+		if next != "" {
+			response["next_cursor"] = next
+		}
+		c.JSON(http.StatusOK, response)
 	})
 
 	v1.GET("/repo-scans", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultScansLimit, maxListLimit)
-		items, err := svc.ListRepoScans(c.Request.Context(), limit)
+		offset := parseCursor(c.Query("cursor"))
+		items, err := svc.ListRepoScans(c.Request.Context(), pageFetchLimit(offset, limit))
 		if err != nil {
 			logger.Error("list repo scans", telemetry.ZapError(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repo scans"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items})
+		page, next := pageWithCursor(items, offset, limit)
+		response := gin.H{"items": page}
+		if next != "" {
+			response["next_cursor"] = next
+		}
+		c.JSON(http.StatusOK, response)
 	})
 
 	v1.GET("/repo-scans/:repo_scan_id", func(c *gin.Context) {
@@ -305,9 +370,10 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 
 	v1.GET("/repo-findings", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
+		offset := parseCursor(c.Query("cursor"))
 		items, err := svc.ListRepoFindings(
 			c.Request.Context(),
-			limit,
+			pageFetchLimit(offset, limit),
 			db.RepoFindingFilter{
 				RepoScanID: strings.TrimSpace(c.Query("repo_scan_id")),
 				Severity:   strings.TrimSpace(c.Query("severity")),
@@ -323,7 +389,12 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repo findings"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"items": items})
+		page, next := pageWithCursor(items, offset, limit)
+		response := gin.H{"items": page}
+		if next != "" {
+			response["next_cursor"] = next
+		}
+		c.JSON(http.StatusOK, response)
 	})
 
 	v1.POST("/scans", requireWriteKeyMiddleware(opts.WriteAPIKeys, opts.APIKeyScopes), func(c *gin.Context) {
@@ -407,6 +478,49 @@ func parseLimit(raw string, fallback int, max int) int {
 		return max
 	}
 	return parsed
+}
+
+func parseCursor(raw string) int {
+	if strings.TrimSpace(raw) == "" {
+		return 0
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || parsed < 0 {
+		return 0
+	}
+	return parsed
+}
+
+func pageFetchLimit(offset int, limit int) int {
+	if limit <= 0 {
+		limit = defaultFindingsLimit
+	}
+	fetch := offset + limit + 1
+	if fetch > maxCursorFetchLimit {
+		return maxCursorFetchLimit
+	}
+	return fetch
+}
+
+func pageWithCursor[T any](items []T, offset int, limit int) ([]T, string) {
+	if limit <= 0 {
+		limit = defaultFindingsLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= len(items) {
+		return []T{}, ""
+	}
+	end := offset + limit
+	if end > len(items) {
+		end = len(items)
+	}
+	next := ""
+	if end < len(items) {
+		next = strconv.Itoa(end)
+	}
+	return items[offset:end], next
 }
 
 func securityHeadersMiddleware() gin.HandlerFunc {

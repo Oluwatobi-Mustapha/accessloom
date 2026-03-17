@@ -100,7 +100,7 @@ func TestServiceRunScanFailure(t *testing.T) {
 func TestServiceRunScanLocked(t *testing.T) {
 	store := db.NewMemoryStore()
 	locker := scheduler.NewInMemoryLocker()
-	release, ok := locker.TryAcquire("scan:aws")
+	release, ok := locker.TryAcquire("identrail:scan:aws")
 	if !ok {
 		t.Fatal("expected lock acquire")
 	}
@@ -415,6 +415,54 @@ func TestServiceListIdentitiesAndRelationshipsDefaultsToLatestScan(t *testing.T)
 	}
 }
 
+func TestServiceListOwnershipSignals(t *testing.T) {
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 17, 18, 0, 0, 0, time.UTC)
+	scan, err := store.CreateScan(context.Background(), "aws", now)
+	if err != nil {
+		t.Fatalf("create scan: %v", err)
+	}
+	if err := store.UpsertArtifacts(context.Background(), scan.ID, db.ScanArtifacts{
+		Bundle: providers.NormalizedBundle{
+			Identities: []domain.Identity{
+				{
+					ID:        "id-owner-hint",
+					Provider:  domain.ProviderAWS,
+					Type:      domain.IdentityTypeRole,
+					Name:      "app-a",
+					OwnerHint: "platform",
+					RawRef:    "raw-a",
+				},
+				{
+					ID:       "id-tags",
+					Provider: domain.ProviderAWS,
+					Type:     domain.IdentityTypeRole,
+					Name:     "app-b",
+					Tags: map[string]string{
+						"team":       "payments",
+						"repository": "github.com/acme/payments",
+					},
+					RawRef: "raw-b",
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("upsert artifacts: %v", err)
+	}
+
+	svc := NewService(store, fakeScanner{}, "aws")
+	signals, err := svc.ListOwnershipSignals(context.Background(), 10, OwnershipFilter{ScanID: scan.ID})
+	if err != nil {
+		t.Fatalf("list ownership signals: %v", err)
+	}
+	if len(signals) != 2 {
+		t.Fatalf("expected 2 ownership signals, got %d", len(signals))
+	}
+	if signals[0].IdentityID != "id-owner-hint" || signals[0].Source != "owner_hint" {
+		t.Fatalf("unexpected top signal %+v", signals[0])
+	}
+}
+
 func TestServiceGetFindingsTrend(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
@@ -575,7 +623,7 @@ func TestServiceRunRepoScanLocked(t *testing.T) {
 	store := db.NewMemoryStore()
 	svc := NewService(store, fakeScanner{}, "aws")
 	locker := scheduler.NewInMemoryLocker()
-	release, ok := locker.TryAcquire("repo-scan:owner/repo")
+	release, ok := locker.TryAcquire("identrail:repo-scan:owner/repo")
 	if !ok {
 		t.Fatal("expected repo lock acquire")
 	}
@@ -654,5 +702,16 @@ func TestSanitizeRepoScanLimit(t *testing.T) {
 	}
 	if _, err := sanitizeRepoScanLimit(600, 100, 500); !errors.Is(err, ErrInvalidRepoScanRequest) {
 		t.Fatalf("expected invalid error for over max value, got %v", err)
+	}
+}
+
+func TestServiceLockKeyNamespace(t *testing.T) {
+	svc := NewService(db.NewMemoryStore(), fakeScanner{}, "aws")
+	if got := svc.lockKey("scan:aws"); got != "identrail:scan:aws" {
+		t.Fatalf("unexpected default namespaced lock key %q", got)
+	}
+	svc.LockNamespace = ""
+	if got := svc.lockKey("scan:aws"); got != "scan:aws" {
+		t.Fatalf("unexpected lock key without namespace %q", got)
 	}
 }

@@ -41,6 +41,12 @@ var allowedAWSSources = map[string]struct{}{
 	"sdk":     {},
 }
 
+var allowedLockBackends = map[string]struct{}{
+	"auto":     {},
+	"inmemory": {},
+	"postgres": {},
+}
+
 // ValidateSecurity checks hard-fail security misconfigurations.
 func ValidateSecurity(cfg Config) error {
 	if len(cfg.APIKeyScopes) > 0 {
@@ -200,6 +206,16 @@ func ValidateSecurity(cfg Config) error {
 			return fmt.Errorf("IDENTRAIL_WORKER_REPO_SCAN_MAX_FINDINGS must be <= IDENTRAIL_REPO_SCAN_MAX_FINDINGS_MAX")
 		}
 	}
+	lockBackend := strings.ToLower(strings.TrimSpace(cfg.LockBackend))
+	if lockBackend == "" {
+		lockBackend = defaultLockBackend
+	}
+	if _, ok := allowedLockBackends[lockBackend]; !ok {
+		return fmt.Errorf("invalid IDENTRAIL_LOCK_BACKEND %q", cfg.LockBackend)
+	}
+	if lockBackend == "postgres" && strings.TrimSpace(cfg.DatabaseURL) == "" {
+		return fmt.Errorf("IDENTRAIL_LOCK_BACKEND=postgres requires IDENTRAIL_DATABASE_URL")
+	}
 	if len(cfg.APIKeys) == 0 && len(cfg.APIKeyScopes) == 0 {
 		return fmt.Errorf("no API keys configured: set IDENTRAIL_API_KEYS or IDENTRAIL_API_KEY_SCOPES to enable authentication")
 	}
@@ -223,6 +239,13 @@ func SecurityWarnings(cfg Config) []string {
 	}
 	if cfg.RepoScanEnabled && len(cfg.RepoScanAllowlist) == 0 {
 		warnings = append(warnings, "repo scan allowlist is open; set IDENTRAIL_REPO_SCAN_ALLOWLIST to restrict allowed repository targets")
+	}
+	lockBackend := strings.ToLower(strings.TrimSpace(cfg.LockBackend))
+	if lockBackend == "" {
+		lockBackend = defaultLockBackend
+	}
+	if strings.TrimSpace(cfg.DatabaseURL) != "" && lockBackend == "inmemory" {
+		warnings = append(warnings, "IDENTRAIL_LOCK_BACKEND is inmemory in database mode; use postgres lock backend for multi-instance deployments")
 	}
 	return warnings
 }

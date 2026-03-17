@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/config"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/scheduler"
 )
 
 func TestBuildScanServiceMemoryStore(t *testing.T) {
@@ -57,6 +58,44 @@ func TestBuildScanServiceRepoScanSettings(t *testing.T) {
 	}
 	if len(svc.RepoScanAllowedTargets) != 1 || svc.RepoScanAllowedTargets[0] != "trusted/*" {
 		t.Fatalf("unexpected repo scan allowlist %+v", svc.RepoScanAllowedTargets)
+	}
+}
+
+func TestBuildScanServiceLockDefaults(t *testing.T) {
+	cfg := config.Config{
+		Provider:       "aws",
+		AWSFixturePath: []string{"testdata/aws/role_with_policies.json"},
+		LockBackend:    "inmemory",
+		LockNamespace:  "tenant-a",
+	}
+	svc, closeFn, err := BuildScanService(cfg)
+	if err != nil {
+		t.Fatalf("build service failed: %v", err)
+	}
+	defer func() { _ = closeFn() }()
+
+	if svc.LockNamespace != "tenant-a" {
+		t.Fatalf("unexpected lock namespace %q", svc.LockNamespace)
+	}
+	if _, ok := svc.Locker.(*scheduler.InMemoryLocker); !ok {
+		t.Fatalf("expected in-memory locker, got %T", svc.Locker)
+	}
+}
+
+func TestBuildScanServiceLockBackendAutoWithoutDatabase(t *testing.T) {
+	cfg := config.Config{
+		Provider:       "aws",
+		AWSFixturePath: []string{"testdata/aws/role_with_policies.json"},
+		LockBackend:    "auto",
+	}
+	svc, closeFn, err := BuildScanService(cfg)
+	if err != nil {
+		t.Fatalf("build service failed: %v", err)
+	}
+	defer func() { _ = closeFn() }()
+
+	if _, ok := svc.Locker.(*scheduler.InMemoryLocker); !ok {
+		t.Fatalf("expected in-memory locker for auto mode without database, got %T", svc.Locker)
 	}
 }
 

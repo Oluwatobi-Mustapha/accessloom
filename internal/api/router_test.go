@@ -94,7 +94,7 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 			},
 		}
 	}
-	r := NewRouter(logger, metrics, svc, RouterOptions{})
+	r := NewRouter(logger, metrics, svc, RouterOptions{RateLimitRPM: 10000, RateLimitBurst: 1000})
 
 	postReq := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
 	postW := httptest.NewRecorder()
@@ -195,6 +195,13 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 		t.Fatalf("expected relationships 200, got %d", relationshipsW.Code)
 	}
 
+	ownershipReq := httptest.NewRequest(http.MethodGet, "/v1/ownership/signals", nil)
+	ownershipW := httptest.NewRecorder()
+	r.ServeHTTP(ownershipW, ownershipReq)
+	if ownershipW.Code != http.StatusOK {
+		t.Fatalf("expected ownership signals 200, got %d", ownershipW.Code)
+	}
+
 	diffReq := httptest.NewRequest(
 		http.MethodGet,
 		"/v1/scans/"+postBody2.Scan.ID+"/diff?previous_scan_id="+firstScanID,
@@ -259,6 +266,42 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 	if repoFindingsW.Code != http.StatusOK {
 		t.Fatalf("expected repo findings 200, got %d", repoFindingsW.Code)
 	}
+
+	scansPageOneReq := httptest.NewRequest(http.MethodGet, "/v1/scans?limit=1", nil)
+	scansPageOneW := httptest.NewRecorder()
+	r.ServeHTTP(scansPageOneW, scansPageOneReq)
+	if scansPageOneW.Code != http.StatusOK {
+		t.Fatalf("expected scans page one 200, got %d", scansPageOneW.Code)
+	}
+	var scansPageOne struct {
+		Items      []db.ScanRecord `json:"items"`
+		NextCursor string          `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(scansPageOneW.Body.Bytes(), &scansPageOne); err != nil {
+		t.Fatalf("decode scans page one: %v", err)
+	}
+	if len(scansPageOne.Items) != 1 || scansPageOne.NextCursor == "" {
+		t.Fatalf("expected one scan and next cursor, got %+v", scansPageOne)
+	}
+
+	scansPageTwoReq := httptest.NewRequest(http.MethodGet, "/v1/scans?limit=1&cursor="+scansPageOne.NextCursor, nil)
+	scansPageTwoW := httptest.NewRecorder()
+	r.ServeHTTP(scansPageTwoW, scansPageTwoReq)
+	if scansPageTwoW.Code != http.StatusOK {
+		t.Fatalf("expected scans page two 200, got %d", scansPageTwoW.Code)
+	}
+	var scansPageTwo struct {
+		Items []db.ScanRecord `json:"items"`
+	}
+	if err := json.Unmarshal(scansPageTwoW.Body.Bytes(), &scansPageTwo); err != nil {
+		t.Fatalf("decode scans page two: %v", err)
+	}
+	if len(scansPageTwo.Items) != 1 {
+		t.Fatalf("expected one scan on page two, got %+v", scansPageTwo)
+	}
+	if scansPageOne.Items[0].ID == scansPageTwo.Items[0].ID {
+		t.Fatalf("expected different scan records across pages, got %q", scansPageTwo.Items[0].ID)
+	}
 }
 
 func TestRouterUnavailableWhenServiceMissing(t *testing.T) {
@@ -294,6 +337,13 @@ func TestRouterUnavailableWhenServiceMissing(t *testing.T) {
 		t.Fatalf("expected identities 200 without service, got %d", identityW.Code)
 	}
 
+	ownershipReq := httptest.NewRequest(http.MethodGet, "/v1/ownership/signals", nil)
+	ownershipW := httptest.NewRecorder()
+	r.ServeHTTP(ownershipW, ownershipReq)
+	if ownershipW.Code != http.StatusOK {
+		t.Fatalf("expected ownership signals 200 without service, got %d", ownershipW.Code)
+	}
+
 	repoReq := httptest.NewRequest(http.MethodPost, "/v1/repo-scans", bytes.NewBufferString(`{"repository":"owner/repo"}`))
 	repoReq.Header.Set("Content-Type", "application/json")
 	repoW := httptest.NewRecorder()
@@ -324,7 +374,7 @@ func TestRouterScanConflictWhenLocked(t *testing.T) {
 	svc := NewService(store, routerScanner{}, "aws")
 
 	locker := scheduler.NewInMemoryLocker()
-	release, ok := locker.TryAcquire("scan:aws")
+	release, ok := locker.TryAcquire("identrail:scan:aws")
 	if !ok {
 		t.Fatal("expected lock acquire")
 	}
@@ -347,7 +397,7 @@ func TestRouterRepoScanConflictWhenLocked(t *testing.T) {
 	store := db.NewMemoryStore()
 	svc := NewService(store, routerScanner{}, "aws")
 	locker := scheduler.NewInMemoryLocker()
-	release, ok := locker.TryAcquire("repo-scan:owner/repo")
+	release, ok := locker.TryAcquire("identrail:repo-scan:owner/repo")
 	if !ok {
 		t.Fatal("expected lock acquire")
 	}
@@ -636,5 +686,26 @@ func TestRouterScanDiffAndEventsNotFound(t *testing.T) {
 	r.ServeHTTP(invalidBaselineW, invalidBaselineReq)
 	if invalidBaselineW.Code != http.StatusBadRequest {
 		t.Fatalf("expected diff 400 for invalid baseline scan, got %d", invalidBaselineW.Code)
+	}
+}
+
+func TestRouterPaginationHelpers(t *testing.T) {
+	if got := parseCursor(""); got != 0 {
+		t.Fatalf("expected empty cursor to parse as 0, got %d", got)
+	}
+	if got := parseCursor("bad"); got != 0 {
+		t.Fatalf("expected invalid cursor to parse as 0, got %d", got)
+	}
+	if got := parseCursor("12"); got != 12 {
+		t.Fatalf("expected cursor 12, got %d", got)
+	}
+	items := []int{1, 2, 3}
+	page, next := pageWithCursor(items, 0, 2)
+	if len(page) != 2 || next != "2" {
+		t.Fatalf("unexpected page result page=%+v next=%q", page, next)
+	}
+	page, next = pageWithCursor(items, 2, 2)
+	if len(page) != 1 || next != "" {
+		t.Fatalf("unexpected final page result page=%+v next=%q", page, next)
 	}
 }

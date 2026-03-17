@@ -54,6 +54,8 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_TARGETS", "")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_HISTORY_LIMIT", "")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_MAX_FINDINGS", "")
+	t.Setenv("IDENTRAIL_LOCK_BACKEND", "")
+	t.Setenv("IDENTRAIL_LOCK_NAMESPACE", "")
 
 	cfg := Load()
 	if cfg.HTTPAddr != defaultHTTPAddr {
@@ -194,6 +196,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.WorkerRepoScanFindings != 0 {
 		t.Fatalf("expected default worker repo scan findings override 0, got %d", cfg.WorkerRepoScanFindings)
 	}
+	if cfg.LockBackend != defaultLockBackend {
+		t.Fatalf("expected default lock backend %q, got %q", defaultLockBackend, cfg.LockBackend)
+	}
+	if cfg.LockNamespace != defaultLockNamespace {
+		t.Fatalf("expected default lock namespace %q, got %q", defaultLockNamespace, cfg.LockNamespace)
+	}
 }
 
 func TestLoadFromEnv(t *testing.T) {
@@ -244,6 +252,8 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_TARGETS", "owner/repo,trusted/infra")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_HISTORY_LIMIT", "700")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_MAX_FINDINGS", "80")
+	t.Setenv("IDENTRAIL_LOCK_BACKEND", "postgres")
+	t.Setenv("IDENTRAIL_LOCK_NAMESPACE", "prod-identrail")
 
 	cfg := Load()
 	if cfg.HTTPAddr != "127.0.0.1:9090" {
@@ -383,6 +393,12 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.WorkerRepoScanFindings != 80 {
 		t.Fatalf("unexpected worker repo scan findings override: %d", cfg.WorkerRepoScanFindings)
+	}
+	if cfg.LockBackend != "postgres" {
+		t.Fatalf("unexpected lock backend: %q", cfg.LockBackend)
+	}
+	if cfg.LockNamespace != "prod-identrail" {
+		t.Fatalf("unexpected lock namespace: %q", cfg.LockNamespace)
 	}
 }
 

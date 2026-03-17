@@ -56,3 +56,24 @@ func TestThirdMigrationContainsRepoScanTables(t *testing.T) {
 		t.Fatal("expected repo_findings table creation in third migration")
 	}
 }
+
+func TestFourthMigrationContainsPerformanceIndexes(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "000004_performance_indexes.up.sql")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	text := string(content)
+	required := []string{
+		"idx_findings_scan_severity_type_created",
+		"idx_findings_created_at",
+		"idx_repo_findings_scan_severity_type_created",
+		"idx_repo_findings_created_at",
+		"idx_scan_events_scan_level_created",
+	}
+	for _, item := range required {
+		if !strings.Contains(text, item) {
+			t.Fatalf("expected performance index %q in fourth migration", item)
+		}
+	}
+}

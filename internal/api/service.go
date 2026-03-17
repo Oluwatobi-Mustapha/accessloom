@@ -37,13 +37,14 @@ type RepoScannerFactory func(historyLimit int, maxFindings int) RepoScanExecutor
 
 // Service orchestrates scan execution and persistence.
 type Service struct {
-	Store        db.Store
-	Scanner      ScannerRunner
-	Provider     string
-	Now          func() time.Time
-	Locker       scheduler.Locker
-	Alerter      FindingAlerter
-	OnAlertError func(error)
+	Store         db.Store
+	Scanner       ScannerRunner
+	Provider      string
+	Now           func() time.Time
+	Locker        scheduler.Locker
+	LockNamespace string
+	Alerter       FindingAlerter
+	OnAlertError  func(error)
 	// Repo scan controls are intentionally separate from cloud identity scan flow.
 	RepoScanEnabled             bool
 	RepoScanDefaultHistoryLimit int
@@ -108,6 +109,11 @@ type TrendPoint struct {
 	BySeverity map[string]int `json:"by_severity"`
 }
 
+// OwnershipFilter narrows ownership-signal query scope.
+type OwnershipFilter struct {
+	ScanID string
+}
+
 // ErrScanInProgress is returned when a scan for the same provider is already running.
 var ErrScanInProgress = errors.New("scan already in progress")
 
@@ -134,6 +140,7 @@ func NewService(store db.Store, scanner ScannerRunner, provider string) *Service
 		Provider:                    provider,
 		Now:                         time.Now,
 		Locker:                      scheduler.NewInMemoryLocker(),
+		LockNamespace:               "identrail",
 		Alerter:                     NopFindingAlerter{},
 		RepoScanEnabled:             true,
 		RepoScanDefaultHistoryLimit: defaultRepoScanHistoryLimit,
@@ -153,7 +160,7 @@ func NewService(store db.Store, scanner ScannerRunner, provider string) *Service
 // RunScan executes one scan and persists metadata + findings.
 func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
 	if s.Locker != nil {
-		release, ok := s.Locker.TryAcquire("scan:" + s.Provider)
+		release, ok := s.Locker.TryAcquire(s.lockKey("scan:" + s.Provider))
 		if !ok {
 			return RunScanResult{}, ErrScanInProgress
 		}
@@ -244,7 +251,7 @@ func (s *Service) RunRepoScanPersisted(ctx context.Context, request RepoScanRequ
 		return RunRepoScanResult{}, ErrRepoTargetNotAllowed
 	}
 	if s.Locker != nil {
-		release, ok := s.Locker.TryAcquire("repo-scan:" + strings.ToLower(target))
+		release, ok := s.Locker.TryAcquire(s.lockKey("repo-scan:" + strings.ToLower(target)))
 		if !ok {
 			return RunRepoScanResult{}, ErrRepoScanInProgress
 		}
@@ -510,6 +517,47 @@ func (s *Service) GetFindingsTrendFiltered(ctx context.Context, points int, seve
 	return result, nil
 }
 
+// ListOwnershipSignals returns inferred ownership hints for identities in one scan.
+func (s *Service) ListOwnershipSignals(ctx context.Context, limit int, filter OwnershipFilter) ([]domain.OwnershipSignal, error) {
+	normalizedScanID := strings.TrimSpace(filter.ScanID)
+	if normalizedScanID == "" {
+		latest, err := s.latestScanID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		normalizedScanID = latest
+	}
+	loadLimit := limit
+	if loadLimit <= 0 {
+		loadLimit = 100
+	}
+	if loadLimit > 5000 {
+		loadLimit = 5000
+	}
+	identities, err := s.Store.ListIdentities(ctx, db.IdentityFilter{ScanID: normalizedScanID}, loadLimit)
+	if err != nil {
+		return nil, err
+	}
+	signals := make([]domain.OwnershipSignal, 0, len(identities))
+	for _, identity := range identities {
+		signal, ok := inferOwnershipSignal(identity)
+		if !ok {
+			continue
+		}
+		signals = append(signals, signal)
+	}
+	sort.Slice(signals, func(i, j int) bool {
+		if signals[i].Confidence == signals[j].Confidence {
+			return signals[i].IdentityID < signals[j].IdentityID
+		}
+		return signals[i].Confidence > signals[j].Confidence
+	})
+	if limit > 0 && len(signals) > limit {
+		signals = signals[:limit]
+	}
+	return signals, nil
+}
+
 // GetScanDiff compares findings between this scan and previous scan of same provider.
 func (s *Service) GetScanDiff(ctx context.Context, scanID string, limit int) (ScanDiff, error) {
 	return s.GetScanDiffAgainst(ctx, scanID, "", limit)
@@ -676,4 +724,68 @@ func repoTargetAllowed(target string, allowlist []string) bool {
 		}
 	}
 	return false
+}
+
+func inferOwnershipSignal(identity domain.Identity) (domain.OwnershipSignal, bool) {
+	ownerHint := strings.TrimSpace(identity.OwnerHint)
+	if ownerHint != "" {
+		return domain.OwnershipSignal{
+			ID:         "ownership:" + identity.ID,
+			IdentityID: identity.ID,
+			Team:       ownerHint,
+			Source:     "owner_hint",
+			Confidence: 0.9,
+		}, true
+	}
+
+	tags := identity.Tags
+	team := firstNonEmptyTag(tags, "team", "owner", "team_name")
+	repository := firstNonEmptyTag(tags, "repository", "repo", "service_repo")
+	if team == "" && repository == "" {
+		return domain.OwnershipSignal{}, false
+	}
+	confidence := 0.65
+	source := "tags"
+	if team != "" {
+		confidence = 0.8
+		source = "tags.team"
+	}
+	if team != "" && repository != "" {
+		confidence = 0.85
+		source = "tags.team+repository"
+	}
+	if team == "" && repository != "" {
+		confidence = 0.75
+		source = "tags.repository"
+	}
+	return domain.OwnershipSignal{
+		ID:         "ownership:" + identity.ID,
+		IdentityID: identity.ID,
+		Team:       team,
+		Repository: repository,
+		Source:     source,
+		Confidence: confidence,
+	}, true
+}
+
+func firstNonEmptyTag(tags map[string]string, keys ...string) string {
+	for _, key := range keys {
+		value := strings.TrimSpace(tags[key])
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func (s *Service) lockKey(key string) string {
+	normalizedKey := strings.TrimSpace(key)
+	namespace := strings.TrimSpace(s.LockNamespace)
+	if namespace == "" {
+		return normalizedKey
+	}
+	if normalizedKey == "" {
+		return namespace
+	}
+	return namespace + ":" + normalizedKey
 }
