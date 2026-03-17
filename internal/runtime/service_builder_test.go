@@ -67,6 +67,34 @@ func TestBuildScanServiceUnsupportedProvider(t *testing.T) {
 	}
 }
 
+func TestBuildScanServiceUnsupportedAWSSource(t *testing.T) {
+	cfg := config.Config{
+		Provider:  "aws",
+		AWSSource: "unknown",
+	}
+	if _, _, err := BuildScanService(cfg); err == nil {
+		t.Fatal("expected unsupported aws source error")
+	}
+}
+
+func TestBuildScanServiceAWSSDKMode(t *testing.T) {
+	cfg := config.Config{
+		Provider:  "aws",
+		AWSSource: "sdk",
+		AWSRegion: "us-east-1",
+	}
+	svc, closeFn, err := BuildScanService(cfg)
+	if err != nil {
+		t.Fatalf("build service failed: %v", err)
+	}
+	if svc == nil || closeFn == nil {
+		t.Fatal("expected non-nil service and close function")
+	}
+	if err := closeFn(); err != nil {
+		t.Fatalf("close failed: %v", err)
+	}
+}
+
 func TestBuildScanServiceUnsupportedKubernetesSource(t *testing.T) {
 	cfg := config.Config{
 		Provider:         "kubernetes",

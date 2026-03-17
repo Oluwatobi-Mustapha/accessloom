@@ -148,6 +148,22 @@ func TestExecuteKubernetesUnsupportedSource(t *testing.T) {
 	}
 }
 
+func TestExecuteAWSUnsupportedSource(t *testing.T) {
+	cfg := config.Config{
+		ServiceName: "identrail-test",
+		Provider:    "aws",
+		AWSSource:   "unknown",
+	}
+	var out bytes.Buffer
+	err := Execute(cfg, []string{"scan"}, &out)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "unsupported aws source") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestExecuteUnknownCommand(t *testing.T) {
 	cfg := config.Config{ServiceName: "identrail-test", Provider: "aws"}
 	var out bytes.Buffer

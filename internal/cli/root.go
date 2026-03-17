@@ -174,13 +174,30 @@ func defaultFixturesForProvider(cfg config.Config) []string {
 func buildScannerForProvider(cfg config.Config, fixtures []string, staleAfterDays int) (app.Scanner, error) {
 	switch strings.ToLower(strings.TrimSpace(cfg.Provider)) {
 	case "aws":
-		return app.Scanner{
-			Collector:            awsprovider.NewFixtureCollector(fixtures),
-			Normalizer:           awsprovider.NewRoleNormalizer(),
-			PermissionResolver:   awsprovider.NewPolicyPermissionResolver(),
-			RelationshipResolver: awsprovider.NewRelationshipBuilder(),
-			RiskRuleSet:          awsprovider.NewRuleSet(awsprovider.WithStaleAfter(time.Duration(staleAfterDays) * 24 * time.Hour)),
-		}, nil
+		switch strings.ToLower(strings.TrimSpace(cfg.AWSSource)) {
+		case "", "fixture":
+			return app.Scanner{
+				Collector:            awsprovider.NewFixtureCollector(fixtures),
+				Normalizer:           awsprovider.NewRoleNormalizer(),
+				PermissionResolver:   awsprovider.NewPolicyPermissionResolver(),
+				RelationshipResolver: awsprovider.NewRelationshipBuilder(),
+				RiskRuleSet:          awsprovider.NewRuleSet(awsprovider.WithStaleAfter(time.Duration(staleAfterDays) * 24 * time.Hour)),
+			}, nil
+		case "sdk":
+			iamAPI, err := awsprovider.NewSDKIAMAPI(cfg.AWSRegion, cfg.AWSProfile)
+			if err != nil {
+				return app.Scanner{}, fmt.Errorf("initialize aws sdk collector: %w", err)
+			}
+			return app.Scanner{
+				Collector:            awsprovider.NewCollector(iamAPI),
+				Normalizer:           awsprovider.NewRoleNormalizer(),
+				PermissionResolver:   awsprovider.NewPolicyPermissionResolver(),
+				RelationshipResolver: awsprovider.NewRelationshipBuilder(),
+				RiskRuleSet:          awsprovider.NewRuleSet(awsprovider.WithStaleAfter(time.Duration(staleAfterDays) * 24 * time.Hour)),
+			}, nil
+		default:
+			return app.Scanner{}, fmt.Errorf("unsupported aws source %q", cfg.AWSSource)
+		}
 	case "kubernetes":
 		switch strings.ToLower(strings.TrimSpace(cfg.KubernetesSource)) {
 		case "", "fixture":

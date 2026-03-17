@@ -34,6 +34,11 @@ var allowedKubernetesSources = map[string]struct{}{
 	"kubectl": {},
 }
 
+var allowedAWSSources = map[string]struct{}{
+	"fixture": {},
+	"sdk":     {},
+}
+
 // ValidateSecurity checks hard-fail security misconfigurations.
 func ValidateSecurity(cfg Config) error {
 	if len(cfg.APIKeyScopes) > 0 {
@@ -119,6 +124,18 @@ func ValidateSecurity(cfg Config) error {
 		}
 		if source == "kubectl" && strings.TrimSpace(cfg.KubectlPath) == "" {
 			return fmt.Errorf("IDENTRAIL_KUBECTL_PATH must be set when IDENTRAIL_K8S_SOURCE=kubectl")
+		}
+	}
+	if strings.ToLower(strings.TrimSpace(cfg.Provider)) == "aws" {
+		source := strings.ToLower(strings.TrimSpace(cfg.AWSSource))
+		if source == "" {
+			source = "fixture"
+		}
+		if _, ok := allowedAWSSources[source]; !ok {
+			return fmt.Errorf("invalid IDENTRAIL_AWS_SOURCE %q", cfg.AWSSource)
+		}
+		if source == "sdk" && strings.TrimSpace(cfg.AWSRegion) == "" {
+			return fmt.Errorf("IDENTRAIL_AWS_REGION must be set when IDENTRAIL_AWS_SOURCE=sdk")
 		}
 	}
 	if len(cfg.APIKeys) == 0 && len(cfg.APIKeyScopes) == 0 {

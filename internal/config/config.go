@@ -12,6 +12,8 @@ const (
 	defaultLogLevel     = "info"
 	defaultProvider     = "aws"
 	defaultServiceName  = "identrail"
+	defaultAWSSource    = "fixture"
+	defaultAWSRegion    = "us-east-1"
 	defaultAWSFixtures  = "testdata/aws/role_with_policies.json,testdata/aws/role_with_urlencoded_trust.json"
 	defaultK8sFixtures  = "testdata/kubernetes/service_account_payments.json,testdata/kubernetes/role_binding_cluster_admin.json,testdata/kubernetes/pod_payments.json"
 	defaultK8sSource    = "fixture"
@@ -27,6 +29,9 @@ type Config struct {
 	Provider                 string
 	ServiceName              string
 	DatabaseURL              string
+	AWSSource                string
+	AWSRegion                string
+	AWSProfile               string
 	AWSFixturePath           []string
 	KubernetesFixturePath    []string
 	KubernetesSource         string
@@ -64,6 +69,9 @@ func Load() Config {
 		Provider:                 strings.ToLower(getEnv("IDENTRAIL_PROVIDER", defaultProvider)),
 		ServiceName:              getEnv("IDENTRAIL_SERVICE_NAME", defaultServiceName),
 		DatabaseURL:              getEnv("IDENTRAIL_DATABASE_URL", ""),
+		AWSSource:                strings.ToLower(getEnv("IDENTRAIL_AWS_SOURCE", defaultAWSSource)),
+		AWSRegion:                getEnv("IDENTRAIL_AWS_REGION", defaultAWSRegion),
+		AWSProfile:               getEnv("IDENTRAIL_AWS_PROFILE", ""),
 		AWSFixturePath:           parseCommaSeparated(getEnv("IDENTRAIL_AWS_FIXTURES", defaultAWSFixtures)),
 		KubernetesFixturePath:    parseCommaSeparated(getEnv("IDENTRAIL_K8S_FIXTURES", defaultK8sFixtures)),
 		KubernetesSource:         strings.ToLower(getEnv("IDENTRAIL_K8S_SOURCE", defaultK8sSource)),

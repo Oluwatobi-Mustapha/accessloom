@@ -38,12 +38,31 @@ func BuildScanService(cfg config.Config) (*api.Service, func() error, error) {
 	var scanner app.Scanner
 	switch strings.ToLower(strings.TrimSpace(cfg.Provider)) {
 	case "aws":
-		scanner = app.Scanner{
-			Collector:            awsprovider.NewFixtureCollector(cfg.AWSFixturePath),
-			Normalizer:           awsprovider.NewRoleNormalizer(),
-			PermissionResolver:   awsprovider.NewPolicyPermissionResolver(),
-			RelationshipResolver: awsprovider.NewRelationshipBuilder(),
-			RiskRuleSet:          awsprovider.NewRuleSet(),
+		switch strings.ToLower(strings.TrimSpace(cfg.AWSSource)) {
+		case "", "fixture":
+			scanner = app.Scanner{
+				Collector:            awsprovider.NewFixtureCollector(cfg.AWSFixturePath),
+				Normalizer:           awsprovider.NewRoleNormalizer(),
+				PermissionResolver:   awsprovider.NewPolicyPermissionResolver(),
+				RelationshipResolver: awsprovider.NewRelationshipBuilder(),
+				RiskRuleSet:          awsprovider.NewRuleSet(),
+			}
+		case "sdk":
+			iamAPI, iamErr := awsprovider.NewSDKIAMAPI(cfg.AWSRegion, cfg.AWSProfile)
+			if iamErr != nil {
+				_ = store.Close()
+				return nil, nil, fmt.Errorf("initialize aws sdk collector: %w", iamErr)
+			}
+			scanner = app.Scanner{
+				Collector:            awsprovider.NewCollector(iamAPI),
+				Normalizer:           awsprovider.NewRoleNormalizer(),
+				PermissionResolver:   awsprovider.NewPolicyPermissionResolver(),
+				RelationshipResolver: awsprovider.NewRelationshipBuilder(),
+				RiskRuleSet:          awsprovider.NewRuleSet(),
+			}
+		default:
+			_ = store.Close()
+			return nil, nil, fmt.Errorf("unsupported aws source %q", cfg.AWSSource)
 		}
 	case "kubernetes":
 		var collector app.Scanner

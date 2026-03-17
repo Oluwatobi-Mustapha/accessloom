@@ -42,6 +42,41 @@ func TestValidateSecuritySuccess(t *testing.T) {
 	}
 }
 
+func TestValidateSecurityRejectsInvalidAWSSource(t *testing.T) {
+	cfg := Config{
+		Provider:  "aws",
+		AWSSource: "invalid",
+		APIKeys:   []string{"reader"},
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected invalid aws source error")
+	}
+}
+
+func TestValidateSecurityRejectsEmptyAWSRegionInSDKMode(t *testing.T) {
+	cfg := Config{
+		Provider:  "aws",
+		AWSSource: "sdk",
+		AWSRegion: "",
+		APIKeys:   []string{"reader"},
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected aws region validation error")
+	}
+}
+
+func TestValidateSecurityAcceptsAWSSDKMode(t *testing.T) {
+	cfg := Config{
+		Provider:  "aws",
+		AWSSource: "sdk",
+		AWSRegion: "us-east-1",
+		APIKeys:   []string{"reader"},
+	}
+	if err := ValidateSecurity(cfg); err != nil {
+		t.Fatalf("expected aws sdk mode to be valid, got %v", err)
+	}
+}
+
 func TestValidateSecurityRejectsInvalidKubernetesSource(t *testing.T) {
 	cfg := Config{
 		Provider:         "kubernetes",

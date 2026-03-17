@@ -12,6 +12,9 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_PROVIDER", "")
 	t.Setenv("IDENTRAIL_SERVICE_NAME", "")
 	t.Setenv("IDENTRAIL_DATABASE_URL", "")
+	t.Setenv("IDENTRAIL_AWS_SOURCE", "")
+	t.Setenv("IDENTRAIL_AWS_REGION", "")
+	t.Setenv("IDENTRAIL_AWS_PROFILE", "")
 	t.Setenv("IDENTRAIL_AWS_FIXTURES", "")
 	t.Setenv("IDENTRAIL_K8S_FIXTURES", "")
 	t.Setenv("IDENTRAIL_K8S_SOURCE", "")
@@ -55,6 +58,15 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.DatabaseURL != "" {
 		t.Fatalf("expected empty database url, got %q", cfg.DatabaseURL)
+	}
+	if cfg.AWSSource != defaultAWSSource {
+		t.Fatalf("expected default aws source %q, got %q", defaultAWSSource, cfg.AWSSource)
+	}
+	if cfg.AWSRegion != defaultAWSRegion {
+		t.Fatalf("expected default aws region %q, got %q", defaultAWSRegion, cfg.AWSRegion)
+	}
+	if cfg.AWSProfile != "" {
+		t.Fatalf("expected empty aws profile, got %q", cfg.AWSProfile)
 	}
 	if len(cfg.AWSFixturePath) != 2 {
 		t.Fatalf("expected 2 default fixture paths, got %d", len(cfg.AWSFixturePath))
@@ -142,6 +154,9 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_PROVIDER", "AWS")
 	t.Setenv("IDENTRAIL_SERVICE_NAME", "identrail-dev")
 	t.Setenv("IDENTRAIL_DATABASE_URL", "postgres://example")
+	t.Setenv("IDENTRAIL_AWS_SOURCE", "sdk")
+	t.Setenv("IDENTRAIL_AWS_REGION", "eu-west-1")
+	t.Setenv("IDENTRAIL_AWS_PROFILE", "engineering")
 	t.Setenv("IDENTRAIL_AWS_FIXTURES", "fixtures/a.json,fixtures/b.json")
 	t.Setenv("IDENTRAIL_K8S_FIXTURES", "fixtures/sa.json,fixtures/rb.json")
 	t.Setenv("IDENTRAIL_K8S_SOURCE", "kubectl")
@@ -185,6 +200,15 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.DatabaseURL != "postgres://example" {
 		t.Fatalf("unexpected database url: %q", cfg.DatabaseURL)
+	}
+	if cfg.AWSSource != "sdk" {
+		t.Fatalf("unexpected aws source: %q", cfg.AWSSource)
+	}
+	if cfg.AWSRegion != "eu-west-1" {
+		t.Fatalf("unexpected aws region: %q", cfg.AWSRegion)
+	}
+	if cfg.AWSProfile != "engineering" {
+		t.Fatalf("unexpected aws profile: %q", cfg.AWSProfile)
 	}
 	if len(cfg.AWSFixturePath) != 2 || cfg.AWSFixturePath[0] != "fixtures/a.json" || cfg.AWSFixturePath[1] != "fixtures/b.json" {
 		t.Fatalf("unexpected fixture paths: %+v", cfg.AWSFixturePath)
