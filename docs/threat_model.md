@@ -177,6 +177,11 @@ Simple threat list for current system.
 - Fix: Explicit `IDENTRAIL_KUBE_CONTEXT` support and startup validation for allowed k8s source modes.
 - Status: Implemented.
 
+## 36) Wrong AWS Account/Region Collection
+- Threat: Running scans against the wrong AWS account or region can produce misleading findings and false confidence.
+- Fix: Explicit AWS source mode/region config (`IDENTRAIL_AWS_SOURCE`, `IDENTRAIL_AWS_REGION`, optional `IDENTRAIL_AWS_PROFILE`) with startup validation.
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and external KMS guidance.
 - Add audit sink forwarding guide for centralized log pipelines.

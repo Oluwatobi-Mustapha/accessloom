@@ -73,6 +73,9 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 ## Config wiring
 
 - `IDENTRAIL_DATABASE_URL`
+- `IDENTRAIL_AWS_SOURCE`
+- `IDENTRAIL_AWS_REGION`
+- `IDENTRAIL_AWS_PROFILE`
 - `IDENTRAIL_AWS_FIXTURES`
 - `IDENTRAIL_K8S_FIXTURES`
 - `IDENTRAIL_K8S_SOURCE`

@@ -217,3 +217,9 @@ This file tracks major decisions in simple terms.
 - Decision: Add `IDENTRAIL_K8S_SOURCE=kubectl` mode for read-only live cluster collection while keeping fixture mode as default.
 - Why: Enable real environment scans now without blocking on full client-go integration complexity.
 - Tradeoff: Requires `kubectl` binary/context availability and shell execution controls.
+
+## ADR-037: Add AWS Live Collection Mode via SDK
+- Date: 2026-03-17
+- Decision: Add `IDENTRAIL_AWS_SOURCE=sdk` mode to collect IAM roles and policies using AWS SDK while retaining fixture mode.
+- Why: Enable direct onboarding for real AWS environments without replacing deterministic fixture workflows.
+- Tradeoff: Requires valid AWS credentials and region configuration; IAM API rate limits must be handled operationally.

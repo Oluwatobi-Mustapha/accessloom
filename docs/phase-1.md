@@ -36,6 +36,7 @@ Deliver a usable AWS scanner that collects IAM identity data, normalizes relatio
    - retry/backoff for throttling and transient failures
    - idempotent deduplication by role ARN
    - fixture-based and edge-case unit tests
+   - live AWS SDK collector mode (`IDENTRAIL_AWS_SOURCE=sdk`) with read-only role/policy retrieval
 3. Normalizer + Graph: completed
    - role normalization into provider-agnostic identities and policies
    - permission tuple expansion for analysis

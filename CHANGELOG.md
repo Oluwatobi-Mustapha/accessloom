@@ -1,6 +1,12 @@
 # Changelog
 
 ## Unreleased
+- Added AWS live collection mode via AWS SDK:
+  - new adapter: `internal/providers/aws/sdk_client.go`
+  - source selection: `IDENTRAIL_AWS_SOURCE=fixture|sdk`
+  - new config vars: `IDENTRAIL_AWS_REGION`, `IDENTRAIL_AWS_PROFILE`
+  - runtime + CLI wiring for fixture/sdk source modes
+  - startup validation for allowed AWS source values
 - Added Kubernetes live collection mode via kubectl:
   - new collector: `internal/providers/kubernetes/kubectl_collector.go`
   - read-only `kubectl get` ingestion for service accounts, role bindings, cluster role bindings, and pods
