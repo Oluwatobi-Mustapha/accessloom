@@ -76,12 +76,13 @@ func (r *RuleSet) Evaluate(ctx context.Context, bundle providers.NormalizedBundl
 		if len(risks) == 0 {
 			continue
 		}
-		findings = append(findings, overprivilegedFinding(identity, risks, now))
+		sortedRisks := sortAccessRisks(risks)
+		findings = append(findings, overprivilegedFinding(identity, sortedRisks, now))
 		if !hasEscalationRisk(risks) {
 			continue
 		}
 		for _, workloadID := range dedupeStrings(identityWorkloads[identity.ID]) {
-			findings = append(findings, escalationFinding(identity, workloadID, risks, now))
+			findings = append(findings, escalationFinding(identity, workloadID, sortedRisks, now))
 		}
 	}
 
@@ -159,6 +160,27 @@ func hasEscalationRisk(risks []accessRisk) bool {
 		}
 	}
 	return false
+}
+
+func sortAccessRisks(risks []accessRisk) []accessRisk {
+	if len(risks) == 0 {
+		return nil
+	}
+	sorted := make([]accessRisk, len(risks))
+	copy(sorted, risks)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Escalates != sorted[j].Escalates {
+			return sorted[i].Escalates
+		}
+		if sorted[i].Action != sorted[j].Action {
+			return sorted[i].Action < sorted[j].Action
+		}
+		if sorted[i].Resource != sorted[j].Resource {
+			return sorted[i].Resource < sorted[j].Resource
+		}
+		return sorted[i].NodeID < sorted[j].NodeID
+	})
+	return sorted
 }
 
 func sortedIdentities(identities []domain.Identity) []domain.Identity {

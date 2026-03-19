@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -12,11 +13,12 @@ import (
 )
 
 const (
-	defaultPageSize   int32 = 100
-	defaultMaxPages         = 500
-	defaultRetryCount       = 3
-	defaultBaseDelay        = 200 * time.Millisecond
-	defaultMaxDelay         = 3 * time.Second
+	defaultPageSize         int32 = 100
+	defaultMaxPages               = 500
+	defaultRetryCount             = 3
+	defaultBaseDelay              = 200 * time.Millisecond
+	defaultMaxDelay               = 3 * time.Second
+	defaultRetryJitterRatio       = 0.20
 )
 
 // IAMRole represents the minimum AWS IAM role fields required for normalization.
@@ -66,7 +68,9 @@ type Collector struct {
 	pageSize int32
 	maxPages int
 	retry    RetryPolicy
+	jitter   float64
 	sleep    Sleeper
+	randFn   func() float64
 	now      func() time.Time
 }
 
@@ -106,6 +110,25 @@ func WithRetryPolicy(policy RetryPolicy) Option {
 	}
 }
 
+// WithRetryJitterRatio configures bounded random jitter around retry backoff.
+func WithRetryJitterRatio(ratio float64) Option {
+	return func(c *Collector) {
+		if ratio < 0 {
+			ratio = 0
+		}
+		c.jitter = ratio
+	}
+}
+
+// WithRetryRandFunc injects deterministic randomness for retry jitter tests.
+func WithRetryRandFunc(randFn func() float64) Option {
+	return func(c *Collector) {
+		if randFn != nil {
+			c.randFn = randFn
+		}
+	}
+}
+
 // WithSleeper injects a testable sleep function.
 func WithSleeper(s Sleeper) Option {
 	return func(c *Collector) {
@@ -135,8 +158,10 @@ func NewCollector(client IAMAPI, opts ...Option) *Collector {
 			BaseDelay:  defaultBaseDelay,
 			MaxDelay:   defaultMaxDelay,
 		},
-		sleep: defaultSleeper,
-		now:   time.Now,
+		jitter: defaultRetryJitterRatio,
+		sleep:  defaultSleeper,
+		randFn: rand.Float64,
+		now:    time.Now,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -227,9 +252,25 @@ func (c *Collector) withRetry(ctx context.Context, fn func(context.Context) (Lis
 func (c *Collector) backoff(attempt int) time.Duration {
 	delay := c.retry.BaseDelay << attempt
 	if delay > c.retry.MaxDelay {
+		delay = c.retry.MaxDelay
+	}
+	if c.jitter <= 0 {
+		return delay
+	}
+	randFn := c.randFn
+	if randFn == nil {
+		randFn = rand.Float64
+	}
+	jitterRange := float64(delay) * c.jitter
+	jitterOffset := (randFn()*2 - 1) * jitterRange
+	jittered := time.Duration(float64(delay) + jitterOffset)
+	if jittered < 0 {
+		return 0
+	}
+	if jittered > c.retry.MaxDelay {
 		return c.retry.MaxDelay
 	}
-	return delay
+	return jittered
 }
 
 func isRetryable(err error) bool {

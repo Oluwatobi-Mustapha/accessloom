@@ -105,6 +105,7 @@ func TestCollectRetriesOnThrottleThenSucceeds(t *testing.T) {
 	collector := NewCollector(
 		client,
 		WithRetryPolicy(RetryPolicy{MaxRetries: 3, BaseDelay: time.Millisecond, MaxDelay: 10 * time.Millisecond}),
+		WithRetryJitterRatio(0),
 		WithSleeper(func(_ context.Context, delay time.Duration) error {
 			delays = append(delays, delay)
 			return nil
@@ -123,6 +124,42 @@ func TestCollectRetriesOnThrottleThenSucceeds(t *testing.T) {
 	}
 	if delays[0] != time.Millisecond || delays[1] != 2*time.Millisecond {
 		t.Fatalf("unexpected retry delays: %+v", delays)
+	}
+}
+
+func TestCollectRetryBackoffJitterApplied(t *testing.T) {
+	attempt := 0
+	delays := make([]time.Duration, 0, 2)
+
+	client := &fakeIAMClient{
+		listFn: func(_ context.Context, _ string, _ int32) (ListRolesPage, error) {
+			attempt++
+			if attempt <= 2 {
+				return ListRolesPage{}, fakeRetryableError{message: "Throttling"}
+			}
+			return ListRolesPage{Roles: []IAMRole{{ARN: "arn:aws:iam::123:role/app", Name: "app"}}}, nil
+		},
+	}
+
+	collector := NewCollector(
+		client,
+		WithRetryPolicy(RetryPolicy{MaxRetries: 3, BaseDelay: 100 * time.Millisecond, MaxDelay: 500 * time.Millisecond}),
+		WithRetryJitterRatio(0.25),
+		WithRetryRandFunc(func() float64 { return 1.0 }),
+		WithSleeper(func(_ context.Context, delay time.Duration) error {
+			delays = append(delays, delay)
+			return nil
+		}),
+	)
+
+	if _, err := collector.Collect(context.Background()); err != nil {
+		t.Fatalf("collect failed: %v", err)
+	}
+	if len(delays) != 2 {
+		t.Fatalf("expected 2 retry delays, got %d", len(delays))
+	}
+	if delays[0] != 125*time.Millisecond || delays[1] != 250*time.Millisecond {
+		t.Fatalf("expected jittered delays [125ms 250ms], got %+v", delays)
 	}
 }
 

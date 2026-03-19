@@ -22,6 +22,10 @@ func TestRelationshipValidate(t *testing.T) {
 	if invalid.Validate() {
 		t.Fatal("expected invalid relationship")
 	}
+	invalidType := Relationship{ID: "1", Type: RelationshipType("custom_rel"), FromNodeID: "a", ToNodeID: "b"}
+	if invalidType.Validate() {
+		t.Fatal("expected invalid relationship type")
+	}
 }
 
 func TestFindingValidate(t *testing.T) {

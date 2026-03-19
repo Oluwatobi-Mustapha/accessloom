@@ -27,8 +27,10 @@ type RelationshipType string
 const (
 	RelationshipCanAssume      RelationshipType = "can_assume"
 	RelationshipAttachedPolicy RelationshipType = "attached_policy"
+	RelationshipAttachedTo     RelationshipType = "attached_to"
 	RelationshipBoundTo        RelationshipType = "bound_to"
 	RelationshipCanAccess      RelationshipType = "can_access"
+	RelationshipCanImpersonate RelationshipType = "can_impersonate"
 )
 
 // FindingSeverity aligns risk scoring with operator expectations.

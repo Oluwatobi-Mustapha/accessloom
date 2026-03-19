@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -104,6 +105,59 @@ func TestRuleSetDeterministicIDs(t *testing.T) {
 		if first[i].ID != second[i].ID {
 			t.Fatalf("non-deterministic finding id at index %d: %q vs %q", i, first[i].ID, second[i].ID)
 		}
+	}
+}
+
+func TestRuleSetDeterministicEvidenceOrdering(t *testing.T) {
+	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
+	identity := domain.Identity{
+		ID:        serviceAccountID("apps", "demo"),
+		Provider:  domain.ProviderKubernetes,
+		Type:      domain.IdentityTypeServiceAccount,
+		Name:      "apps/demo",
+		ARN:       serviceAccountID("apps", "demo"),
+		OwnerHint: "team-a",
+	}
+	bundle := providers.NormalizedBundle{Identities: []domain.Identity{identity}}
+
+	relationshipsA := []domain.Relationship{
+		{Type: domain.RelationshipCanAccess, FromNodeID: identity.ID, ToNodeID: accessNodeID("create", "clusterrolebindings")},
+		{Type: domain.RelationshipCanAccess, FromNodeID: identity.ID, ToNodeID: accessNodeID("*", "*")},
+	}
+	relationshipsB := []domain.Relationship{
+		{Type: domain.RelationshipCanAccess, FromNodeID: identity.ID, ToNodeID: accessNodeID("*", "*")},
+		{Type: domain.RelationshipCanAccess, FromNodeID: identity.ID, ToNodeID: accessNodeID("create", "clusterrolebindings")},
+	}
+
+	rules := NewRuleSet()
+	rules.now = func() time.Time { return now }
+	findingsA, err := rules.Evaluate(context.Background(), bundle, relationshipsA)
+	if err != nil {
+		t.Fatalf("evaluate A failed: %v", err)
+	}
+	findingsB, err := rules.Evaluate(context.Background(), bundle, relationshipsB)
+	if err != nil {
+		t.Fatalf("evaluate B failed: %v", err)
+	}
+
+	var overA, overB domain.Finding
+	for _, finding := range findingsA {
+		if finding.Type == domain.FindingOverPrivileged {
+			overA = finding
+			break
+		}
+	}
+	for _, finding := range findingsB {
+		if finding.Type == domain.FindingOverPrivileged {
+			overB = finding
+			break
+		}
+	}
+	if overA.ID == "" || overB.ID == "" {
+		t.Fatalf("missing overprivileged finding; got A=%v B=%v", findingTypes(findingsA), findingTypes(findingsB))
+	}
+	if !reflect.DeepEqual(overA.Evidence, overB.Evidence) {
+		t.Fatalf("expected deterministic evidence ordering, got A=%+v B=%+v", overA.Evidence, overB.Evidence)
 	}
 }
 

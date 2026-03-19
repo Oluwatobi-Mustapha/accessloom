@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -128,6 +129,59 @@ func TestRuleSetDeterministicIDs(t *testing.T) {
 		if first[i].ID != second[i].ID {
 			t.Fatalf("non-deterministic ID at index %d: %s vs %s", i, first[i].ID, second[i].ID)
 		}
+	}
+}
+
+func TestRuleSetDeterministicEvidenceOrdering(t *testing.T) {
+	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
+	identity := domain.Identity{
+		ID:       identityIDFromARN("arn:aws:iam::123456789012:role/demo"),
+		Provider: domain.ProviderAWS,
+		Type:     domain.IdentityTypeRole,
+		ARN:      "arn:aws:iam::123456789012:role/demo",
+		Name:     "demo",
+	}
+	bundle := providers.NormalizedBundle{Identities: []domain.Identity{identity}}
+
+	relationshipsA := []domain.Relationship{
+		{Type: domain.RelationshipCanAccess, FromNodeID: identity.ID, ToNodeID: accessNodeID("iam:PassRole", "*")},
+		{Type: domain.RelationshipCanAccess, FromNodeID: identity.ID, ToNodeID: accessNodeID("ec2:*", "*")},
+		{Type: domain.RelationshipCanAssume, FromNodeID: "aws:principal:*", ToNodeID: identity.ID},
+	}
+	relationshipsB := []domain.Relationship{
+		{Type: domain.RelationshipCanAssume, FromNodeID: "aws:principal:*", ToNodeID: identity.ID},
+		{Type: domain.RelationshipCanAccess, FromNodeID: identity.ID, ToNodeID: accessNodeID("ec2:*", "*")},
+		{Type: domain.RelationshipCanAccess, FromNodeID: identity.ID, ToNodeID: accessNodeID("iam:PassRole", "*")},
+	}
+
+	rules := NewRuleSet(WithRuleClock(func() time.Time { return now }))
+	findingsA, err := rules.Evaluate(context.Background(), bundle, relationshipsA)
+	if err != nil {
+		t.Fatalf("evaluate A failed: %v", err)
+	}
+	findingsB, err := rules.Evaluate(context.Background(), bundle, relationshipsB)
+	if err != nil {
+		t.Fatalf("evaluate B failed: %v", err)
+	}
+
+	var overA, overB domain.Finding
+	for _, finding := range findingsA {
+		if finding.Type == domain.FindingOverPrivileged {
+			overA = finding
+			break
+		}
+	}
+	for _, finding := range findingsB {
+		if finding.Type == domain.FindingOverPrivileged {
+			overB = finding
+			break
+		}
+	}
+	if overA.ID == "" || overB.ID == "" {
+		t.Fatalf("missing overprivileged finding; got A=%v B=%v", findingTypes(findingsA), findingTypes(findingsB))
+	}
+	if !reflect.DeepEqual(overA.Evidence, overB.Evidence) {
+		t.Fatalf("expected deterministic evidence ordering, got A=%+v B=%+v", overA.Evidence, overB.Evidence)
 	}
 }
 

@@ -145,7 +145,7 @@ func (r *RuleSet) Evaluate(ctx context.Context, bundle providers.NormalizedBundl
 		if !exists {
 			continue
 		}
-		findings = append(findings, overprivilegedFinding(identity, risks, now))
+		findings = append(findings, overprivilegedFinding(identity, sortAccessRisks(risks), now))
 	}
 
 	for identityID, principals := range riskyTrust {
@@ -157,7 +157,7 @@ func (r *RuleSet) Evaluate(ctx context.Context, bundle providers.NormalizedBundl
 	}
 
 	for identityID, principals := range riskyTrust {
-		risks := overprivileged[identityID]
+		risks := sortAccessRisks(overprivileged[identityID])
 		if len(risks) == 0 {
 			continue
 		}
@@ -257,6 +257,27 @@ func hasEscalationRisk(risks []accessRisk) bool {
 		}
 	}
 	return false
+}
+
+func sortAccessRisks(risks []accessRisk) []accessRisk {
+	if len(risks) == 0 {
+		return nil
+	}
+	sorted := make([]accessRisk, len(risks))
+	copy(sorted, risks)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Escalates != sorted[j].Escalates {
+			return sorted[i].Escalates
+		}
+		if sorted[i].Action != sorted[j].Action {
+			return sorted[i].Action < sorted[j].Action
+		}
+		if sorted[i].Resource != sorted[j].Resource {
+			return sorted[i].Resource < sorted[j].Resource
+		}
+		return sorted[i].NodeID < sorted[j].NodeID
+	})
+	return sorted
 }
 
 func isRiskyPrincipal(fromNodeID, targetAccount string, identityByID map[string]domain.Identity) bool {
