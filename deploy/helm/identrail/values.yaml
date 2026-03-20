@@ -9,6 +9,14 @@ api:
     repository: identrail/api
     tag: latest
     pullPolicy: IfNotPresent
+  podSecurityContext:
+    runAsNonRoot: true
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
   service:
     type: ClusterIP
     port: 8080
@@ -20,6 +28,14 @@ worker:
     repository: identrail/worker
     tag: latest
     pullPolicy: IfNotPresent
+  podSecurityContext:
+    runAsNonRoot: true
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
   resources: {}
 
 web:
