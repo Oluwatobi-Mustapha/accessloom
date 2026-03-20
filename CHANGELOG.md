@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Hardened repository exposure scanner clone target validation:
+  - reject insecure `http://` repository clone URLs
+  - allow `https://`, `ssh://`, and `git@` forms
+  - added regression tests to ensure insecure targets are blocked before clone execution
 - Hardened API rate limiter memory behavior:
   - bounded per-IP limiter cache with deterministic max-cap eviction
   - stale IP limiter entries now expire automatically
