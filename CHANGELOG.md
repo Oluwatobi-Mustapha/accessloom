@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Refreshed vulnerability-sensitive Go runtime/dependency baseline:
+  - raised project Go version baseline to `1.25.8`
+  - upgraded `github.com/quic-go/quic-go` to `v0.57.0` and `qpack` to `v0.6.0`
+  - validated compatibility with full test and vet suites
 - Hardened API rate limiter memory behavior:
   - bounded per-IP limiter cache with deterministic max-cap eviction
   - stale IP limiter entries now expire automatically
