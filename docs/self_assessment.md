@@ -36,6 +36,7 @@ Updated only at major milestones.
 - API scalability: cursor pagination (`cursor`, `next_cursor`) added for list endpoints.
 - Ownership workflow: ownership-signal endpoint added (`GET /v1/ownership/signals`) from identity metadata hints.
 - V1 baseline freeze (first 5): scope guardrails, standards mapping/export, OIDC auth path, graph contract tests, and deterministic risk evidence are now locked.
+- V1 hardening (next 5): collector diagnostics, scheduler retry/dead-letter, partial lifecycle state, normalized-schema validation, and graph contract/snapshot regression checks are now locked.
 - Worker: scheduled process runs scans with shared runtime bootstrap.
 - Migrations: startup migration runner added for Postgres mode.
 - Test health: `go test ./... -cover` passing, coverage above 80%.

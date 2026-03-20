@@ -1,6 +1,18 @@
 # Changelog
 
 ## Unreleased
+- Locked V1 finalization priorities 6-10:
+  - collector reliability hardening with diagnostics and transient kubectl retry/backoff/jitter handling
+  - scheduler bounded retry + dead-letter callback support
+  - explicit scan lifecycle transitions including `partial`
+  - normalized schema contract validation for identities/workloads/policies
+  - graph contract validation for endpoint semantics, uniqueness, and discovery timestamp
+- Added fixture contract regression coverage:
+  - normalized bundle contract tests for AWS and Kubernetes fixture pipelines
+  - graph snapshot regression tests for AWS and Kubernetes relationship edges
+- Added service-level partial-run event handling:
+  - non-fatal source errors are stored as warning scan events
+  - lifecycle states now include `queued`, `running`, `partial`, `succeeded`, `failed`
 - Locked first five V1 finalization priorities:
   - scope freeze guardrails for `aws|kubernetes` runtime providers
   - standards baseline with OIDC/OAuth2-compatible auth and findings export mappings

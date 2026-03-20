@@ -1,6 +1,6 @@
-# V1 Scope And Baseline (First 5 Priorities)
+# V1 Scope And Baseline (First 10 Priorities)
 
-This document locks the first five non-negotiable V1 priorities.
+This document locks the first ten non-negotiable V1 priorities.
 
 ## 1) Scope Freeze
 
@@ -45,3 +45,39 @@ This document locks the first five non-negotiable V1 priorities.
   - escalation paths
 - Findings are typed, deterministic, and include evidence + remediation text.
 - Evidence ordering is deterministic across reruns to keep diffing stable.
+
+## 6) Collector Reliability Hardening
+
+- Collectors now support partial failure diagnostics through `CollectWithDiagnostics`.
+- Kubernetes kubectl collector has bounded retry/backoff/jitter for transient API failures.
+- Source-level decode and collection issues are captured as non-fatal diagnostics.
+- AWS collector now reports non-fatal source issues (for example malformed role payload shapes) without dropping full scan runs.
+
+## 7) Scheduler + Scan Idempotency
+
+- Scheduler runner now supports bounded retry attempts and exponential backoff.
+- Dead-letter callback hook added for exhausted retry paths.
+- Scan lifecycle state tracking now emits: `queued`, `running`, `partial`, `succeeded`, `failed`.
+- Partial runs are explicit in scan events when source diagnostics are present.
+
+## 8) Normalization Contract Hardening
+
+- Normalized bundle validator now enforces required identity/workload/policy fields.
+- Policy normalized payload contract is strict and explicit (`policy_type`, `identity_id`, statement/principal requirements).
+- AWS and Kubernetes fixture pipelines are covered by contract tests to prevent schema drift.
+
+## 9) Graph Contract Hardening
+
+- Graph contract validator now enforces:
+  - edge type support
+  - endpoint integrity by relationship semantic
+  - relationship ID uniqueness
+  - semantic tuple uniqueness (`type + from + to`)
+  - required discovery timestamp on all edges
+- AWS and Kubernetes graph snapshots were added as regression fixtures.
+
+## 10) Risk Rule Reliability Baseline
+
+- Rule outputs remain deterministic for identical inputs.
+- Evidence and relationship contracts are now validated before rule execution is persisted.
+- Regression tests now cover deterministic and stable graph/rule input expectations across providers.

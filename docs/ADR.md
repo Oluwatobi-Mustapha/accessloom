@@ -301,3 +301,33 @@ This file tracks major decisions in simple terms.
 - Decision: Add bounded jitter to AWS IAM retry backoff with deterministic override hooks for tests.
 - Why: Reduce synchronized retry bursts under throttling and improve production scan reliability.
 - Tradeoff: Retry timing becomes non-uniform, so deterministic tests need explicit jitter overrides.
+
+## ADR-051: Add Collector Diagnostics Contract for Partial Failures
+- Date: 2026-03-19
+- Decision: Add optional `CollectWithDiagnostics` provider interface returning non-fatal source errors with collected assets.
+- Why: Preserve scan continuity when partial provider data is malformed/unavailable while still exposing operator-visible reliability signal.
+- Tradeoff: Service layer must handle both full-fail and partial-fail collector paths.
+
+## ADR-052: Enforce Normalized Schema Contract Validation Before Persistence
+- Date: 2026-03-19
+- Decision: Validate normalized bundles for required fields, uniqueness, and policy payload structure before graph/risk persistence.
+- Why: Prevent malformed provider-normalized payloads from entering storage and creating hard-to-debug downstream findings drift.
+- Tradeoff: Stricter validation can fail scans that previously completed with weakly structured data.
+
+## ADR-053: Enforce Graph Contract Validation and Semantic Uniqueness
+- Date: 2026-03-19
+- Decision: Validate relationship endpoint integrity and enforce both ID and semantic tuple uniqueness (`type/from/to`).
+- Why: Prevent graph corruption and duplicate-edge semantics that can inflate paths and create unstable finding outcomes.
+- Tradeoff: Relationship builders must now satisfy stricter endpoint/type contract checks.
+
+## ADR-054: Add Bounded Scheduler Retry + Dead-Letter Hook
+- Date: 2026-03-19
+- Decision: Extend scheduler runner with bounded retries, exponential backoff, and dead-letter callback on terminal failure.
+- Why: Improve resilience to transient scan failures while creating a clear operational hook for unrecoverable errors.
+- Tradeoff: Retries add runtime delay before final failure state is surfaced.
+
+## ADR-055: Persist Partial Scan Lifecycle State
+- Date: 2026-03-19
+- Decision: Introduce explicit `partial` lifecycle state event when scans complete with non-fatal source diagnostics.
+- Why: Operators need deterministic distinction between clean-success and degraded-success runs for incident triage.
+- Tradeoff: Clients consuming scan events must account for one additional lifecycle state.

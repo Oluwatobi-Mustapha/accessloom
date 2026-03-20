@@ -247,6 +247,31 @@ Simple threat list for current system.
 - Fix: Add bounded jitter to AWS retry backoff.
 - Status: Implemented.
 
+## 50) Silent Partial Collector Failures
+- Threat: Collector decode/source issues can be dropped silently, leading operators to trust incomplete scan output.
+- Fix: Add diagnostic collector contract and surface source errors in scan lifecycle events.
+- Status: Implemented.
+
+## 51) Normalized Schema Drift at Runtime
+- Threat: Missing/invalid normalized fields can persist malformed entities and break graph/risk logic later.
+- Fix: Enforce normalized bundle contract validation before graph resolution and persistence.
+- Status: Implemented.
+
+## 52) Graph Edge Drift and Duplicate Semantics
+- Threat: Duplicate or invalid relationship edges can inflate privilege paths and cause unstable findings.
+- Fix: Enforce graph endpoint contract, relationship ID uniqueness, semantic tuple uniqueness, and required discovery timestamp.
+- Status: Implemented.
+
+## 53) Transient Scheduler Failure Drops
+- Threat: One transient failure in scheduled runs can cause missed scans without retry.
+- Fix: Add bounded scheduler retries with exponential backoff and dead-letter callback on exhaustion.
+- Status: Implemented.
+
+## 54) Hidden Degraded Scan Success
+- Threat: A scan can complete with partial source failures but still look like a clean success to operators.
+- Fix: Emit explicit `partial` lifecycle state and warning events with truncated source-error evidence.
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and external KMS guidance.
 - Add audit sink forwarding guide for centralized log pipelines.

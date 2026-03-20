@@ -32,6 +32,11 @@
 - Artifact and finding idempotent upserts
 - Scheduler lock/runner behavior
 - Worker startup and cancellation behavior
+- Provider contract validation for normalized schema + graph semantics
+- Fixture contract tests for AWS and Kubernetes normalization/graph pipelines
+- Graph snapshot regression tests for AWS and Kubernetes edge sets
+- Collector diagnostics and transient retry behavior (kubectl mode)
+- Partial scan lifecycle state assertions (`partial` on non-fatal source errors)
 
 ## CI Pipeline Gates
 
