@@ -37,6 +37,7 @@ Updated only at major milestones.
 - Ownership workflow: ownership-signal endpoint added (`GET /v1/ownership/signals`) from identity metadata hints.
 - V1 baseline freeze (first 5): scope guardrails, standards mapping/export, OIDC auth path, graph contract tests, and deterministic risk evidence are now locked.
 - V1 hardening (next 5): collector diagnostics, scheduler retry/dead-letter, partial lifecycle state, normalized-schema validation, and graph contract/snapshot regression checks are now locked.
+- V1 hardening (11-15): API sort + OpenAPI contract, CLI stability smoke, dashboard empty/error coverage, migration rollback roundtrip, and CI runtime smoke gates are now locked.
 - Worker: scheduled process runs scans with shared runtime bootstrap.
 - Migrations: startup migration runner added for Postgres mode.
 - Test health: `go test ./... -cover` passing, coverage above 80%.

@@ -331,3 +331,33 @@ This file tracks major decisions in simple terms.
 - Decision: Introduce explicit `partial` lifecycle state event when scans complete with non-fatal source diagnostics.
 - Why: Operators need deterministic distinction between clean-success and degraded-success runs for incident triage.
 - Tradeoff: Clients consuming scan events must account for one additional lifecycle state.
+
+## ADR-056: Standardize List Sorting Contract on `/v1` Endpoints
+- Date: 2026-03-20
+- Decision: Add additive `sort_by` and `sort_order` query parameters across list endpoints while keeping existing defaults.
+- Why: Ensure pagination/filter/sort behavior is predictable for CLI, dashboard, and API consumers.
+- Tradeoff: Sort support is endpoint-specific, so unsupported field names fall back to safe defaults.
+
+## ADR-057: Publish Versioned OpenAPI V1 Spec
+- Date: 2026-03-20
+- Decision: Keep `docs/openapi-v1.yaml` as the contract source for core `/v1` endpoints.
+- Why: Reduce integration ambiguity and provide a stable machine-readable API contract for teams and tooling.
+- Tradeoff: Spec maintenance is now a release responsibility and must stay aligned with route changes.
+
+## ADR-058: Enforce Deterministic CLI Severity Ordering
+- Date: 2026-03-20
+- Decision: Sort table output using severity rank (`critical` to `info`) instead of lexical severity ordering.
+- Why: Preserve operator triage expectations and keep CLI output stable across environments.
+- Tradeoff: Output ordering logic is less trivial than plain string sorting.
+
+## ADR-059: Add Explicit Down Migration Support and Roundtrip Validation
+- Date: 2026-03-20
+- Decision: Add `ApplyDownMigrations` support and run integration roundtrip checks (`up -> down -> up`).
+- Why: Provide a tested rollback path and reduce migration failure risk during production incidents.
+- Tradeoff: Rollback remains manual and requires strict operator discipline.
+
+## ADR-060: Add Smoke Gates for CLI and Dockerized API Path
+- Date: 2026-03-20
+- Decision: Extend CI with CLI smoke tests and compose-backed API smoke verification against Postgres.
+- Why: Catch release-breaking runtime issues not covered by unit tests alone.
+- Tradeoff: CI runtime increases modestly due to container startup and command smoke execution.

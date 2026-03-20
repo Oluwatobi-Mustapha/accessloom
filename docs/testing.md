@@ -37,6 +37,9 @@
 - Graph snapshot regression tests for AWS and Kubernetes edge sets
 - Collector diagnostics and transient retry behavior (kubectl mode)
 - Partial scan lifecycle state assertions (`partial` on non-fatal source errors)
+- API list sort contract behavior (`sort_by`, `sort_order`) on findings and scans
+- OpenAPI v1 contract presence checks for core endpoints and parameters
+- Migration rollback roundtrip integration test (up -> down -> up)
 
 ## CI Pipeline Gates
 
@@ -51,7 +54,15 @@ GitHub Actions workflow: `.github/workflows/ci.yml`
 - `go-integration`
   - Postgres service container
   - `go test -tags=integration ./internal/integration -count=1 -v`
+- `go-cli-smoke`
+  - scan command smoke (`table` + persisted state)
+  - findings command smoke (`json`)
+  - repo-scan command smoke
 - `web-build`
   - `npm ci --prefix web`
   - `npm run test:ci --prefix web`
   - `npm run build --prefix web`
+- `deploy-portability`
+  - docker compose config validation
+  - image build validation
+  - dockerized API smoke (`postgres + api + fixture scan trigger + findings read`)

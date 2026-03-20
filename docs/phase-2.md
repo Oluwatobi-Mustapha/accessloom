@@ -37,8 +37,11 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
   - trends filters: `severity`, `type`
   - scan event filters: `level`
   - list endpoint cursor pagination: `cursor`, `next_cursor`
+  - list endpoint sort contract: `sort_by`, `sort_order`
   - scan diff baseline override: `previous_scan_id`
   - finding drill-down by id, with optional `scan_id` scope
+- API contract spec:
+  - OpenAPI v1 file: `docs/openapi-v1.yaml`
 - Full artifact persistence:
   - raw assets, identities, policies, relationships, permissions, findings
 - SQL query scaffolding:
@@ -133,5 +136,4 @@ Persist scan metadata and findings over time, expose stable API endpoints, and r
 
 1. migrate Postgres store queries to generated sqlc package
 2. role/scope policy hardening guide for key rotation
-3. dashboard UI consumption for trends/explorer endpoints
-4. distributed lock observability and contention metrics
+3. distributed lock observability and contention metrics

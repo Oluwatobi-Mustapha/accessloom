@@ -1,6 +1,6 @@
-# V1 Scope And Baseline (First 10 Priorities)
+# V1 Scope And Baseline (First 15 Priorities)
 
-This document locks the first ten non-negotiable V1 priorities.
+This document locks the first fifteen non-negotiable V1 priorities.
 
 ## 1) Scope Freeze
 
@@ -81,3 +81,45 @@ This document locks the first ten non-negotiable V1 priorities.
 - Rule outputs remain deterministic for identical inputs.
 - Evidence and relationship contracts are now validated before rule execution is persisted.
 - Regression tests now cover deterministic and stable graph/rule input expectations across providers.
+
+## 11) API Contract Hardening
+
+- `/v1` namespace is the stable API contract surface.
+- List endpoints now support consistent sort contract:
+  - `sort_by`
+  - `sort_order=asc|desc`
+- Cursor pagination and filter behavior remains backward compatible.
+- OpenAPI v1 contract published at `docs/openapi-v1.yaml`.
+
+## 12) CLI Hardening
+
+- Stable command paths:
+  - `identrail scan`
+  - `identrail findings`
+  - `identrail repo-scan`
+- Output compatibility maintained (`table` and `json`).
+- Table output now uses deterministic severity ordering (`critical` first).
+- CLI smoke coverage is enforced in CI.
+
+## 13) Dashboard Hardening
+
+- Findings list/detail and scan diff views remain stable on top of `/v1` contracts.
+- Added explicit empty/error UX states for:
+  - no scans
+  - no trend data
+  - no explorer graph data
+- Web tests now validate happy-path plus empty/error states.
+
+## 14) Persistence Hardening
+
+- Migration engine now supports explicit down migration execution for controlled rollback.
+- Added migration roundtrip integration coverage:
+  - `up -> down -> up` then scan persistence verification.
+- Added migration operator guide: `docs/migrations.md`.
+
+## 15) CI/CD Release Gates
+
+- Go quality + unit + integration + coverage gate remain required.
+- Added CLI smoke gate in CI.
+- Added dockerized API smoke gate (`postgres + api + fixture scan`) in CI deploy portability job.
+- Contract safety now includes OpenAPI presence checks in tests.

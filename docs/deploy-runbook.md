@@ -7,6 +7,8 @@ Portable deployment profiles:
 - Kubernetes: `deploy/kubernetes/`
 - Linux VM/systemd: `deploy/systemd/`
 - Guide: `docs/deployment-anywhere.md`
+- API contract: `docs/openapi-v1.yaml`
+- Migration policy: `docs/migrations.md`
 
 ## 1) Pre-Deploy Checklist
 

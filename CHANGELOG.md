@@ -1,6 +1,21 @@
 # Changelog
 
 ## Unreleased
+- Locked V1 finalization priorities 11-15:
+  - API hardening with consistent `sort_by`/`sort_order` list contract
+  - published OpenAPI v1 contract (`docs/openapi-v1.yaml`) with contract presence tests
+  - CLI hardening with deterministic severity-prioritized table output
+  - persistence hardening with explicit down-migration support and rollback roundtrip integration tests
+  - CI release gates extended with CLI smoke and dockerized API compose smoke
+- Added API list sort support across core list endpoints:
+  - findings, scans, scan events, identities, relationships, ownership signals, repo scans, repo findings
+  - additive query params preserve backward compatibility
+- Added migration operations enhancements:
+  - `ApplyDownMigrations` API in store/db migration package
+  - integration test for migration roundtrip safety (`up -> down -> up`)
+- Added frontend contract hardening:
+  - API client now surfaces backend error envelope messages
+  - dashboard tests now cover empty and error states
 - Locked V1 finalization priorities 6-10:
   - collector reliability hardening with diagnostics and transient kubectl retry/backoff/jitter handling
   - scheduler bounded retry + dead-letter callback support

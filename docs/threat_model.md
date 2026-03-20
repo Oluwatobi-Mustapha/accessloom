@@ -272,6 +272,31 @@ Simple threat list for current system.
 - Fix: Emit explicit `partial` lifecycle state and warning events with truncated source-error evidence.
 - Status: Implemented.
 
+## 55) API Sort Drift Across Clients
+- Threat: Different clients can interpret ordering differently, creating inconsistent findings/scans views.
+- Fix: Standardize list sorting with `sort_by` and `sort_order` query parameters across `/v1` list endpoints.
+- Status: Implemented.
+
+## 56) Contract Drift Between API and Integrations
+- Threat: Endpoint/parameter drift can break dashboard and external automation unexpectedly.
+- Fix: Publish and test a versioned OpenAPI v1 contract (`docs/openapi-v1.yaml` + contract tests).
+- Status: Implemented.
+
+## 57) Misleading CLI Risk Prioritization
+- Threat: Lexical severity ordering can hide highest-severity findings lower in table output.
+- Fix: Deterministic severity-rank sorting in CLI table output.
+- Status: Implemented.
+
+## 58) Unverified Migration Rollback Path
+- Threat: Rollback scripts may exist but fail during incident pressure if never validated.
+- Fix: Add explicit down migration runner and integration roundtrip test (`up -> down -> up`).
+- Status: Implemented.
+
+## 59) Runtime Regressions Escaping Unit Tests
+- Threat: Unit-only CI can miss failures in real command and container startup paths.
+- Fix: Add CLI smoke and dockerized API smoke gates in CI.
+- Status: Implemented.
+
 ## Current Gaps (Next)
 - Add encrypted secret management and external KMS guidance.
 - Add audit sink forwarding guide for centralized log pipelines.

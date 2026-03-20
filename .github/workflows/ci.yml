@@ -111,6 +111,39 @@ jobs:
           IDENTRAIL_INTEGRATION_DATABASE_URL: postgres://identrail:secret@127.0.0.1:5432/identrail?sslmode=disable
         run: go test -tags=integration ./internal/integration -count=1 -v
 
+  go-cli-smoke:
+    name: CLI Smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: go-quality
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: CLI Scan Smoke (Table + JSON)
+        shell: bash
+        run: |
+          set -euo pipefail
+          state_file="/tmp/identrail-smoke-state.json"
+          go run ./cmd/cli --state-file "${state_file}" scan \
+            --fixture testdata/aws/role_with_policies.json \
+            --fixture testdata/aws/role_with_urlencoded_trust.json \
+            --output table
+          go run ./cmd/cli --state-file "${state_file}" findings --output json > /tmp/identrail-findings.json
+          grep -q '"findings"' /tmp/identrail-findings.json
+
+      - name: CLI Repo Scan Smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          go run ./cmd/cli repo-scan --repo . --history-limit 20 --max-findings 50 --output json > /tmp/identrail-repo-scan.json
+
   web-build:
     name: Web Build
     runs-on: ubuntu-latest
@@ -139,7 +172,7 @@ jobs:
     name: Deploy Portability
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [go-quality, web-build]
+    needs: [go-quality, web-build, go-cli-smoke]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -159,3 +192,55 @@ jobs:
 
       - name: Build Web Image
         run: docker build -f deploy/docker/Dockerfile.web --build-arg VITE_IDENTRAIL_API_URL=http://localhost:8080 -t identrail/web:ci .
+
+      - name: Compose API Smoke (Postgres + API)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > deploy/docker/.env <<'EOF'
+          IDENTRAIL_SERVICE_NAME=identrail
+          IDENTRAIL_LOG_LEVEL=info
+          IDENTRAIL_PROVIDER=aws
+          IDENTRAIL_AWS_SOURCE=fixture
+          IDENTRAIL_AWS_REGION=us-east-1
+          IDENTRAIL_AWS_FIXTURES=/app/testdata/aws/role_with_policies.json,/app/testdata/aws/role_with_urlencoded_trust.json
+          IDENTRAIL_K8S_SOURCE=fixture
+          IDENTRAIL_K8S_FIXTURES=/app/testdata/kubernetes/service_account_payments.json,/app/testdata/kubernetes/cluster_role_cluster_admin.json,/app/testdata/kubernetes/role_binding_cluster_admin.json,/app/testdata/kubernetes/pod_payments.json
+          IDENTRAIL_API_KEYS=ci-read,ci-write
+          IDENTRAIL_WRITE_API_KEYS=ci-write
+          IDENTRAIL_RATE_LIMIT_RPM=10000
+          IDENTRAIL_RATE_LIMIT_BURST=1000
+          IDENTRAIL_LOCK_BACKEND=auto
+          IDENTRAIL_LOCK_NAMESPACE=identrail-ci
+          IDENTRAIL_REPO_SCAN_ENABLED=true
+          IDENTRAIL_SCAN_INTERVAL=15m
+          IDENTRAIL_WORKER_RUN_NOW=false
+          VITE_IDENTRAIL_API_URL=http://localhost:8080
+          EOF
+
+          docker tag identrail/api:ci identrail/api:local
+          docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env up -d postgres api
+
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:8080/healthz >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8080/healthz
+
+          curl -fsS -X POST http://localhost:8080/v1/scans \
+            -H 'X-API-Key: ci-write' \
+            -H 'Content-Type: application/json' \
+            > /tmp/identrail-scan-run.json
+
+          curl -fsS http://localhost:8080/v1/findings?limit=5 \
+            -H 'X-API-Key: ci-read' \
+            > /tmp/identrail-findings-smoke.json
+          grep -q '"items"' /tmp/identrail-findings-smoke.json
+
+      - name: Compose Teardown
+        if: always()
+        shell: bash
+        run: |
+          docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env down -v --remove-orphans || true
