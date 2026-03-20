@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- Fixed Helm chart default to avoid startup failure on nonroot containers:
+  - `IDENTRAIL_AUDIT_LOG_FILE` now defaults to empty (opt-in)
+  - Helm docs now require writable mount path when enabling file audit sink
 - Fixed backward-compatibility read path for legacy findings rows where `remediation` is `NULL`:
   - `ListFindings`, `ListFindingsByScan`, and `ListRepoFindings` now coalesce nullable remediation values
   - added regression test to prevent null-remediation scan failures in CI/integration

@@ -22,3 +22,4 @@ This chart is the Kubernetes deployment baseline for Identrail.
 - For production, prefer `secret.existingSecret` and set `secret.create=false`.
 - Enable web deployment by setting `web.enabled=true`.
 - Enable ingress by setting `ingress.enabled=true`.
+- `IDENTRAIL_AUDIT_LOG_FILE` is empty by default. If you enable it, mount a writable path for the container user.
