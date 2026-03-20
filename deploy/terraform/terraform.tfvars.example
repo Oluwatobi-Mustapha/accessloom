@@ -1,0 +1,35 @@
+namespace    = "identrail"
+release_name = "identrail"
+
+create_namespace         = true
+create_kubernetes_secret = true
+
+secret_data = {
+  IDENTRAIL_API_KEYS      = "replace-read-key,replace-write-key"
+  IDENTRAIL_WRITE_API_KEYS = "replace-write-key"
+  IDENTRAIL_DATABASE_URL  = "postgres://identrail:replace-password@postgres:5432/identrail?sslmode=require"
+}
+
+chart_values = {
+  api = {
+    image = {
+      repository = "ghcr.io/example/identrail-api"
+      tag        = "v1.0.0"
+      pullPolicy = "IfNotPresent"
+    }
+  }
+  worker = {
+    image = {
+      repository = "ghcr.io/example/identrail-worker"
+      tag        = "v1.0.0"
+      pullPolicy = "IfNotPresent"
+    }
+  }
+  config = {
+    IDENTRAIL_PROVIDER = "aws"
+    IDENTRAIL_AWS_SOURCE = "sdk"
+    IDENTRAIL_K8S_SOURCE = "kubectl"
+    IDENTRAIL_LOCK_BACKEND = "postgres"
+    IDENTRAIL_LOCK_NAMESPACE = "identrail-prod"
+  }
+}

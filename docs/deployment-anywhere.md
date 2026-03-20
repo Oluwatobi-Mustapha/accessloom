@@ -1,10 +1,12 @@
 # Deployment Anywhere
 
-This guide standardizes deployment for three common targets:
+This guide standardizes deployment for five common targets:
 
 1. Docker Compose (single host)
 2. Kubernetes (cluster)
-3. Linux VM with systemd
+3. Kubernetes Helm (cluster)
+4. Terraform (cluster automation)
+5. Linux VM with systemd
 
 ## 1) Docker Compose
 
@@ -34,7 +36,28 @@ Use this for managed cluster deployment.
 4. Optional ingress:
    - `kubectl apply -f deploy/kubernetes/ingress.example.yaml`
 
-## 3) Linux VM (systemd)
+## 3) Kubernetes Helm
+
+Use this for upgrade-safe cluster rollout.
+
+1. Copy chart values:
+   - `cp deploy/helm/identrail/values.yaml /tmp/identrail-values.yaml`
+2. Set production images and secrets in `/tmp/identrail-values.yaml`.
+3. Install or upgrade:
+   - `helm upgrade --install identrail deploy/helm/identrail -n identrail --create-namespace -f /tmp/identrail-values.yaml`
+
+## 4) Terraform
+
+Use this when infrastructure teams want repeatable IaC rollout.
+
+1. Copy example vars:
+   - `cp deploy/terraform/terraform.tfvars.example deploy/terraform/terraform.tfvars`
+2. Edit `terraform.tfvars` (image tags, secrets, provider settings).
+3. Run:
+   - `cd deploy/terraform`
+   - `terraform init && terraform apply`
+
+## 5) Linux VM (systemd)
 
 Use this where Kubernetes is not required.
 
@@ -61,5 +84,6 @@ Use this where Kubernetes is not required.
 - Optional continuous repo scanning can run from worker (`IDENTRAIL_WORKER_REPO_SCAN_ENABLED=true` + `IDENTRAIL_WORKER_REPO_SCAN_TARGETS`).
 - For tighter safety in shared environments, set `IDENTRAIL_REPO_SCAN_ALLOWLIST`.
 - For multi-instance API/worker deployments, use `IDENTRAIL_LOCK_BACKEND=postgres` (or `auto` with database mode).
+- For live AWS/Kubernetes scans, use least-privilege templates in `deploy/policies/`.
 - Use PostgreSQL in non-local deployments.
 - Set HTTPS endpoints for alert/audit forwarding in production.

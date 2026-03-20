@@ -62,6 +62,10 @@ GitHub Actions workflow: `.github/workflows/ci.yml`
   - `npm ci --prefix web`
   - `npm run test:ci --prefix web`
   - `npm run build --prefix web`
+- `infra-validate`
+  - `helm lint deploy/helm/identrail`
+  - `terraform fmt -check -recursive deploy/terraform`
+  - `terraform validate` in `deploy/terraform`
 - `deploy-portability`
   - docker compose config validation
   - image build validation

@@ -168,11 +168,39 @@ jobs:
       - name: Build Web
         run: npm run build --prefix web
 
+  infra-validate:
+    name: Infra Validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm Lint
+        run: helm lint deploy/helm/identrail
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive deploy/terraform
+
+      - name: Terraform Validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd deploy/terraform
+          terraform init -backend=false
+          terraform validate
+
   deploy-portability:
     name: Deploy Portability
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: [go-quality, web-build, go-cli-smoke]
+    needs: [go-quality, web-build, go-cli-smoke, infra-validate]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

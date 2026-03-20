@@ -1,0 +1,109 @@
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []
+
+api:
+  replicaCount: 1
+  image:
+    repository: identrail/api
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+  resources: {}
+
+worker:
+  replicaCount: 1
+  image:
+    repository: identrail/worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources: {}
+
+web:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: identrail/web
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+  resources: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: identrail.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+config:
+  IDENTRAIL_SERVICE_NAME: identrail
+  IDENTRAIL_LOG_LEVEL: info
+  IDENTRAIL_PROVIDER: aws
+  IDENTRAIL_AWS_SOURCE: fixture
+  IDENTRAIL_AWS_REGION: us-east-1
+  IDENTRAIL_AWS_PROFILE: ""
+  IDENTRAIL_K8S_SOURCE: fixture
+  IDENTRAIL_KUBECTL_PATH: /usr/bin/kubectl
+  IDENTRAIL_KUBE_CONTEXT: ""
+  IDENTRAIL_HTTP_ADDR: ":8080"
+  IDENTRAIL_LOCK_BACKEND: auto
+  IDENTRAIL_LOCK_NAMESPACE: identrail
+  IDENTRAIL_RUN_MIGRATIONS: "true"
+  IDENTRAIL_MIGRATIONS_DIR: /app/migrations
+  IDENTRAIL_SCAN_INTERVAL: 15m
+  IDENTRAIL_WORKER_RUN_NOW: "true"
+  IDENTRAIL_WORKER_REPO_SCAN_ENABLED: "false"
+  IDENTRAIL_WORKER_REPO_SCAN_RUN_NOW: "false"
+  IDENTRAIL_WORKER_REPO_SCAN_INTERVAL: 1h
+  IDENTRAIL_WORKER_REPO_SCAN_TARGETS: ""
+  IDENTRAIL_WORKER_REPO_SCAN_HISTORY_LIMIT: "0"
+  IDENTRAIL_WORKER_REPO_SCAN_MAX_FINDINGS: "0"
+  IDENTRAIL_REPO_SCAN_ENABLED: "true"
+  IDENTRAIL_REPO_SCAN_HISTORY_LIMIT: "500"
+  IDENTRAIL_REPO_SCAN_MAX_FINDINGS: "200"
+  IDENTRAIL_REPO_SCAN_HISTORY_LIMIT_MAX: "5000"
+  IDENTRAIL_REPO_SCAN_MAX_FINDINGS_MAX: "1000"
+  IDENTRAIL_REPO_SCAN_ALLOWLIST: ""
+  IDENTRAIL_RATE_LIMIT_RPM: "120"
+  IDENTRAIL_RATE_LIMIT_BURST: "20"
+  IDENTRAIL_OIDC_ISSUER_URL: ""
+  IDENTRAIL_OIDC_AUDIENCE: ""
+  IDENTRAIL_OIDC_WRITE_SCOPES: identrail.write,identrail.admin,write,admin
+  IDENTRAIL_AWS_FIXTURES: /app/testdata/aws/role_with_policies.json,/app/testdata/aws/role_with_urlencoded_trust.json
+  IDENTRAIL_K8S_FIXTURES: /app/testdata/kubernetes/service_account_payments.json,/app/testdata/kubernetes/cluster_role_cluster_admin.json,/app/testdata/kubernetes/role_binding_cluster_admin.json,/app/testdata/kubernetes/pod_payments.json
+
+secret:
+  create: true
+  existingSecret: ""
+  data:
+    IDENTRAIL_API_KEYS: "replace-read-key,replace-write-key"
+    IDENTRAIL_WRITE_API_KEYS: "replace-write-key"
+    IDENTRAIL_DATABASE_URL: "postgres://identrail:replace-password@postgres:5432/identrail?sslmode=require"
+    IDENTRAIL_API_KEY_SCOPES: ""
+    IDENTRAIL_ALERT_WEBHOOK_URL: ""
+    IDENTRAIL_ALERT_HMAC_SECRET: ""
+    IDENTRAIL_ALERT_MIN_SEVERITY: high
+    IDENTRAIL_ALERT_MAX_FINDINGS: "25"
+    IDENTRAIL_ALERT_MAX_RETRIES: "2"
+    IDENTRAIL_ALERT_RETRY_BACKOFF: 1s
+    IDENTRAIL_AUDIT_LOG_FILE: /var/log/identrail/audit.jsonl
+    IDENTRAIL_AUDIT_FORWARD_URL: ""
+    IDENTRAIL_AUDIT_FORWARD_TIMEOUT: 3s
+    IDENTRAIL_AUDIT_FORWARD_MAX_RETRIES: "1"
+    IDENTRAIL_AUDIT_FORWARD_RETRY_BACKOFF: 1s
+    IDENTRAIL_AUDIT_FORWARD_HMAC_SECRET: ""
