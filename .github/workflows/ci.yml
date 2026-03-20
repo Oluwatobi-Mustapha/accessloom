@@ -241,6 +241,7 @@ jobs:
           IDENTRAIL_LOCK_BACKEND=auto
           IDENTRAIL_LOCK_NAMESPACE=identrail-ci
           IDENTRAIL_REPO_SCAN_ENABLED=true
+          IDENTRAIL_AUDIT_LOG_FILE=
           IDENTRAIL_SCAN_INTERVAL=15m
           IDENTRAIL_WORKER_RUN_NOW=false
           VITE_IDENTRAIL_API_URL=http://localhost:8080
@@ -249,12 +250,20 @@ jobs:
           docker tag identrail/api:ci identrail/api:local
           docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env up -d postgres api
 
+          healthy=false
           for i in $(seq 1 30); do
             if curl -fsS http://localhost:8080/healthz >/dev/null; then
+              healthy=true
               break
             fi
             sleep 2
           done
+          if [ "${healthy}" != "true" ]; then
+            echo "API failed health check; dumping container diagnostics"
+            docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env ps
+            docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env logs api postgres || true
+            exit 1
+          fi
           curl -fsS http://localhost:8080/healthz
 
           curl -fsS -X POST http://localhost:8080/v1/scans \

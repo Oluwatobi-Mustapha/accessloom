@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Fixed deploy portability smoke stability:
+  - removed forced API audit-file path from Docker Compose default runtime
+  - removed default audit volume mount that could fail for non-root container writes
+  - CI compose smoke now prints API/Postgres logs when health checks fail
 - Locked V1 finalization priorities 16-20:
   - security hardening (constant-time API key checks, key-strength warning, least-privilege policy templates)
   - observability baseline (scan outcome metrics + repo scan metrics + scanner tracing spans)

@@ -36,11 +36,8 @@ services:
       IDENTRAIL_DATABASE_URL: "postgres://identrail:identrail@postgres:5432/identrail?sslmode=disable"
       IDENTRAIL_RUN_MIGRATIONS: "true"
       IDENTRAIL_MIGRATIONS_DIR: "/app/migrations"
-      IDENTRAIL_AUDIT_LOG_FILE: "/var/log/identrail/audit.jsonl"
     ports:
       - "8080:8080"
-    volumes:
-      - identrail_audit:/var/log/identrail
 
   worker:
     build:
@@ -80,4 +77,3 @@ services:
 
 volumes:
   identrail_pgdata:
-  identrail_audit:
