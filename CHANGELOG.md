@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Refreshed vulnerability-sensitive Go runtime/dependency baseline:
+  - raised project Go version baseline to `1.25.8`
+  - upgraded `github.com/quic-go/quic-go` to `v0.57.0` and `qpack` to `v0.6.0`
+  - validated compatibility with full test and vet suites
 - Hardened repository exposure scanner clone target validation:
   - reject insecure `http://` repository clone URLs
   - allow `https://`, `ssh://`, and `git@` forms
