@@ -445,6 +445,114 @@ func TestServiceRunScanPartialLifecycleEvents(t *testing.T) {
 	}
 }
 
+func TestServiceRunScanPersistsRawAndNormalizedArtifactsConsistently(t *testing.T) {
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 20, 11, 0, 0, 0, time.UTC)
+	identityID := "aws:identity:arn:aws:iam::123456789012:role/demo"
+	policyID := "aws:policy:demo"
+	relationshipID := "rel-attached-policy"
+
+	svc := NewService(store, fakeScanner{result: app.ScanResult{
+		Assets: 1,
+		RawAssets: []providers.RawAsset{
+			{
+				Kind:      "aws_iam_role",
+				SourceID:  "arn:aws:iam::123456789012:role/demo",
+				Payload:   []byte(`{"RoleName":"demo"}`),
+				Collected: now.Format(time.RFC3339Nano),
+			},
+		},
+		Bundle: providers.NormalizedBundle{
+			Identities: []domain.Identity{
+				{
+					ID:       identityID,
+					Provider: domain.ProviderAWS,
+					Type:     domain.IdentityTypeRole,
+					Name:     "demo",
+					ARN:      "arn:aws:iam::123456789012:role/demo",
+					RawRef:   "aws_iam_role:arn:aws:iam::123456789012:role/demo",
+				},
+			},
+			Policies: []domain.Policy{
+				{
+					ID:       policyID,
+					Provider: domain.ProviderAWS,
+					Name:     "demo-inline",
+					RawRef:   "aws_iam_policy:demo-inline",
+					Normalized: map[string]any{
+						"policy_type": "permission",
+						"identity_id": identityID,
+						"statements": []map[string]any{
+							{"effect": "Allow", "actions": []string{"s3:GetObject"}, "resources": []string{"*"}},
+						},
+					},
+				},
+			},
+		},
+		Permissions: []providers.PermissionTuple{
+			{
+				IdentityID: identityID,
+				Action:     "s3:GetObject",
+				Resource:   "*",
+				Effect:     "Allow",
+			},
+		},
+		Relationships: []domain.Relationship{
+			{
+				ID:           relationshipID,
+				Type:         domain.RelationshipAttachedPolicy,
+				FromNodeID:   identityID,
+				ToNodeID:     policyID,
+				DiscoveredAt: now,
+			},
+		},
+		Findings: []domain.Finding{
+			{
+				ID:           "finding-ownerless",
+				Type:         domain.FindingOwnerless,
+				Severity:     domain.SeverityMedium,
+				Title:        "Ownerless identity",
+				HumanSummary: "Identity has no owner hint",
+				Remediation:  "Assign team owner",
+				CreatedAt:    now,
+			},
+		},
+	}}, "aws")
+	svc.Now = func() time.Time { return now }
+
+	result, err := svc.RunScan(context.Background())
+	if err != nil {
+		t.Fatalf("run scan: %v", err)
+	}
+	if result.Assets != 1 || result.FindingCount != 1 {
+		t.Fatalf("unexpected run result: %+v", result)
+	}
+
+	identities, err := svc.ListIdentities(context.Background(), result.Scan.ID, "aws", "role", "", 10)
+	if err != nil {
+		t.Fatalf("list identities: %v", err)
+	}
+	if len(identities) != 1 || identities[0].ID != identityID {
+		t.Fatalf("unexpected identities: %+v", identities)
+	}
+
+	relationships, err := svc.ListRelationships(context.Background(), result.Scan.ID, string(domain.RelationshipAttachedPolicy), "", "", 10)
+	if err != nil {
+		t.Fatalf("list relationships: %v", err)
+	}
+	if len(relationships) != 1 || relationships[0].ID != relationshipID {
+		t.Fatalf("unexpected relationships: %+v", relationships)
+	}
+
+	findings, err := svc.ListFindingsFiltered(context.Background(), 10, FindingsFilter{ScanID: result.Scan.ID})
+	if err != nil {
+		t.Fatalf("list findings filtered: %v", err)
+	}
+	if len(findings) != 1 || findings[0].ID != "finding-ownerless" {
+		t.Fatalf("unexpected findings: %+v", findings)
+	}
+}
+
 func TestServiceListIdentitiesAndRelationshipsDefaultsToLatestScan(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
