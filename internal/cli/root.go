@@ -397,13 +397,15 @@ func renderFindingsTable(out io.Writer, findings []domain.Finding) error {
 	sorted := make([]domain.Finding, len(findings))
 	copy(sorted, findings)
 	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Severity == sorted[j].Severity {
+		leftSeverity := severitySortRank(sorted[i].Severity)
+		rightSeverity := severitySortRank(sorted[j].Severity)
+		if leftSeverity == rightSeverity {
 			if sorted[i].Type == sorted[j].Type {
 				return sorted[i].Title < sorted[j].Title
 			}
 			return sorted[i].Type < sorted[j].Type
 		}
-		return sorted[i].Severity < sorted[j].Severity
+		return leftSeverity > rightSeverity
 	})
 
 	for i, finding := range sorted {
@@ -421,4 +423,21 @@ func renderFindingsTable(out io.Writer, findings []domain.Finding) error {
 		}
 	}
 	return nil
+}
+
+func severitySortRank(severity domain.FindingSeverity) int {
+	switch severity {
+	case domain.SeverityCritical:
+		return 5
+	case domain.SeverityHigh:
+		return 4
+	case domain.SeverityMedium:
+		return 3
+	case domain.SeverityLow:
+		return 2
+	case domain.SeverityInfo:
+		return 1
+	default:
+		return 0
+	}
 }

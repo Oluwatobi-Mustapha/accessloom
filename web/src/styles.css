@@ -155,6 +155,12 @@ select {
   color: var(--warning);
 }
 
+.hint {
+  margin-top: 0.45rem;
+  font-size: 0.86rem;
+  color: var(--muted);
+}
+
 @media (max-width: 980px) {
   .controls {
     grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -96,7 +96,16 @@ async function request<T>(path: string, apiKey?: string): Promise<T> {
   }
   const res = await fetch(`${baseURL}${path}`, { headers });
   if (!res.ok) {
-    throw new Error(`Request failed (${res.status})`);
+    let message = `Request failed (${res.status})`;
+    try {
+      const payload = (await res.json()) as { error?: string };
+      if (payload?.error) {
+        message = payload.error;
+      }
+    } catch {
+      // Keep status-based message when server does not return a JSON error body.
+    }
+    throw new Error(message);
   }
   return (await res.json()) as T;
 }
@@ -122,10 +131,17 @@ export const apiClient = {
     return request<{ items: TrendPoint[] }>(`/v1/findings/trends${buildQuery(filters)}`, apiKey);
   },
   listScans(apiKey?: string) {
-    return request<{ items: ScanRecord[] }>('/v1/scans', apiKey);
+    return request<{ items: ScanRecord[] }>('/v1/scans?sort_by=started_at&sort_order=desc', apiKey);
   },
   listFindings(
-    filters: { limit?: number; scan_id?: string; severity?: string; type?: string } = {},
+    filters: {
+      limit?: number;
+      scan_id?: string;
+      severity?: string;
+      type?: string;
+      sort_by?: string;
+      sort_order?: 'asc' | 'desc';
+    } = {},
     apiKey?: string
   ) {
     return request<{ items: Finding[] }>(`/v1/findings${buildQuery(filters)}`, apiKey);
@@ -145,19 +161,24 @@ export const apiClient = {
   },
   listIdentities(scanID: string, limit = 100, apiKey?: string) {
     return request<{ items: Identity[] }>(
-      `/v1/identities${buildQuery({ scan_id: scanID, limit })}`,
+      `/v1/identities${buildQuery({ scan_id: scanID, limit, sort_by: 'name', sort_order: 'asc' })}`,
       apiKey
     );
   },
   listRelationships(scanID: string, limit = 100, apiKey?: string) {
     return request<{ items: Relationship[] }>(
-      `/v1/relationships${buildQuery({ scan_id: scanID, limit })}`,
+      `/v1/relationships${buildQuery({ scan_id: scanID, limit, sort_by: 'discovered_at', sort_order: 'desc' })}`,
       apiKey
     );
   },
   listScanEvents(scanID: string, level?: string, limit = 50, apiKey?: string) {
     return request<{ items: ScanEvent[] }>(
-      `/v1/scans/${encodeURIComponent(scanID)}/events${buildQuery({ level, limit })}`,
+      `/v1/scans/${encodeURIComponent(scanID)}/events${buildQuery({
+        level,
+        limit,
+        sort_by: 'created_at',
+        sort_order: 'desc'
+      })}`,
       apiKey
     );
   }

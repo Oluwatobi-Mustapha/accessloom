@@ -19,7 +19,7 @@ describe('App', () => {
       if (url.includes('/v1/findings/trends')) {
         return ok({ items: [{ scan_id: 'scan-1', started_at: '2026-03-16T00:00:00Z', total: 2, by_severity: { high: 1, medium: 1 } }] });
       }
-      if (url.endsWith('/v1/scans')) {
+      if (url.includes('/v1/scans?')) {
         return ok({ items: [{ id: 'scan-1', provider: 'aws', status: 'completed', started_at: '2026-03-16T00:00:00Z', asset_count: 3, finding_count: 2 }] });
       }
       if (url.includes('/v1/findings?')) {
@@ -107,6 +107,48 @@ describe('App', () => {
       expect(screen.getByText('Added: 1')).toBeInTheDocument();
       expect(screen.getByText('Identities: 1')).toBeInTheDocument();
       expect(screen.getByText('Risky trust')).toBeInTheDocument();
+    });
+  });
+
+  it('shows empty states when no scan data exists', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/v1/findings/summary')) return ok({ total: 0, by_severity: {}, by_type: {} });
+      if (url.includes('/v1/findings/trends')) return ok({ items: [] });
+      if (url.includes('/v1/scans?')) return ok({ items: [] });
+      return ok({ items: [] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Total Findings: 0')).toBeInTheDocument();
+      expect(screen.getByText('No scans yet. Trigger a scan from API or CLI.')).toBeInTheDocument();
+      expect(screen.getByText('No trend data yet.')).toBeInTheDocument();
+    });
+  });
+
+  it('shows API error message from backend envelope', async () => {
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/v1/findings/summary')) {
+        return Promise.resolve({
+          ok: false,
+          status: 401,
+          json: async () => ({ error: 'unauthorized' })
+        });
+      }
+      if (url.includes('/v1/findings/trends')) return ok({ items: [] });
+      if (url.includes('/v1/scans?')) return ok({ items: [] });
+      return ok({ items: [] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByText('unauthorized')).toBeInTheDocument();
     });
   });
 });

@@ -31,6 +31,18 @@ describe('apiClient', () => {
     });
   });
 
+  it('uses default scan listing sort contract', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [] })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.listScans('reader');
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toContain('/v1/scans?sort_by=started_at&sort_order=desc');
+  });
+
   it('encodes scan id for diff URL', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
@@ -53,5 +65,16 @@ describe('apiClient', () => {
     await apiClient.getScanDiff('scan-2', 20, 'reader', 'scan-1');
     const [url] = fetchMock.mock.calls[0] as [string];
     expect(url).toContain('/v1/scans/scan-2/diff?limit=20&previous_scan_id=scan-1');
+  });
+
+  it('surfaces backend error envelope message', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: 'unauthorized' })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiClient.getFindingsSummary('reader')).rejects.toThrow('unauthorized');
   });
 });

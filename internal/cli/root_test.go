@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/config"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/domain"
 )
 
 func TestExecuteScanAndFindingsTable(t *testing.T) {
@@ -249,6 +250,100 @@ func TestExecuteUnknownCommand(t *testing.T) {
 	if !strings.Contains(out.String(), "unknown command") {
 		t.Fatalf("expected unknown command output, got: %q", out.String())
 	}
+}
+
+func TestRenderFindingsTableSeverityOrdering(t *testing.T) {
+	findings := []domain.Finding{
+		{ID: "f-low", Severity: domain.SeverityLow, Type: domain.FindingOwnerless, Title: "low"},
+		{ID: "f-critical", Severity: domain.SeverityCritical, Type: domain.FindingEscalationPath, Title: "critical"},
+		{ID: "f-high", Severity: domain.SeverityHigh, Type: domain.FindingRiskyTrustPolicy, Title: "high"},
+	}
+
+	var out bytes.Buffer
+	if err := renderFindingsTable(&out, findings); err != nil {
+		t.Fatalf("render table: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected at least 3 lines, got %q", out.String())
+	}
+	if !strings.Contains(lines[0], "[CRITICAL]") || !strings.Contains(lines[0], "critical") {
+		t.Fatalf("expected critical finding first, got %q", lines[0])
+	}
+	if !strings.Contains(lines[2], "[HIGH]") && !strings.Contains(lines[2], "[LOW]") {
+		// keep message readable if formatting changes
+		t.Fatalf("expected severity-ordered output, got %q", out.String())
+	}
+}
+
+func TestCLISmokeFlow(t *testing.T) {
+	cfg := config.Config{ServiceName: "identrail-test", Provider: "aws"}
+	stateFile := filepath.Join(t.TempDir(), "smoke-state.json")
+	fixtureA := repoFixturePath(t, "role_with_policies.json")
+	fixtureB := repoFixturePath(t, "role_with_urlencoded_trust.json")
+
+	var scanOut bytes.Buffer
+	if err := Execute(cfg, []string{
+		"--state-file", stateFile,
+		"scan",
+		"--fixture", fixtureA,
+		"--fixture", fixtureB,
+		"--output", "table",
+	}, &scanOut); err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+	var findingsOut bytes.Buffer
+	if err := Execute(cfg, []string{
+		"--state-file", stateFile,
+		"findings",
+		"--output", "json",
+	}, &findingsOut); err != nil {
+		t.Fatalf("findings failed: %v", err)
+	}
+	if !strings.Contains(findingsOut.String(), "\"findings\"") {
+		t.Fatalf("expected findings json output, got %q", findingsOut.String())
+	}
+
+	// Best-effort repo scan smoke path with deterministic tiny local repository.
+	repo := t.TempDir()
+	runCLITestGit(t, repo, "init", "-q")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("smoke"), 0o600); err != nil {
+		t.Fatalf("write readme: %v", err)
+	}
+	runCLITestGit(t, repo, "add", "README.md")
+	runCLITestGit(t, repo, "commit", "-q", "-m", "init")
+
+	var repoOut bytes.Buffer
+	if err := Execute(cfg, []string{
+		"repo-scan",
+		"--repo", repo,
+		"--history-limit", "10",
+		"--max-findings", "20",
+		"--output", "table",
+	}, &repoOut); err != nil {
+		t.Fatalf("repo scan failed: %v", err)
+	}
+	if !strings.Contains(repoOut.String(), "Repo scan completed:") {
+		t.Fatalf("expected repo scan summary, got %q", repoOut.String())
+	}
+}
+
+func TestSeveritySortRank(t *testing.T) {
+	if severitySortRank(domain.SeverityCritical) <= severitySortRank(domain.SeverityHigh) {
+		t.Fatal("expected critical rank > high rank")
+	}
+	if severitySortRank("unknown") != 0 {
+		t.Fatalf("expected zero rank for unknown severity, got %d", severitySortRank("unknown"))
+	}
+
+	// Keep compile-time guard for ranking usage in sorting comparisons.
+	if cmp := compareSeverityForTest(domain.SeverityInfo, domain.SeverityCritical); cmp >= 0 {
+		t.Fatalf("expected info to rank below critical, got %d", cmp)
+	}
+}
+
+func compareSeverityForTest(left domain.FindingSeverity, right domain.FindingSeverity) int {
+	return severitySortRank(left) - severitySortRank(right)
 }
 
 func repoFixturePath(t *testing.T, name string) string {

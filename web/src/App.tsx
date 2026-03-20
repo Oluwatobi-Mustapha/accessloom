@@ -116,7 +116,14 @@ export function App() {
     setLoadingDetails(true);
     Promise.all([
       apiClient.listFindings(
-        { scan_id: scanID, severity: severityFilter, type: typeFilter, limit: 100 },
+        {
+          scan_id: scanID,
+          severity: severityFilter,
+          type: typeFilter,
+          limit: 100,
+          sort_by: 'severity',
+          sort_order: 'desc'
+        },
         apiKey || undefined
       ),
       apiClient.getScanDiff(scanID, 20, apiKey || undefined, baselineScanID || undefined),
@@ -221,6 +228,7 @@ export function App() {
               </option>
             ))}
           </select>
+          {scans.length === 0 && <p className="hint">No scans yet. Trigger a scan from API or CLI.</p>}
         </div>
         <div>
           <label htmlFor="severity-filter">Severity</label>
@@ -363,16 +371,23 @@ export function App() {
             <li>Relationships: {relationships.length}</li>
             <li>Info Events: {events.length}</li>
           </ul>
+          {!loadingDetails && !detailsError && identities.length === 0 && relationships.length === 0 && (
+            <p className="hint">No explorer graph data for this scan and filter set.</p>
+          )}
         </div>
         <div>
           <h2>Recent Trends</h2>
-          <ul className="stats-list">
-            {trends.slice(-5).map((point) => (
-              <li key={point.scan_id}>
-                {point.scan_id.slice(0, 8)}: {point.total}
-              </li>
-            ))}
-          </ul>
+          {trends.length === 0 ? (
+            <p className="hint">No trend data yet.</p>
+          ) : (
+            <ul className="stats-list">
+              {trends.slice(-5).map((point) => (
+                <li key={point.scan_id}>
+                  {point.scan_id.slice(0, 8)}: {point.total}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </section>
     </main>
