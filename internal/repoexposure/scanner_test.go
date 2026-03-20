@@ -165,6 +165,54 @@ func TestPrepareRepositoryCloneFailure(t *testing.T) {
 	}
 }
 
+func TestPrepareRepositoryRejectsInsecureHTTPRepositoryURL(t *testing.T) {
+	cloneCalled := false
+	scanner := NewScanner(func(context.Context, string, ...string) ([]byte, error) {
+		cloneCalled = true
+		return nil, nil
+	})
+
+	_, cleanup, err := scanner.prepareRepository(context.Background(), "http://github.com/owner/repo.git")
+	if cleanup != nil {
+		cleanup()
+	}
+	if err == nil {
+		t.Fatal("expected insecure repository URL to be rejected")
+	}
+	if !strings.Contains(err.Error(), "insecure repository url scheme http is not allowed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cloneCalled {
+		t.Fatal("expected clone command not to run for insecure repository URL")
+	}
+}
+
+func TestValidateCloneURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		target    string
+		expectErr bool
+	}{
+		{name: "github shorthand", target: "https://github.com/owner/repo.git"},
+		{name: "ssh url", target: "ssh://git@github.com/owner/repo.git"},
+		{name: "git scp form", target: "git@github.com:owner/repo.git"},
+		{name: "insecure http", target: "http://github.com/owner/repo.git", expectErr: true},
+		{name: "unsupported file scheme", target: "file:///tmp/repo.git", expectErr: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateCloneURL(tc.target)
+			if tc.expectErr && err == nil {
+				t.Fatalf("expected error for %q", tc.target)
+			}
+			if !tc.expectErr && err != nil {
+				t.Fatalf("expected no error for %q, got %v", tc.target, err)
+			}
+		})
+	}
+}
+
 func TestGitInvocationModes(t *testing.T) {
 	var got [][]string
 	scanner := NewScanner(func(_ context.Context, name string, args ...string) ([]byte, error) {

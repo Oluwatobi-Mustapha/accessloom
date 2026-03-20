@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -225,6 +226,9 @@ func (s *Scanner) prepareRepository(ctx context.Context, target string) (reposit
 	}
 
 	cloneURL := normalizeRepositoryInput(target)
+	if err := validateCloneURL(cloneURL); err != nil {
+		return repositoryLocation{}, nil, err
+	}
 	workdir, err := os.MkdirTemp("", "identrail-repo-*")
 	if err != nil {
 		return repositoryLocation{}, nil, fmt.Errorf("create temp repository directory: %w", err)
@@ -406,6 +410,32 @@ func normalizeRepositoryInput(target string) string {
 		return "https://github.com/" + strings.TrimSuffix(trimmed, ".git") + ".git"
 	}
 	return trimmed
+}
+
+func validateCloneURL(cloneURL string) error {
+	trimmed := strings.TrimSpace(cloneURL)
+	if trimmed == "" {
+		return fmt.Errorf("repository target is required")
+	}
+
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "http://") {
+		return fmt.Errorf("insecure repository url scheme http is not allowed; use https or ssh")
+	}
+	if !strings.Contains(lower, "://") {
+		return nil
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return fmt.Errorf("parse repository target: %w", err)
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "https", "ssh":
+		return nil
+	default:
+		return fmt.Errorf("unsupported repository url scheme %q", parsed.Scheme)
+	}
 }
 
 func redactMatch(line string, value string) string {
