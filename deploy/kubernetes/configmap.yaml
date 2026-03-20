@@ -31,4 +31,4 @@ data:
   IDENTRAIL_TRUSTED_PROXIES: ""
   # Fixture mode defaults for deterministic scans.
   IDENTRAIL_AWS_FIXTURES: "/app/testdata/aws/role_with_policies.json,/app/testdata/aws/role_with_urlencoded_trust.json"
-  IDENTRAIL_K8S_FIXTURES: "/app/testdata/kubernetes/service_account_payments.json,/app/testdata/kubernetes/role_binding_cluster_admin.json,/app/testdata/kubernetes/pod_payments.json"
+  IDENTRAIL_K8S_FIXTURES: "/app/testdata/kubernetes/service_account_payments.json,/app/testdata/kubernetes/cluster_role_cluster_admin.json,/app/testdata/kubernetes/role_binding_cluster_admin.json,/app/testdata/kubernetes/pod_payments.json"
