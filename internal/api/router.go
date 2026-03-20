@@ -15,6 +15,7 @@ import (
 	"github.com/Oluwatobi-Mustapha/identrail/internal/domain"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/telemetry"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
@@ -422,7 +423,12 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	})
 
 	v1.GET("/repo-scans/:repo_scan_id", func(c *gin.Context) {
-		item, err := svc.GetRepoScan(c.Request.Context(), strings.TrimSpace(c.Param("repo_scan_id")))
+		repoScanID := strings.TrimSpace(c.Param("repo_scan_id"))
+		if !isValidUUID(repoScanID) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repo_scan_id"})
+			return
+		}
+		item, err := svc.GetRepoScan(c.Request.Context(), repoScanID)
 		if err != nil {
 			if errors.Is(err, db.ErrNotFound) {
 				c.JSON(http.StatusNotFound, gin.H{"error": "repo scan not found"})
@@ -439,11 +445,16 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
 		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "created_at")
+		repoScanID := strings.TrimSpace(c.Query("repo_scan_id"))
+		if repoScanID != "" && !isValidUUID(repoScanID) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repo_scan_id"})
+			return
+		}
 		items, err := svc.ListRepoFindings(
 			c.Request.Context(),
 			pageFetchLimit(offset, limit),
 			db.RepoFindingFilter{
-				RepoScanID: strings.TrimSpace(c.Query("repo_scan_id")),
+				RepoScanID: repoScanID,
 				Severity:   strings.TrimSpace(c.Query("severity")),
 				Type:       strings.TrimSpace(c.Query("type")),
 			},
@@ -624,6 +635,14 @@ func parseSortParams(rawBy string, rawOrder string, fallbackBy string) (string, 
 		return by, false
 	}
 	return by, true
+}
+
+func isValidUUID(raw string) bool {
+	if strings.TrimSpace(raw) == "" {
+		return false
+	}
+	_, err := uuid.Parse(strings.TrimSpace(raw))
+	return err == nil
 }
 
 func sortFindings(items []domain.Finding, sortBy string, desc bool) {
