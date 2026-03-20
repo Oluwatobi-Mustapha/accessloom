@@ -1154,6 +1154,28 @@ func TestRouterScanDiffAndEventsNotFound(t *testing.T) {
 	}
 }
 
+func TestRouterRejectsInvalidRepoScanUUIDInputs(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	metrics := telemetry.NewMetrics()
+	store := db.NewMemoryStore()
+	svc := NewService(store, routerScanner{}, "aws")
+	r := NewRouter(logger, metrics, svc, RouterOptions{})
+
+	repoScanReq := httptest.NewRequest(http.MethodGet, "/v1/repo-scans/not-a-uuid", nil)
+	repoScanW := httptest.NewRecorder()
+	r.ServeHTTP(repoScanW, repoScanReq)
+	if repoScanW.Code != http.StatusBadRequest {
+		t.Fatalf("expected repo scan detail 400 for invalid repo_scan_id, got %d", repoScanW.Code)
+	}
+
+	repoFindingsReq := httptest.NewRequest(http.MethodGet, "/v1/repo-findings?repo_scan_id=not-a-uuid", nil)
+	repoFindingsW := httptest.NewRecorder()
+	r.ServeHTTP(repoFindingsW, repoFindingsReq)
+	if repoFindingsW.Code != http.StatusBadRequest {
+		t.Fatalf("expected repo findings 400 for invalid repo_scan_id filter, got %d", repoFindingsW.Code)
+	}
+}
+
 func TestRouterPaginationHelpers(t *testing.T) {
 	if got := parseCursor(""); got != 0 {
 		t.Fatalf("expected empty cursor to parse as 0, got %d", got)
