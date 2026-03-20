@@ -398,6 +398,53 @@ func TestServiceListScanEvents(t *testing.T) {
 	}
 }
 
+func TestServiceRunScanPartialLifecycleEvents(t *testing.T) {
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 19, 10, 0, 0, 0, time.UTC)
+	svc := NewService(store, fakeScanner{result: app.ScanResult{
+		Assets: 1,
+		Bundle: providers.NormalizedBundle{
+			Identities: []domain.Identity{{
+				ID:       "aws:identity:arn:aws:iam::123456789012:role/demo",
+				Provider: domain.ProviderAWS,
+				Type:     domain.IdentityTypeRole,
+				Name:     "demo",
+			}},
+		},
+		SourceErrors: []providers.SourceError{{
+			Collector: "aws_iam_collector",
+			Code:      "missing_role_arn",
+			Message:   "skipped IAM role record without ARN",
+		}},
+	}}, "aws")
+	svc.Now = func() time.Time { return now }
+
+	result, err := svc.RunScan(context.Background())
+	if err != nil {
+		t.Fatalf("run scan: %v", err)
+	}
+	if result.Scan.Status != "completed" {
+		t.Fatalf("expected completed scan status, got %q", result.Scan.Status)
+	}
+
+	events, err := svc.ListScanEvents(context.Background(), result.Scan.ID, 50)
+	if err != nil {
+		t.Fatalf("list scan events: %v", err)
+	}
+	states := map[string]bool{}
+	for _, event := range events {
+		state, _ := event.Metadata["state"].(string)
+		if state != "" {
+			states[state] = true
+		}
+	}
+	for _, expected := range []string{scanLifecycleQueued, scanLifecycleRunning, scanLifecyclePartial, scanLifecycleSucceeded} {
+		if !states[expected] {
+			t.Fatalf("expected lifecycle state %q in events, got %+v", expected, states)
+		}
+	}
+}
+
 func TestServiceListIdentitiesAndRelationshipsDefaultsToLatestScan(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)

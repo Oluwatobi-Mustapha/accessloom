@@ -12,6 +12,7 @@ import (
 	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/domain"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/findings/standards"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/providers"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/repoexposure"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/scheduler"
 )
@@ -21,6 +22,15 @@ const (
 	defaultRepoScanMaxFindings  = 200
 	defaultRepoScanHistoryMax   = 5000
 	defaultRepoScanFindingsMax  = 1000
+	maxSourceErrorsInEvent      = 25
+)
+
+const (
+	scanLifecycleQueued    = "queued"
+	scanLifecycleRunning   = "running"
+	scanLifecyclePartial   = "partial"
+	scanLifecycleSucceeded = "succeeded"
+	scanLifecycleFailed    = "failed"
 )
 
 // ScannerRunner is the scan execution dependency required by API service.
@@ -179,15 +189,25 @@ func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
 	if err != nil {
 		return RunScanResult{}, err
 	}
+	s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleQueued, map[string]any{"provider": s.Provider})
+	s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleRunning, map[string]any{"provider": s.Provider})
 	s.appendScanEvent(ctx, record.ID, db.ScanEventLevelInfo, "scan started", map[string]any{"provider": s.Provider})
 
 	result, err := s.Scanner.Run(ctx)
 	if err != nil {
+		s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleFailed, map[string]any{"error": err.Error()})
 		s.appendScanEvent(ctx, record.ID, db.ScanEventLevelError, "scan failed during collection/analysis", map[string]any{"error": err.Error()})
 		_ = s.Store.CompleteScan(ctx, record.ID, "failed", s.Now().UTC(), 0, 0, err.Error())
 		return RunScanResult{}, err
 	}
 	result.Findings = enrichFindings(result.Findings)
+	if len(result.SourceErrors) > 0 {
+		s.appendScanEvent(ctx, record.ID, db.ScanEventLevelWarn, "scan completed with partial source errors", map[string]any{
+			"source_error_count": len(result.SourceErrors),
+			"source_errors":      truncateSourceErrors(result.SourceErrors, maxSourceErrorsInEvent),
+		})
+		s.appendScanLifecycleEvent(ctx, record.ID, scanLifecyclePartial, map[string]any{"source_error_count": len(result.SourceErrors)})
+	}
 
 	if err := s.Store.UpsertArtifacts(ctx, record.ID, db.ScanArtifacts{
 		RawAssets:     result.RawAssets,
@@ -195,6 +215,7 @@ func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
 		Permissions:   result.Permissions,
 		Relationships: result.Relationships,
 	}); err != nil {
+		s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleFailed, map[string]any{"error": err.Error()})
 		s.appendScanEvent(ctx, record.ID, db.ScanEventLevelError, "scan failed while persisting artifacts", map[string]any{"error": err.Error()})
 		_ = s.Store.CompleteScan(ctx, record.ID, "failed", s.Now().UTC(), result.Assets, 0, err.Error())
 		return RunScanResult{}, fmt.Errorf("persist artifacts: %w", err)
@@ -202,6 +223,7 @@ func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
 	s.appendScanEvent(ctx, record.ID, db.ScanEventLevelInfo, "artifacts persisted", map[string]any{"raw_assets": len(result.RawAssets), "identities": len(result.Bundle.Identities)})
 
 	if err := s.Store.UpsertFindings(ctx, record.ID, result.Findings); err != nil {
+		s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleFailed, map[string]any{"error": err.Error()})
 		s.appendScanEvent(ctx, record.ID, db.ScanEventLevelError, "scan failed while persisting findings", map[string]any{"error": err.Error()})
 		_ = s.Store.CompleteScan(ctx, record.ID, "failed", s.Now().UTC(), result.Assets, 0, err.Error())
 		return RunScanResult{}, fmt.Errorf("persist findings: %w", err)
@@ -209,6 +231,7 @@ func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
 	s.appendScanEvent(ctx, record.ID, db.ScanEventLevelInfo, "findings persisted", map[string]any{"findings": len(result.Findings)})
 
 	if err := s.Store.CompleteScan(ctx, record.ID, "completed", s.Now().UTC(), result.Assets, len(result.Findings), ""); err != nil {
+		s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleFailed, map[string]any{"error": err.Error()})
 		s.appendScanEvent(ctx, record.ID, db.ScanEventLevelError, "scan failed while finalizing scan record", map[string]any{"error": err.Error()})
 		return RunScanResult{}, fmt.Errorf("complete scan record: %w", err)
 	}
@@ -218,6 +241,11 @@ func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
 	record.FinishedAt = &finished
 	record.AssetCount = result.Assets
 	record.FindingCount = len(result.Findings)
+	s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleSucceeded, map[string]any{
+		"assets":             result.Assets,
+		"findings":           len(result.Findings),
+		"partial_source_run": len(result.SourceErrors) > 0,
+	})
 	s.appendScanEvent(ctx, record.ID, db.ScanEventLevelInfo, "scan completed", map[string]any{"assets": result.Assets, "findings": len(result.Findings)})
 	if s.Alerter != nil {
 		if alertErr := s.Alerter.NotifyScan(ctx, s.Provider, record, result.Findings); alertErr != nil && s.OnAlertError != nil {
@@ -683,6 +711,14 @@ func (s *Service) appendScanEvent(ctx context.Context, scanID string, level stri
 	_ = s.Store.AppendScanEvent(ctx, scanID, level, message, metadata)
 }
 
+func (s *Service) appendScanLifecycleEvent(ctx context.Context, scanID string, state string, metadata map[string]any) {
+	payload := map[string]any{"state": state}
+	for key, value := range metadata {
+		payload[key] = value
+	}
+	s.appendScanEvent(ctx, scanID, db.ScanEventLevelInfo, "scan lifecycle transition", payload)
+}
+
 func (d *ScanDiff) applyLimit(limit int) {
 	if limit <= 0 {
 		return
@@ -737,6 +773,16 @@ func enrichFindings(findings []domain.Finding) []domain.Finding {
 		enriched = append(enriched, standards.EnrichFinding(finding))
 	}
 	return enriched
+}
+
+func truncateSourceErrors(errors []providers.SourceError, max int) []providers.SourceError {
+	if len(errors) == 0 {
+		return nil
+	}
+	if max <= 0 || len(errors) <= max {
+		return append([]providers.SourceError(nil), errors...)
+	}
+	return append([]providers.SourceError(nil), errors[:max]...)
 }
 
 func repoTargetAllowed(target string, allowlist []string) bool {
