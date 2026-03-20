@@ -68,9 +68,10 @@ type Service struct {
 
 // RunScanResult is returned after a scan API trigger.
 type RunScanResult struct {
-	Scan         db.ScanRecord `json:"scan"`
-	Assets       int           `json:"assets"`
-	FindingCount int           `json:"finding_count"`
+	Scan             db.ScanRecord `json:"scan"`
+	Assets           int           `json:"assets"`
+	FindingCount     int           `json:"finding_count"`
+	PartialSourceRun bool          `json:"partial_source_run"`
 }
 
 // RunRepoScanResult is returned after repo scan API trigger.
@@ -254,9 +255,10 @@ func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
 	}
 
 	return RunScanResult{
-		Scan:         record,
-		Assets:       result.Assets,
-		FindingCount: len(result.Findings),
+		Scan:             record,
+		Assets:           result.Assets,
+		FindingCount:     len(result.Findings),
+		PartialSourceRun: len(result.SourceErrors) > 0,
 	}, nil
 }
 

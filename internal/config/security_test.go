@@ -1,6 +1,7 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -358,5 +359,22 @@ func TestSecurityWarnings(t *testing.T) {
 	warnings := SecurityWarnings(cfg)
 	if len(warnings) < 3 {
 		t.Fatalf("expected multiple warnings, got %+v", warnings)
+	}
+}
+
+func TestSecurityWarningsShortAPIKey(t *testing.T) {
+	cfg := Config{
+		APIKeys: []string{"short"},
+	}
+	warnings := SecurityWarnings(cfg)
+	found := false
+	for _, warning := range warnings {
+		if strings.Contains(warning, "shorter than") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected short API key warning, got %+v", warnings)
 	}
 }

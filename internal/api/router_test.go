@@ -669,6 +669,31 @@ func TestSortHelpersCoverageForAllCollections(t *testing.T) {
 	}
 }
 
+func TestSecureKeyHelpers(t *testing.T) {
+	if !secureKeyEquals("reader-secret", "reader-secret") {
+		t.Fatal("expected equal keys to match")
+	}
+	if secureKeyEquals("reader-secret", "reader-secret-2") {
+		t.Fatal("expected different keys to not match")
+	}
+	if keyInList([]string{"reader", "writer"}, "admin") {
+		t.Fatal("expected missing key to not be found")
+	}
+	if !keyInList([]string{"reader", "writer"}, "writer") {
+		t.Fatal("expected exact key to be found")
+	}
+	scoped := map[string]scopeSet{
+		"reader": newScopeSet([]string{"read"}),
+		"writer": newScopeSet([]string{"read", "write"}),
+	}
+	if _, ok := scopedKeyLookup(scoped, "missing"); ok {
+		t.Fatal("expected missing scoped key to not resolve")
+	}
+	if scopes, ok := scopedKeyLookup(scoped, "writer"); !ok || !scopes.has("write") {
+		t.Fatalf("expected writer scopes to resolve, got ok=%t scopes=%+v", ok, scopes)
+	}
+}
+
 func TestRouterRequiresAPIKeyForV1(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	metrics := telemetry.NewMetrics()

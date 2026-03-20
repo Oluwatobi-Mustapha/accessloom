@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"sort"
@@ -64,7 +65,18 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	r.Use(securityHeadersMiddleware())
 
 	registry := prometheus.NewRegistry()
-	registry.MustRegister(metrics.ScanRunsTotal, metrics.ScanDurationMS, metrics.FindingsGenerated)
+	registry.MustRegister(
+		metrics.ScanRunsTotal,
+		metrics.ScanSuccessTotal,
+		metrics.ScanFailureTotal,
+		metrics.ScanPartialTotal,
+		metrics.ScanInFlight,
+		metrics.ScanDurationMS,
+		metrics.FindingsGenerated,
+		metrics.RepoScanRunsTotal,
+		metrics.RepoScanFailureTotal,
+		metrics.RepoScanDurationMS,
+	)
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -452,12 +464,16 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	v1.POST("/scans", requireWriteKeyMiddleware(opts.WriteAPIKeys, opts.APIKeyScopes), func(c *gin.Context) {
 		start := time.Now()
 		metrics.ScanRunsTotal.Inc()
+		metrics.ScanInFlight.Inc()
+		defer metrics.ScanInFlight.Dec()
+		defer metrics.ScanDurationMS.Observe(float64(time.Since(start).Milliseconds()))
 
 		requestCtx, cancel := context.WithTimeout(c.Request.Context(), scanRequestTimeout)
 		defer cancel()
 
 		result, err := svc.RunScan(requestCtx)
 		if err != nil {
+			metrics.ScanFailureTotal.Inc()
 			if errors.Is(err, ErrScanInProgress) {
 				c.JSON(http.StatusConflict, gin.H{"error": "scan already in progress"})
 				return
@@ -467,18 +483,27 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			return
 		}
 
+		metrics.ScanSuccessTotal.Inc()
+		if result.PartialSourceRun {
+			metrics.ScanPartialTotal.Inc()
+		}
 		metrics.FindingsGenerated.Add(float64(result.FindingCount))
-		metrics.ScanDurationMS.Observe(float64(time.Since(start).Milliseconds()))
 		c.JSON(http.StatusAccepted, gin.H{
-			"scan":          result.Scan,
-			"assets":        result.Assets,
-			"finding_count": result.FindingCount,
+			"scan":               result.Scan,
+			"assets":             result.Assets,
+			"finding_count":      result.FindingCount,
+			"partial_source_run": result.PartialSourceRun,
 		})
 	})
 
 	v1.POST("/repo-scans", requireWriteKeyMiddleware(opts.WriteAPIKeys, opts.APIKeyScopes), func(c *gin.Context) {
+		start := time.Now()
+		metrics.RepoScanRunsTotal.Inc()
+		defer metrics.RepoScanDurationMS.Observe(float64(time.Since(start).Milliseconds()))
+
 		var request RepoScanRequest
 		if err := c.ShouldBindJSON(&request); err != nil {
+			metrics.RepoScanFailureTotal.Inc()
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
 			return
 		}
@@ -488,6 +513,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 
 		result, err := svc.RunRepoScanPersisted(requestCtx, request)
 		if err != nil {
+			metrics.RepoScanFailureTotal.Inc()
 			if errors.Is(err, ErrInvalidRepoScanRequest) {
 				c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repo scan request"})
 				return
@@ -859,14 +885,14 @@ func apiKeyAuthMiddleware(keys []string, scopedKeys map[string][]string, tokenVe
 	}
 
 	// Scoped keys are the source of truth when configured.
-	legacyAllowed := map[string]struct{}{}
+	legacyAllowed := []string{}
 	if len(scopedAllowed) == 0 {
 		for _, key := range keys {
 			trimmed := strings.TrimSpace(key)
 			if trimmed == "" {
 				continue
 			}
-			legacyAllowed[trimmed] = struct{}{}
+			legacyAllowed = append(legacyAllowed, trimmed)
 		}
 	}
 
@@ -876,13 +902,13 @@ func apiKeyAuthMiddleware(keys []string, scopedKeys map[string][]string, tokenVe
 
 	return func(c *gin.Context) {
 		if candidate := readAPIKey(c); candidate != "" {
-			if scopes, ok := scopedAllowed[candidate]; ok {
+			if scopes, ok := scopedKeyLookup(scopedAllowed, candidate); ok {
 				c.Set("auth.api_key", candidate)
 				c.Set("auth.scope_set", scopes)
 				c.Next()
 				return
 			}
-			if _, ok := legacyAllowed[candidate]; ok {
+			if keyInList(legacyAllowed, candidate) {
 				c.Set("auth.api_key", candidate)
 				c.Next()
 				return
@@ -902,13 +928,13 @@ func apiKeyAuthMiddleware(keys []string, scopedKeys map[string][]string, tokenVe
 
 		// Backward-compatible fallback for legacy clients sending API key via Bearer token.
 		if rawBearer != "" {
-			if scopes, ok := scopedAllowed[rawBearer]; ok {
+			if scopes, ok := scopedKeyLookup(scopedAllowed, rawBearer); ok {
 				c.Set("auth.api_key", rawBearer)
 				c.Set("auth.scope_set", scopes)
 				c.Next()
 				return
 			}
-			if _, ok := legacyAllowed[rawBearer]; ok {
+			if keyInList(legacyAllowed, rawBearer) {
 				c.Set("auth.api_key", rawBearer)
 				c.Next()
 				return
@@ -920,13 +946,13 @@ func apiKeyAuthMiddleware(keys []string, scopedKeys map[string][]string, tokenVe
 }
 
 func requireWriteKeyMiddleware(writeKeys []string, scopedKeys map[string][]string) gin.HandlerFunc {
-	allowed := map[string]struct{}{}
+	allowed := []string{}
 	for _, key := range writeKeys {
 		trimmed := strings.TrimSpace(key)
 		if trimmed == "" {
 			continue
 		}
-		allowed[trimmed] = struct{}{}
+		allowed = append(allowed, trimmed)
 	}
 
 	// When scoped auth exists (scoped API keys or OIDC token scopes), prefer scope-based write checks.
@@ -959,12 +985,37 @@ func requireWriteKeyMiddleware(writeKeys []string, scopedKeys map[string][]strin
 			return
 		}
 		apiKey, _ := apiKeyValue.(string)
-		if _, ok := allowed[apiKey]; !ok {
+		if !keyInList(allowed, apiKey) {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
 		c.Next()
 	}
+}
+
+func keyInList(keys []string, candidate string) bool {
+	for _, key := range keys {
+		if secureKeyEquals(key, candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func scopedKeyLookup(scoped map[string]scopeSet, candidate string) (scopeSet, bool) {
+	for key, scopes := range scoped {
+		if secureKeyEquals(key, candidate) {
+			return scopes, true
+		}
+	}
+	return scopeSet{}, false
+}
+
+func secureKeyEquals(expected string, candidate string) bool {
+	if len(expected) != len(candidate) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(expected), []byte(candidate)) == 1
 }
 
 func requireReadableScopeMiddleware(scopedKeys map[string][]string) gin.HandlerFunc {

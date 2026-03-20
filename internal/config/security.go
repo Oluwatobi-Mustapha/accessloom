@@ -15,6 +15,7 @@ const (
 	maxAuditForwardBackoffLimit = 30
 	maxRepoScanHistoryLimitMax  = 20000
 	maxRepoScanFindingsLimitMax = 5000
+	minAPIKeyLength             = 24
 )
 
 var allowedKeyScopes = map[string]struct{}{
@@ -250,6 +251,9 @@ func SecurityWarnings(cfg Config) []string {
 	if len(cfg.APIKeys) > 0 && len(cfg.APIKeyScopes) > 0 {
 		warnings = append(warnings, "IDENTRAIL_API_KEYS is ignored when IDENTRAIL_API_KEY_SCOPES is configured")
 	}
+	if hasShortAPIKey(cfg.APIKeys, cfg.APIKeyScopes) {
+		warnings = append(warnings, fmt.Sprintf("one or more API keys are shorter than %d characters; rotate to high-entropy keys", minAPIKeyLength))
+	}
 	if strings.TrimSpace(cfg.OIDCIssuerURL) != "" && (len(cfg.APIKeys) > 0 || len(cfg.APIKeyScopes) > 0) {
 		warnings = append(warnings, "both API key auth and OIDC are enabled; verify expected precedence in clients and automation")
 	}
@@ -273,6 +277,20 @@ func SecurityWarnings(cfg Config) []string {
 		warnings = append(warnings, "IDENTRAIL_LOCK_BACKEND is inmemory in database mode; use postgres lock backend for multi-instance deployments")
 	}
 	return warnings
+}
+
+func hasShortAPIKey(keys []string, scoped map[string][]string) bool {
+	for _, key := range keys {
+		if len(strings.TrimSpace(key)) > 0 && len(strings.TrimSpace(key)) < minAPIKeyLength {
+			return true
+		}
+	}
+	for key := range scoped {
+		if len(strings.TrimSpace(key)) > 0 && len(strings.TrimSpace(key)) < minAPIKeyLength {
+			return true
+		}
+	}
+	return false
 }
 
 func validateForwardURL(raw string) error {

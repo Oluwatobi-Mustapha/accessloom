@@ -190,6 +190,8 @@ paths:
                     type: integer
                   finding_count:
                     type: integer
+                  partial_source_run:
+                    type: boolean
         "409":
           description: Scan already running for provider
   /v1/scans/{scan_id}/diff:
