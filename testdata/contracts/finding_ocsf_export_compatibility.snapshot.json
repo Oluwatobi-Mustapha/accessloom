@@ -1,0 +1,59 @@
+{
+  "activity_name": "detect",
+  "category_name": "Findings",
+  "class_name": "Security Finding",
+  "finding_info": {
+    "controls": [
+      {
+        "control_id": "1.16",
+        "framework": "CIS AWS Foundations",
+        "title": "Ensure IAM policies that allow full administrative privileges are not attached"
+      },
+      {
+        "control_id": "PR.PT-3",
+        "framework": "NIST CSF",
+        "title": "Principle of least functionality is incorporated"
+      }
+    ],
+    "created": "2026-03-20T08:00:00Z",
+    "desc": "A workload can escalate to administrator access.",
+    "evidence": {
+      "compliance_frameworks": [
+        "CIS AWS Foundations",
+        "NIST CSF"
+      ],
+      "control_refs": [
+        {
+          "framework": "CIS AWS Foundations",
+          "control_id": "1.16",
+          "title": "Ensure IAM policies that allow full administrative privileges are not attached"
+        },
+        {
+          "framework": "NIST CSF",
+          "control_id": "PR.PT-3",
+          "title": "Principle of least functionality is incorporated"
+        }
+      ],
+      "path_count": 1,
+      "schema_version": "v1"
+    },
+    "framework": [
+      "CIS AWS Foundations",
+      "NIST CSF"
+    ],
+    "path": [
+      "aws:identity:role:payments",
+      "aws:access:iam:*:*"
+    ],
+    "provider": "aws",
+    "remedy": "Remove wildcard trust and reduce permissions.",
+    "scan_id": "scan-compat-1",
+    "title": "Escalation path to admin",
+    "type_uid": "escalation_path",
+    "uid": "compat-finding-1"
+  },
+  "severity": {
+    "id": 5,
+    "label": "Critical"
+  }
+}

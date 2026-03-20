@@ -35,11 +35,14 @@
 - Provider contract validation for normalized schema + graph semantics
 - Fixture contract tests for AWS and Kubernetes normalization/graph pipelines
 - Graph snapshot regression tests for AWS and Kubernetes edge sets
+- API contract snapshot tests for critical `/v1` responses
+- Finding payload compatibility snapshots (internal enriched + OCSF + ASFF)
 - Collector diagnostics and transient retry behavior (kubectl mode)
 - Partial scan lifecycle state assertions (`partial` on non-fatal source errors)
 - API list sort contract behavior (`sort_by`, `sort_order`) on findings and scans
 - OpenAPI v1 contract presence checks for core endpoints and parameters
 - Migration rollback roundtrip integration test (up -> down -> up)
+- Migration compatibility integration test for existing nullable legacy rows
 
 ## CI Pipeline Gates
 

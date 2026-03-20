@@ -1,0 +1,14 @@
+{
+  "assets": 1,
+  "finding_count": 1,
+  "partial_source_run": false,
+  "scan": {
+    "asset_count": 1,
+    "finding_count": 1,
+    "finished_at": "\u003ctimestamp\u003e",
+    "id": "\u003cscan-id\u003e",
+    "provider": "aws",
+    "started_at": "\u003ctimestamp\u003e",
+    "status": "completed"
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "AwsAccountId": "000000000000",
+  "CreatedAt": "2026-03-20T08:00:00Z",
+  "Description": "A workload can escalate to administrator access.",
+  "GeneratorId": "identrail/escalation_path",
+  "Id": "compat-finding-1",
+  "ProductArn": "arn:aws:securityhub:::product/identrail/default",
+  "ProductFields": {
+    "ControlRefs": [
+      {
+        "control_id": "1.16",
+        "framework": "CIS AWS Foundations",
+        "title": "Ensure IAM policies that allow full administrative privileges are not attached"
+      },
+      {
+        "control_id": "PR.PT-3",
+        "framework": "NIST CSF",
+        "title": "Principle of least functionality is incorporated"
+      }
+    ],
+    "ProviderName": "Identrail",
+    "ProviderType": "aws",
+    "ScanID": "scan-compat-1"
+  },
+  "Remediation": {
+    "Recommendation": {
+      "Text": "Remove wildcard trust and reduce permissions."
+    }
+  },
+  "Resources": [
+    {
+      "Details": {
+        "ControlRefs": [
+          {
+            "control_id": "1.16",
+            "framework": "CIS AWS Foundations",
+            "title": "Ensure IAM policies that allow full administrative privileges are not attached"
+          },
+          {
+            "control_id": "PR.PT-3",
+            "framework": "NIST CSF",
+            "title": "Principle of least functionality is incorporated"
+          }
+        ]
+      },
+      "Id": "aws:identity:role:payments -\u003e aws:access:iam:*:*",
+      "Region": "us-east-1",
+      "Type": "Other"
+    }
+  ],
+  "SchemaVersion": "2018-10-08",
+  "Severity": {
+    "Label": "CRITICAL"
+  },
+  "Title": "Escalation path to admin",
+  "Types": [
+    "Software and Configuration Checks/AWS Security Best Practices"
+  ],
+  "UpdatedAt": "2026-03-20T08:00:00Z"
+}

@@ -1,0 +1,117 @@
+{
+  "asff": {
+    "AwsAccountId": "000000000000",
+    "CreatedAt": "\u003ctimestamp\u003e",
+    "Description": "summary",
+    "GeneratorId": "identrail/risky_trust_policy",
+    "Id": "f1",
+    "ProductArn": "arn:aws:securityhub:::product/identrail/default",
+    "ProductFields": {
+      "ControlRefs": [
+        {
+          "control_id": "1.20",
+          "framework": "CIS AWS Foundations",
+          "title": "Ensure IAM policies do not allow broad trust relationships"
+        },
+        {
+          "control_id": "PR.AC-4",
+          "framework": "NIST CSF",
+          "title": "Access permissions are managed"
+        }
+      ],
+      "ProviderName": "Identrail",
+      "ProviderType": "unknown",
+      "ScanID": "\u003cscan-id\u003e"
+    },
+    "Remediation": {
+      "Recommendation": {
+        "Text": ""
+      }
+    },
+    "Resources": [
+      {
+        "Details": {
+          "ControlRefs": [
+            {
+              "control_id": "1.20",
+              "framework": "CIS AWS Foundations",
+              "title": "Ensure IAM policies do not allow broad trust relationships"
+            },
+            {
+              "control_id": "PR.AC-4",
+              "framework": "NIST CSF",
+              "title": "Access permissions are managed"
+            }
+          ]
+        },
+        "Id": "",
+        "Region": "us-east-1",
+        "Type": "Other"
+      }
+    ],
+    "SchemaVersion": "2018-10-08",
+    "Severity": {
+      "Label": "HIGH"
+    },
+    "Title": "Risky trust",
+    "Types": [
+      "TTPs/Persistence"
+    ],
+    "UpdatedAt": "\u003ctimestamp\u003e"
+  },
+  "ocsf": {
+    "activity_name": "detect",
+    "category_name": "Findings",
+    "class_name": "Security Finding",
+    "finding_info": {
+      "controls": [
+        {
+          "control_id": "1.20",
+          "framework": "CIS AWS Foundations",
+          "title": "Ensure IAM policies do not allow broad trust relationships"
+        },
+        {
+          "control_id": "PR.AC-4",
+          "framework": "NIST CSF",
+          "title": "Access permissions are managed"
+        }
+      ],
+      "created": "\u003ctimestamp\u003e",
+      "desc": "summary",
+      "evidence": {
+        "compliance_frameworks": [
+          "CIS AWS Foundations",
+          "NIST CSF"
+        ],
+        "control_refs": [
+          {
+            "control_id": "1.20",
+            "framework": "CIS AWS Foundations",
+            "title": "Ensure IAM policies do not allow broad trust relationships"
+          },
+          {
+            "control_id": "PR.AC-4",
+            "framework": "NIST CSF",
+            "title": "Access permissions are managed"
+          }
+        ],
+        "schema_version": "v1"
+      },
+      "framework": [
+        "CIS AWS Foundations",
+        "NIST CSF"
+      ],
+      "path": null,
+      "provider": "unknown",
+      "remedy": "",
+      "scan_id": "\u003cscan-id\u003e",
+      "title": "Risky trust",
+      "type_uid": "risky_trust_policy",
+      "uid": "f1"
+    },
+    "severity": {
+      "id": 4,
+      "label": "High"
+    }
+  }
+}
