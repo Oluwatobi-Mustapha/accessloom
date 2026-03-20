@@ -948,6 +948,72 @@ func TestRouterRateLimitExceeded(t *testing.T) {
 	}
 }
 
+func TestIPRateLimiterEvictsExpiredEntries(t *testing.T) {
+	now := time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC)
+	limiter := newIPRateLimiterWithClock(
+		60,
+		1,
+		func() time.Time { return now },
+		1*time.Second,
+		2,
+		1,
+	)
+
+	if !limiter.allow("10.0.0.1") {
+		t.Fatal("expected first request to pass")
+	}
+	if len(limiter.limiters) != 1 {
+		t.Fatalf("expected one tracked ip, got %d", len(limiter.limiters))
+	}
+
+	now = now.Add(2 * time.Second)
+	if !limiter.allow("10.0.0.2") {
+		t.Fatal("expected new request to pass")
+	}
+	if len(limiter.limiters) != 1 {
+		t.Fatalf("expected stale entry eviction to keep one tracked ip, got %d", len(limiter.limiters))
+	}
+	if _, exists := limiter.limiters["10.0.0.1"]; exists {
+		t.Fatal("expected expired ip entry to be evicted")
+	}
+}
+
+func TestIPRateLimiterEvictsOldestEntryWhenCapacityReached(t *testing.T) {
+	now := time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC)
+	limiter := newIPRateLimiterWithClock(
+		60,
+		1,
+		func() time.Time { return now },
+		1*time.Hour,
+		2,
+		1,
+	)
+
+	if !limiter.allow("10.0.0.1") {
+		t.Fatal("expected first request to pass")
+	}
+	now = now.Add(100 * time.Millisecond)
+	if !limiter.allow("10.0.0.2") {
+		t.Fatal("expected second request to pass")
+	}
+	now = now.Add(100 * time.Millisecond)
+	if !limiter.allow("10.0.0.3") {
+		t.Fatal("expected third request to pass")
+	}
+	if len(limiter.limiters) != 2 {
+		t.Fatalf("expected limiter size to stay bounded at 2, got %d", len(limiter.limiters))
+	}
+	if _, exists := limiter.limiters["10.0.0.1"]; exists {
+		t.Fatal("expected oldest entry to be evicted when capacity is reached")
+	}
+	if _, exists := limiter.limiters["10.0.0.2"]; !exists {
+		t.Fatal("expected newer entry to remain in limiter cache")
+	}
+	if _, exists := limiter.limiters["10.0.0.3"]; !exists {
+		t.Fatal("expected most recent entry to remain in limiter cache")
+	}
+}
+
 func TestParseLimit(t *testing.T) {
 	if got := parseLimit("", 10, 500); got != 10 {
 		t.Fatalf("expected fallback 10, got %d", got)

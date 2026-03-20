@@ -29,6 +29,9 @@ const (
 	maxCursorFetchLimit    = 5000
 	scanRequestTimeout     = 2 * time.Minute
 	repoScanRequestTimeout = 5 * time.Minute
+	rateLimiterEntryTTL    = 15 * time.Minute
+	rateLimiterMaxEntries  = 10000
+	rateLimiterCleanupTick = 256
 	scopeRead              = "read"
 	scopeWrite             = "write"
 	scopeAdmin             = "admin"
@@ -1080,35 +1083,119 @@ func requireReadableScopeMiddleware(scopedKeys map[string][]string) gin.HandlerF
 }
 
 type ipRateLimiter struct {
-	mu       sync.Mutex
-	limiters map[string]*rate.Limiter
-	rate     rate.Limit
-	burst    int
+	mu           sync.Mutex
+	limiters     map[string]ipLimiterEntry
+	rate         rate.Limit
+	burst        int
+	now          func() time.Time
+	entryTTL     time.Duration
+	maxEntries   int
+	cleanupEvery uint64
+	allowCount   uint64
+}
+
+type ipLimiterEntry struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
 }
 
 func newIPRateLimiter(rpm int, burst int) *ipRateLimiter {
+	return newIPRateLimiterWithClock(rpm, burst, time.Now, rateLimiterEntryTTL, rateLimiterMaxEntries, rateLimiterCleanupTick)
+}
+
+func newIPRateLimiterWithClock(
+	rpm int,
+	burst int,
+	now func() time.Time,
+	entryTTL time.Duration,
+	maxEntries int,
+	cleanupEvery uint64,
+) *ipRateLimiter {
 	if rpm <= 0 {
 		rpm = 120
 	}
 	if burst <= 0 {
 		burst = 20
 	}
+	if now == nil {
+		now = time.Now
+	}
+	if entryTTL <= 0 {
+		entryTTL = rateLimiterEntryTTL
+	}
+	if maxEntries <= 0 {
+		maxEntries = rateLimiterMaxEntries
+	}
+	if cleanupEvery == 0 {
+		cleanupEvery = rateLimiterCleanupTick
+	}
 	return &ipRateLimiter{
-		limiters: map[string]*rate.Limiter{},
-		rate:     rate.Every(time.Minute / time.Duration(rpm)),
-		burst:    burst,
+		limiters:     map[string]ipLimiterEntry{},
+		rate:         rate.Every(time.Minute / time.Duration(rpm)),
+		burst:        burst,
+		now:          now,
+		entryTTL:     entryTTL,
+		maxEntries:   maxEntries,
+		cleanupEvery: cleanupEvery,
 	}
 }
 
 func (l *ipRateLimiter) allow(ip string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	limiter, ok := l.limiters[ip]
-	if !ok {
-		limiter = rate.NewLimiter(l.rate, l.burst)
-		l.limiters[ip] = limiter
+	now := l.now()
+	l.allowCount++
+	if l.cleanupEvery > 0 && l.allowCount%l.cleanupEvery == 0 {
+		l.evictExpiredLocked(now)
 	}
-	return limiter.Allow()
+
+	entry, ok := l.limiters[ip]
+	if !ok {
+		if len(l.limiters) >= l.maxEntries {
+			l.evictExpiredLocked(now)
+		}
+		if len(l.limiters) >= l.maxEntries {
+			l.evictOldestLocked()
+		}
+		entry = ipLimiterEntry{
+			limiter:  rate.NewLimiter(l.rate, l.burst),
+			lastSeen: now,
+		}
+		l.limiters[ip] = entry
+	} else {
+		entry.lastSeen = now
+		l.limiters[ip] = entry
+	}
+	return entry.limiter.Allow()
+}
+
+func (l *ipRateLimiter) evictExpiredLocked(now time.Time) {
+	if len(l.limiters) == 0 {
+		return
+	}
+	cutoff := now.Add(-l.entryTTL)
+	for ip, entry := range l.limiters {
+		if entry.lastSeen.Before(cutoff) {
+			delete(l.limiters, ip)
+		}
+	}
+}
+
+func (l *ipRateLimiter) evictOldestLocked() {
+	if len(l.limiters) == 0 {
+		return
+	}
+	var oldestIP string
+	var oldestTime time.Time
+	for ip, entry := range l.limiters {
+		if oldestIP == "" || entry.lastSeen.Before(oldestTime) {
+			oldestIP = ip
+			oldestTime = entry.lastSeen
+		}
+	}
+	if oldestIP != "" {
+		delete(l.limiters, oldestIP)
+	}
 }
 
 func rateLimitMiddleware(rpm int, burst int) gin.HandlerFunc {

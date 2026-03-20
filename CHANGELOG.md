@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Hardened API rate limiter memory behavior:
+  - bounded per-IP limiter cache with deterministic max-cap eviction
+  - stale IP limiter entries now expire automatically
+  - added regression tests for stale-entry and oldest-entry eviction paths
 - Hardened API client IP handling against spoofed `X-Forwarded-For` by default:
   - added trusted proxy configuration (`IDENTRAIL_TRUSTED_PROXIES`)
   - default behavior now trusts no proxy hops unless explicitly configured
