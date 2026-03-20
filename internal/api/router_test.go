@@ -459,6 +459,216 @@ func TestRouterRepoScanConflictWhenLocked(t *testing.T) {
 	}
 }
 
+func TestRouterSupportsFindingsSortParameters(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	metrics := telemetry.NewMetrics()
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC)
+
+	scan, err := store.CreateScan(context.Background(), "aws", now)
+	if err != nil {
+		t.Fatalf("create scan: %v", err)
+	}
+	if err := store.UpsertFindings(context.Background(), scan.ID, []domain.Finding{
+		{ID: "f-critical", Severity: domain.SeverityCritical, Type: domain.FindingEscalationPath, Title: "critical", CreatedAt: now},
+		{ID: "f-info", Severity: domain.SeverityInfo, Type: domain.FindingOwnerless, Title: "info", CreatedAt: now},
+		{ID: "f-high", Severity: domain.SeverityHigh, Type: domain.FindingRiskyTrustPolicy, Title: "high", CreatedAt: now},
+	}); err != nil {
+		t.Fatalf("seed findings: %v", err)
+	}
+
+	svc := NewService(store, routerScanner{}, "aws")
+	r := NewRouter(logger, metrics, svc, RouterOptions{RateLimitRPM: 10000, RateLimitBurst: 1000})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/findings?scan_id="+scan.ID+"&sort_by=severity&sort_order=asc", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	var body struct {
+		Items []domain.Finding `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Items) != 3 {
+		t.Fatalf("expected 3 findings, got %d", len(body.Items))
+	}
+	if body.Items[0].ID != "f-info" || body.Items[2].ID != "f-critical" {
+		t.Fatalf("unexpected sort order by severity asc: %+v", body.Items)
+	}
+}
+
+func TestRouterSupportsScansSortParameters(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	metrics := telemetry.NewMetrics()
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC)
+
+	scanA, err := store.CreateScan(context.Background(), "aws", now)
+	if err != nil {
+		t.Fatalf("create scan A: %v", err)
+	}
+	scanB, err := store.CreateScan(context.Background(), "aws", now.Add(1*time.Minute))
+	if err != nil {
+		t.Fatalf("create scan B: %v", err)
+	}
+	if err := store.CompleteScan(context.Background(), scanA.ID, "completed", now.Add(2*time.Minute), 2, 7, ""); err != nil {
+		t.Fatalf("complete scan A: %v", err)
+	}
+	if err := store.CompleteScan(context.Background(), scanB.ID, "completed", now.Add(3*time.Minute), 2, 1, ""); err != nil {
+		t.Fatalf("complete scan B: %v", err)
+	}
+
+	svc := NewService(store, routerScanner{}, "aws")
+	r := NewRouter(logger, metrics, svc, RouterOptions{RateLimitRPM: 10000, RateLimitBurst: 1000})
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/scans?sort_by=finding_count&sort_order=asc", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	var body struct {
+		Items []db.ScanRecord `json:"items"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Items) != 2 {
+		t.Fatalf("expected 2 scans, got %d", len(body.Items))
+	}
+	if body.Items[0].FindingCount != 1 || body.Items[1].FindingCount != 7 {
+		t.Fatalf("unexpected scan sort order: %+v", body.Items)
+	}
+}
+
+func TestSortHelpersFallbackAndLevels(t *testing.T) {
+	sortBy, desc := parseSortParams(" ", "invalid", "created_at")
+	if sortBy != "created_at" || !desc {
+		t.Fatalf("expected fallback sort defaults, got sort_by=%q desc=%t", sortBy, desc)
+	}
+
+	if got := scanEventLevelRank("warn"); got <= scanEventLevelRank("info") {
+		t.Fatalf("expected warn rank greater than info, got warn=%d info=%d", got, scanEventLevelRank("info"))
+	}
+}
+
+func TestSortHelpersCoverageForAllCollections(t *testing.T) {
+	now := time.Date(2026, 3, 20, 12, 0, 0, 0, time.UTC)
+	findings := []domain.Finding{
+		{ID: "f1", Severity: domain.SeverityLow, Type: domain.FindingOwnerless, Title: "b", CreatedAt: now.Add(-2 * time.Minute)},
+		{ID: "f2", Severity: domain.SeverityCritical, Type: domain.FindingEscalationPath, Title: "a", CreatedAt: now.Add(-1 * time.Minute)},
+	}
+	sortFindings(findings, "title", false)
+	if findings[0].Title != "a" {
+		t.Fatalf("expected title asc sort, got %+v", findings)
+	}
+	sortFindings(findings, "severity", true)
+	if findings[0].Severity != domain.SeverityCritical {
+		t.Fatalf("expected severity desc sort, got %+v", findings)
+	}
+
+	scans := []db.ScanRecord{
+		{ID: "s1", Status: "completed", AssetCount: 2, FindingCount: 8, StartedAt: now.Add(-2 * time.Minute)},
+		{ID: "s2", Status: "running", AssetCount: 5, FindingCount: 1, StartedAt: now.Add(-1 * time.Minute)},
+	}
+	sortScans(scans, "finding_count", false)
+	if scans[0].ID != "s2" {
+		t.Fatalf("expected finding_count asc sort, got %+v", scans)
+	}
+	sortScans(scans, "asset_count", true)
+	if scans[0].ID != "s2" {
+		t.Fatalf("expected asset_count desc sort, got %+v", scans)
+	}
+	sortScans(scans, "status", false)
+	if scans[0].Status != "completed" {
+		t.Fatalf("expected status asc sort, got %+v", scans)
+	}
+
+	events := []db.ScanEvent{
+		{ID: "e1", Level: db.ScanEventLevelInfo, Message: "z", CreatedAt: now.Add(-2 * time.Minute)},
+		{ID: "e2", Level: db.ScanEventLevelError, Message: "a", CreatedAt: now.Add(-1 * time.Minute)},
+	}
+	sortScanEvents(events, "level", true)
+	if events[0].Level != db.ScanEventLevelError {
+		t.Fatalf("expected level desc sort, got %+v", events)
+	}
+	sortScanEvents(events, "message", false)
+	if events[0].Message != "a" {
+		t.Fatalf("expected message asc sort, got %+v", events)
+	}
+
+	repoScans := []db.RepoScanRecord{
+		{ID: "r1", Repository: "z/repo", Status: "completed", CommitsScanned: 10, FindingCount: 4, StartedAt: now.Add(-2 * time.Minute)},
+		{ID: "r2", Repository: "a/repo", Status: "running", CommitsScanned: 3, FindingCount: 1, StartedAt: now.Add(-1 * time.Minute)},
+	}
+	sortRepoScans(repoScans, "repository", false)
+	if repoScans[0].Repository != "a/repo" {
+		t.Fatalf("expected repository asc sort, got %+v", repoScans)
+	}
+	sortRepoScans(repoScans, "commits_scanned", false)
+	if repoScans[0].CommitsScanned != 3 {
+		t.Fatalf("expected commits_scanned asc sort, got %+v", repoScans)
+	}
+
+	identities := []domain.Identity{
+		{ID: "i1", Provider: domain.ProviderKubernetes, Type: domain.IdentityTypeServiceAccount, Name: "zeta", CreatedAt: now.Add(-2 * time.Minute)},
+		{ID: "i2", Provider: domain.ProviderAWS, Type: domain.IdentityTypeRole, Name: "alpha", CreatedAt: now.Add(-1 * time.Minute)},
+	}
+	sortIdentities(identities, "provider", false)
+	if identities[0].Provider != domain.ProviderAWS {
+		t.Fatalf("expected provider asc sort, got %+v", identities)
+	}
+	sortIdentities(identities, "type", false)
+	if identities[0].Type != domain.IdentityTypeRole {
+		t.Fatalf("expected type asc sort, got %+v", identities)
+	}
+	sortIdentities(identities, "created_at", true)
+	if !identities[0].CreatedAt.After(identities[1].CreatedAt) {
+		t.Fatalf("expected created_at desc sort, got %+v", identities)
+	}
+
+	relationships := []domain.Relationship{
+		{ID: "x2", Type: domain.RelationshipCanAccess, FromNodeID: "z", ToNodeID: "a", DiscoveredAt: now.Add(-2 * time.Minute)},
+		{ID: "x1", Type: domain.RelationshipCanAssume, FromNodeID: "a", ToNodeID: "z", DiscoveredAt: now.Add(-1 * time.Minute)},
+	}
+	sortRelationships(relationships, "type", false)
+	if relationships[0].Type != domain.RelationshipCanAccess {
+		t.Fatalf("expected type asc sort, got %+v", relationships)
+	}
+	sortRelationships(relationships, "from_node_id", false)
+	if relationships[0].FromNodeID != "a" {
+		t.Fatalf("expected from_node_id asc sort, got %+v", relationships)
+	}
+	sortRelationships(relationships, "to_node_id", false)
+	if relationships[0].ToNodeID != "a" {
+		t.Fatalf("expected to_node_id asc sort, got %+v", relationships)
+	}
+
+	ownership := []domain.OwnershipSignal{
+		{ID: "o1", Team: "zeta", Source: "tags", Confidence: 0.5},
+		{ID: "o2", Team: "alpha", Source: "owner_hint", Confidence: 0.9},
+	}
+	sortOwnershipSignals(ownership, "team", false)
+	if ownership[0].Team != "alpha" {
+		t.Fatalf("expected team asc sort, got %+v", ownership)
+	}
+	sortOwnershipSignals(ownership, "source", false)
+	if ownership[0].Source != "owner_hint" {
+		t.Fatalf("expected source asc sort, got %+v", ownership)
+	}
+	sortOwnershipSignals(ownership, "confidence", true)
+	if ownership[0].Confidence < ownership[1].Confidence {
+		t.Fatalf("expected confidence desc sort, got %+v", ownership)
+	}
+
+	if compareFloat(1.2, 1.2) != 0 {
+		t.Fatal("expected compareFloat equality branch")
+	}
+}
+
 func TestRouterRequiresAPIKeyForV1(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	metrics := telemetry.NewMetrics()

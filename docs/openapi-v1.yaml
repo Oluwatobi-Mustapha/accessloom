@@ -1,0 +1,700 @@
+openapi: 3.0.3
+info:
+  title: Identrail API
+  version: "1.0.0"
+  description: |
+    V1 machine identity security API for AWS and Kubernetes discovery, graphing, and findings.
+servers:
+  - url: http://localhost:8080
+    description: Local development
+tags:
+  - name: Health
+  - name: Findings
+  - name: Scans
+  - name: Explorer
+  - name: RepositoryExposure
+paths:
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Service health
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  service:
+                    type: string
+  /v1/findings:
+    get:
+      tags: [Findings]
+      summary: List findings
+      operationId: listFindings
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/sortBy"
+        - $ref: "#/components/parameters/sortOrder"
+        - in: query
+          name: scan_id
+          schema: { type: string }
+        - in: query
+          name: severity
+          schema:
+            $ref: "#/components/schemas/FindingSeverity"
+        - in: query
+          name: type
+          schema:
+            $ref: "#/components/schemas/FindingType"
+      responses:
+        "200":
+          description: Findings page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/findings/summary:
+    get:
+      tags: [Findings]
+      summary: Findings summary
+      operationId: getFindingsSummary
+      parameters:
+        - $ref: "#/components/parameters/limit"
+      responses:
+        "200":
+          description: Findings summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingsSummary"
+  /v1/findings/trends:
+    get:
+      tags: [Findings]
+      summary: Findings trend over recent scans
+      operationId: getFindingsTrends
+      parameters:
+        - in: query
+          name: points
+          schema:
+            type: integer
+            minimum: 1
+        - in: query
+          name: severity
+          schema:
+            $ref: "#/components/schemas/FindingSeverity"
+        - in: query
+          name: type
+          schema:
+            $ref: "#/components/schemas/FindingType"
+      responses:
+        "200":
+          description: Trend points
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TrendPoint"
+  /v1/findings/{finding_id}:
+    get:
+      tags: [Findings]
+      summary: Get finding by id
+      operationId: getFinding
+      parameters:
+        - in: path
+          name: finding_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: scan_id
+          schema: { type: string }
+      responses:
+        "200":
+          description: Finding detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Finding"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/findings/{finding_id}/exports:
+    get:
+      tags: [Findings]
+      summary: Get standards-aligned exports for a finding
+      operationId: getFindingExports
+      parameters:
+        - in: path
+          name: finding_id
+          required: true
+          schema: { type: string }
+        - in: query
+          name: scan_id
+          schema: { type: string }
+      responses:
+        "200":
+          description: OCSF and ASFF payloads
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ocsf:
+                    type: object
+                    additionalProperties: true
+                  asff:
+                    type: object
+                    additionalProperties: true
+  /v1/scans:
+    get:
+      tags: [Scans]
+      summary: List scans
+      operationId: listScans
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/sortBy"
+        - $ref: "#/components/parameters/sortOrder"
+      responses:
+        "200":
+          description: Scans page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanPage"
+    post:
+      tags: [Scans]
+      summary: Trigger scan
+      operationId: runScan
+      responses:
+        "202":
+          description: Scan started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scan:
+                    $ref: "#/components/schemas/ScanRecord"
+                  assets:
+                    type: integer
+                  finding_count:
+                    type: integer
+        "409":
+          description: Scan already running for provider
+  /v1/scans/{scan_id}/diff:
+    get:
+      tags: [Scans]
+      summary: Compare a scan with baseline
+      operationId: getScanDiff
+      parameters:
+        - in: path
+          name: scan_id
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/limit"
+        - in: query
+          name: previous_scan_id
+          schema: { type: string }
+      responses:
+        "200":
+          description: Scan diff
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanDiff"
+        "400":
+          description: Invalid baseline
+  /v1/scans/{scan_id}/events:
+    get:
+      tags: [Scans]
+      summary: List scan lifecycle events
+      operationId: listScanEvents
+      parameters:
+        - in: path
+          name: scan_id
+          required: true
+          schema: { type: string }
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/sortBy"
+        - $ref: "#/components/parameters/sortOrder"
+        - in: query
+          name: level
+          schema:
+            type: string
+            enum: [debug, info, warn, error]
+      responses:
+        "200":
+          description: Events page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanEventPage"
+  /v1/identities:
+    get:
+      tags: [Explorer]
+      summary: List normalized identities
+      operationId: listIdentities
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/sortBy"
+        - $ref: "#/components/parameters/sortOrder"
+        - in: query
+          name: scan_id
+          schema: { type: string }
+        - in: query
+          name: provider
+          schema:
+            type: string
+            enum: [aws, kubernetes]
+        - in: query
+          name: type
+          schema: { type: string }
+        - in: query
+          name: name_prefix
+          schema: { type: string }
+      responses:
+        "200":
+          description: Identities page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IdentityPage"
+  /v1/relationships:
+    get:
+      tags: [Explorer]
+      summary: List graph relationships
+      operationId: listRelationships
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/sortBy"
+        - $ref: "#/components/parameters/sortOrder"
+        - in: query
+          name: scan_id
+          schema: { type: string }
+        - in: query
+          name: type
+          schema: { type: string }
+        - in: query
+          name: from_node_id
+          schema: { type: string }
+        - in: query
+          name: to_node_id
+          schema: { type: string }
+      responses:
+        "200":
+          description: Relationships page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RelationshipPage"
+  /v1/ownership/signals:
+    get:
+      tags: [Explorer]
+      summary: List ownership signals
+      operationId: listOwnershipSignals
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/sortBy"
+        - $ref: "#/components/parameters/sortOrder"
+        - in: query
+          name: scan_id
+          schema: { type: string }
+      responses:
+        "200":
+          description: Ownership signal page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OwnershipSignalPage"
+  /v1/repo-scans:
+    get:
+      tags: [RepositoryExposure]
+      summary: List repository exposure scans
+      operationId: listRepoScans
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/sortBy"
+        - $ref: "#/components/parameters/sortOrder"
+      responses:
+        "200":
+          description: Repo scan page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepoScanPage"
+    post:
+      tags: [RepositoryExposure]
+      summary: Trigger repository exposure scan
+      operationId: runRepoScan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RepoScanRequest"
+      responses:
+        "202":
+          description: Repo scan started
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  repo_scan:
+                    $ref: "#/components/schemas/RepoScanRecord"
+                  result:
+                    type: object
+                    additionalProperties: true
+  /v1/repo-scans/{repo_scan_id}:
+    get:
+      tags: [RepositoryExposure]
+      summary: Get repository scan
+      operationId: getRepoScan
+      parameters:
+        - in: path
+          name: repo_scan_id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Repository scan detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RepoScanRecord"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/repo-findings:
+    get:
+      tags: [RepositoryExposure]
+      summary: List repository scan findings
+      operationId: listRepoFindings
+      parameters:
+        - $ref: "#/components/parameters/limit"
+        - $ref: "#/components/parameters/cursor"
+        - $ref: "#/components/parameters/sortBy"
+        - $ref: "#/components/parameters/sortOrder"
+        - in: query
+          name: repo_scan_id
+          schema: { type: string }
+        - in: query
+          name: severity
+          schema:
+            $ref: "#/components/schemas/FindingSeverity"
+        - in: query
+          name: type
+          schema:
+            $ref: "#/components/schemas/FindingType"
+      responses:
+        "200":
+          description: Repository findings page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingPage"
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  parameters:
+    limit:
+      in: query
+      name: limit
+      schema:
+        type: integer
+        minimum: 1
+    cursor:
+      in: query
+      name: cursor
+      schema:
+        type: integer
+        minimum: 0
+    sortBy:
+      in: query
+      name: sort_by
+      schema:
+        type: string
+      description: Endpoint-specific sort field.
+    sortOrder:
+      in: query
+      name: sort_order
+      schema:
+        type: string
+        enum: [asc, desc]
+      description: Sort direction.
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+    FindingSeverity:
+      type: string
+      enum: [critical, high, medium, low, info]
+    FindingType:
+      type: string
+      enum:
+        - overprivileged_identity
+        - escalation_path
+        - stale_identity
+        - ownerless_identity
+        - risky_trust_policy
+        - secret_exposure
+        - repo_misconfiguration
+    Finding:
+      type: object
+      properties:
+        id: { type: string }
+        scan_id: { type: string }
+        type: { $ref: "#/components/schemas/FindingType" }
+        severity: { $ref: "#/components/schemas/FindingSeverity" }
+        title: { type: string }
+        human_summary: { type: string }
+        path:
+          type: array
+          items: { type: string }
+        evidence:
+          type: object
+          additionalProperties: true
+        remediation: { type: string }
+        created_at:
+          type: string
+          format: date-time
+    FindingsSummary:
+      type: object
+      properties:
+        total:
+          type: integer
+        by_severity:
+          type: object
+          additionalProperties:
+            type: integer
+        by_type:
+          type: object
+          additionalProperties:
+            type: integer
+    ScanRecord:
+      type: object
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        status: { type: string }
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        asset_count: { type: integer }
+        finding_count: { type: integer }
+        error_message: { type: string }
+    ScanEvent:
+      type: object
+      properties:
+        id: { type: string }
+        scan_id: { type: string }
+        level: { type: string }
+        message: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+        created_at:
+          type: string
+          format: date-time
+    TrendPoint:
+      type: object
+      properties:
+        scan_id: { type: string }
+        started_at:
+          type: string
+          format: date-time
+        total: { type: integer }
+        by_severity:
+          type: object
+          additionalProperties:
+            type: integer
+    Identity:
+      type: object
+      properties:
+        id: { type: string }
+        provider: { type: string }
+        type: { type: string }
+        name: { type: string }
+        arn: { type: string }
+        owner_hint: { type: string }
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+        tags:
+          type: object
+          additionalProperties:
+            type: string
+        raw_ref: { type: string }
+    Relationship:
+      type: object
+      properties:
+        id: { type: string }
+        type: { type: string }
+        from_node_id: { type: string }
+        to_node_id: { type: string }
+        evidence_ref: { type: string }
+        discovered_at:
+          type: string
+          format: date-time
+    OwnershipSignal:
+      type: object
+      properties:
+        id: { type: string }
+        identity_id: { type: string }
+        team: { type: string }
+        repository: { type: string }
+        source: { type: string }
+        confidence: { type: number }
+    RepoScanRecord:
+      type: object
+      properties:
+        id: { type: string }
+        repository: { type: string }
+        status: { type: string }
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: string
+          format: date-time
+          nullable: true
+        commits_scanned: { type: integer }
+        files_scanned: { type: integer }
+        finding_count: { type: integer }
+        truncated: { type: boolean }
+        error_message: { type: string }
+    RepoScanRequest:
+      type: object
+      required: [repository]
+      properties:
+        repository: { type: string }
+        history_limit:
+          type: integer
+          minimum: 1
+        max_findings:
+          type: integer
+          minimum: 1
+    ScanDiff:
+      type: object
+      properties:
+        scan_id: { type: string }
+        previous_scan_id: { type: string }
+        added_count: { type: integer }
+        resolved_count: { type: integer }
+        persisting_count: { type: integer }
+        added:
+          type: array
+          items:
+            $ref: "#/components/schemas/Finding"
+        resolved:
+          type: array
+          items:
+            $ref: "#/components/schemas/Finding"
+        persisting:
+          type: array
+          items:
+            $ref: "#/components/schemas/Finding"
+    FindingPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Finding"
+        next_cursor:
+          type: string
+    ScanPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScanRecord"
+        next_cursor:
+          type: string
+    ScanEventPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScanEvent"
+        next_cursor:
+          type: string
+    RepoScanPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/RepoScanRecord"
+        next_cursor:
+          type: string
+    IdentityPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Identity"
+        next_cursor:
+          type: string
+    RelationshipPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Relationship"
+        next_cursor:
+          type: string
+    OwnershipSignalPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OwnershipSignal"
+        next_cursor:
+          type: string

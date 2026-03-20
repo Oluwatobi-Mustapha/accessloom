@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/domain"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/telemetry"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus"
@@ -138,6 +140,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	v1.GET("/findings", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
+		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "created_at")
 		items, err := svc.ListFindingsFiltered(c.Request.Context(), pageFetchLimit(offset, limit), FindingsFilter{
 			ScanID:   strings.TrimSpace(c.Query("scan_id")),
 			Severity: strings.TrimSpace(c.Query("severity")),
@@ -152,6 +155,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list findings"})
 			return
 		}
+		sortFindings(items, sortBy, sortDesc)
 		page, next := pageWithCursor(items, offset, limit)
 		response := gin.H{"items": page}
 		if next != "" {
@@ -226,6 +230,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	v1.GET("/identities", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
+		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "name")
 		items, err := svc.ListIdentities(
 			c.Request.Context(),
 			strings.TrimSpace(c.Query("scan_id")),
@@ -243,6 +248,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list identities"})
 			return
 		}
+		sortIdentities(items, sortBy, sortDesc)
 		page, next := pageWithCursor(items, offset, limit)
 		response := gin.H{"items": page}
 		if next != "" {
@@ -254,6 +260,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	v1.GET("/relationships", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
+		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "discovered_at")
 		items, err := svc.ListRelationships(
 			c.Request.Context(),
 			strings.TrimSpace(c.Query("scan_id")),
@@ -271,6 +278,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list relationships"})
 			return
 		}
+		sortRelationships(items, sortBy, sortDesc)
 		page, next := pageWithCursor(items, offset, limit)
 		response := gin.H{"items": page}
 		if next != "" {
@@ -282,6 +290,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	v1.GET("/ownership/signals", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
+		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "confidence")
 		items, err := svc.ListOwnershipSignals(
 			c.Request.Context(),
 			pageFetchLimit(offset, limit),
@@ -296,6 +305,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list ownership signals"})
 			return
 		}
+		sortOwnershipSignals(items, sortBy, sortDesc)
 		page, next := pageWithCursor(items, offset, limit)
 		response := gin.H{"items": page}
 		if next != "" {
@@ -307,12 +317,14 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	v1.GET("/scans", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultScansLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
+		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "started_at")
 		items, err := svc.ListScans(c.Request.Context(), pageFetchLimit(offset, limit))
 		if err != nil {
 			logger.Error("list scans", telemetry.ZapError(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list scans"})
 			return
 		}
+		sortScans(items, sortBy, sortDesc)
 		page, next := pageWithCursor(items, offset, limit)
 		response := gin.H{"items": page}
 		if next != "" {
@@ -348,6 +360,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	v1.GET("/scans/:scan_id/events", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultEventsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
+		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "created_at")
 		items, err := svc.ListScanEventsFiltered(
 			c.Request.Context(),
 			strings.TrimSpace(c.Param("scan_id")),
@@ -363,6 +376,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list scan events"})
 			return
 		}
+		sortScanEvents(items, sortBy, sortDesc)
 		page, next := pageWithCursor(items, offset, limit)
 		response := gin.H{"items": page}
 		if next != "" {
@@ -374,12 +388,14 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	v1.GET("/repo-scans", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultScansLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
+		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "started_at")
 		items, err := svc.ListRepoScans(c.Request.Context(), pageFetchLimit(offset, limit))
 		if err != nil {
 			logger.Error("list repo scans", telemetry.ZapError(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repo scans"})
 			return
 		}
+		sortRepoScans(items, sortBy, sortDesc)
 		page, next := pageWithCursor(items, offset, limit)
 		response := gin.H{"items": page}
 		if next != "" {
@@ -405,6 +421,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	v1.GET("/repo-findings", func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
+		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "created_at")
 		items, err := svc.ListRepoFindings(
 			c.Request.Context(),
 			pageFetchLimit(offset, limit),
@@ -423,6 +440,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list repo findings"})
 			return
 		}
+		sortFindings(items, sortBy, sortDesc)
 		page, next := pageWithCursor(items, offset, limit)
 		response := gin.H{"items": page}
 		if next != "" {
@@ -523,6 +541,267 @@ func parseCursor(raw string) int {
 		return 0
 	}
 	return parsed
+}
+
+func parseSortParams(rawBy string, rawOrder string, fallbackBy string) (string, bool) {
+	by := strings.ToLower(strings.TrimSpace(rawBy))
+	if by == "" {
+		by = fallbackBy
+	}
+	order := strings.ToLower(strings.TrimSpace(rawOrder))
+	if order == "asc" {
+		return by, false
+	}
+	return by, true
+}
+
+func sortFindings(items []domain.Finding, sortBy string, desc bool) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+		var cmp int
+		switch sortBy {
+		case "severity":
+			cmp = compareInt(severityOrder(left.Severity), severityOrder(right.Severity))
+		case "type":
+			cmp = compareString(string(left.Type), string(right.Type))
+		case "title":
+			cmp = compareString(left.Title, right.Title)
+		default:
+			cmp = compareTime(left.CreatedAt, right.CreatedAt)
+		}
+		if cmp == 0 {
+			cmp = compareString(left.ID, right.ID)
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+func sortScans(items []db.ScanRecord, sortBy string, desc bool) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+		var cmp int
+		switch sortBy {
+		case "finding_count":
+			cmp = compareInt(left.FindingCount, right.FindingCount)
+		case "asset_count":
+			cmp = compareInt(left.AssetCount, right.AssetCount)
+		case "status":
+			cmp = compareString(left.Status, right.Status)
+		default:
+			cmp = compareTime(left.StartedAt, right.StartedAt)
+		}
+		if cmp == 0 {
+			cmp = compareString(left.ID, right.ID)
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+func sortScanEvents(items []db.ScanEvent, sortBy string, desc bool) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+		var cmp int
+		switch sortBy {
+		case "level":
+			cmp = compareInt(scanEventLevelRank(left.Level), scanEventLevelRank(right.Level))
+		case "message":
+			cmp = compareString(left.Message, right.Message)
+		default:
+			cmp = compareTime(left.CreatedAt, right.CreatedAt)
+		}
+		if cmp == 0 {
+			cmp = compareString(left.ID, right.ID)
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+func sortRepoScans(items []db.RepoScanRecord, sortBy string, desc bool) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+		var cmp int
+		switch sortBy {
+		case "finding_count":
+			cmp = compareInt(left.FindingCount, right.FindingCount)
+		case "commits_scanned":
+			cmp = compareInt(left.CommitsScanned, right.CommitsScanned)
+		case "repository":
+			cmp = compareString(left.Repository, right.Repository)
+		case "status":
+			cmp = compareString(left.Status, right.Status)
+		default:
+			cmp = compareTime(left.StartedAt, right.StartedAt)
+		}
+		if cmp == 0 {
+			cmp = compareString(left.ID, right.ID)
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+func sortIdentities(items []domain.Identity, sortBy string, desc bool) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+		var cmp int
+		switch sortBy {
+		case "type":
+			cmp = compareString(string(left.Type), string(right.Type))
+		case "provider":
+			cmp = compareString(string(left.Provider), string(right.Provider))
+		case "created_at":
+			cmp = compareTime(left.CreatedAt, right.CreatedAt)
+		default:
+			cmp = compareString(left.Name, right.Name)
+		}
+		if cmp == 0 {
+			cmp = compareString(left.ID, right.ID)
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+func sortRelationships(items []domain.Relationship, sortBy string, desc bool) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+		var cmp int
+		switch sortBy {
+		case "type":
+			cmp = compareString(string(left.Type), string(right.Type))
+		case "from_node_id":
+			cmp = compareString(left.FromNodeID, right.FromNodeID)
+		case "to_node_id":
+			cmp = compareString(left.ToNodeID, right.ToNodeID)
+		default:
+			cmp = compareTime(left.DiscoveredAt, right.DiscoveredAt)
+		}
+		if cmp == 0 {
+			cmp = compareString(left.ID, right.ID)
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+func sortOwnershipSignals(items []domain.OwnershipSignal, sortBy string, desc bool) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := items[i]
+		right := items[j]
+		var cmp int
+		switch sortBy {
+		case "team":
+			cmp = compareString(left.Team, right.Team)
+		case "source":
+			cmp = compareString(left.Source, right.Source)
+		default:
+			cmp = compareFloat(left.Confidence, right.Confidence)
+		}
+		if cmp == 0 {
+			cmp = compareString(left.ID, right.ID)
+		}
+		if desc {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+func compareTime(left time.Time, right time.Time) int {
+	switch {
+	case left.Before(right):
+		return -1
+	case left.After(right):
+		return 1
+	default:
+		return 0
+	}
+}
+
+func compareString(left string, right string) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func compareInt(left int, right int) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func compareFloat(left float64, right float64) int {
+	switch {
+	case left < right:
+		return -1
+	case left > right:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func severityOrder(severity domain.FindingSeverity) int {
+	switch severity {
+	case domain.SeverityCritical:
+		return 5
+	case domain.SeverityHigh:
+		return 4
+	case domain.SeverityMedium:
+		return 3
+	case domain.SeverityLow:
+		return 2
+	case domain.SeverityInfo:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func scanEventLevelRank(level string) int {
+	switch strings.ToLower(strings.TrimSpace(level)) {
+	case db.ScanEventLevelError:
+		return 4
+	case db.ScanEventLevelWarn:
+		return 3
+	case db.ScanEventLevelInfo:
+		return 2
+	case db.ScanEventLevelDebug:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func pageFetchLimit(offset int, limit int) int {
