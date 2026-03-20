@@ -121,7 +121,7 @@ func (q *Queries) ListScans(ctx context.Context, limit int) ([]ScanRow, error) {
 func (q *Queries) ListFindings(ctx context.Context, limit int) ([]FindingRow, error) {
 	rows, err := q.db.QueryContext(
 		ctx,
-		`SELECT scan_id, finding_id, type, severity, title, human_summary, path, evidence, remediation, created_at
+		`SELECT scan_id, finding_id, type, severity, title, human_summary, path, evidence, COALESCE(remediation, ''), created_at
 		 FROM findings
 		 ORDER BY created_at DESC
 		 LIMIT $1`,
@@ -138,7 +138,7 @@ func (q *Queries) ListFindings(ctx context.Context, limit int) ([]FindingRow, er
 func (q *Queries) ListFindingsByScan(ctx context.Context, scanID string, limit int) ([]FindingRow, error) {
 	rows, err := q.db.QueryContext(
 		ctx,
-		`SELECT scan_id, finding_id, type, severity, title, human_summary, path, evidence, remediation, created_at
+		`SELECT scan_id, finding_id, type, severity, title, human_summary, path, evidence, COALESCE(remediation, ''), created_at
 		 FROM findings
 		 WHERE scan_id = $1
 		 ORDER BY created_at DESC
@@ -252,7 +252,7 @@ func (q *Queries) ListRepoScans(ctx context.Context, limit int) ([]RepoScanRow, 
 func (q *Queries) ListRepoFindings(ctx context.Context, repoScanID string, severity string, findingType string, limit int) ([]RepoFindingRow, error) {
 	rows, err := q.db.QueryContext(
 		ctx,
-		`SELECT repo_scan_id, finding_id, type, severity, title, human_summary, path, evidence, remediation, created_at
+		`SELECT repo_scan_id, finding_id, type, severity, title, human_summary, path, evidence, COALESCE(remediation, ''), created_at
 		 FROM repo_findings
 		 WHERE ($1 = '' OR repo_scan_id = $1::uuid)
 		   AND ($2 = '' OR severity = $2)

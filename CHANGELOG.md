@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- Fixed backward-compatibility read path for legacy findings rows where `remediation` is `NULL`:
+  - `ListFindings`, `ListFindingsByScan`, and `ListRepoFindings` now coalesce nullable remediation values
+  - added regression test to prevent null-remediation scan failures in CI/integration
 - Locked V1 finalization priorities 21-22:
   - snapshot-based backward compatibility tests for core API payloads and finding exports
   - migration compatibility integration check for legacy persisted rows

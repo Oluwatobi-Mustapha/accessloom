@@ -44,7 +44,7 @@ func TestQueriesListFindingsByScan(t *testing.T) {
 	now := time.Now().UTC()
 	rows := sqlmock.NewRows([]string{"scan_id", "finding_id", "type", "severity", "title", "human_summary", "path", "evidence", "remediation", "created_at"}).
 		AddRow("scan-1", "f1", "ownerless_identity", "high", "Ownerless", "summary", []byte("[]"), []byte("{}"), "fix", now)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT scan_id, finding_id, type, severity, title, human_summary, path, evidence, remediation, created_at
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT scan_id, finding_id, type, severity, title, human_summary, path, evidence, COALESCE(remediation, ''), created_at
 		 FROM findings
 		 WHERE scan_id = $1
 		 ORDER BY created_at DESC
@@ -56,6 +56,35 @@ func TestQueriesListFindingsByScan(t *testing.T) {
 	}
 	if len(result) != 1 || result[0].FindingID != "f1" {
 		t.Fatalf("unexpected results: %+v", result)
+	}
+}
+
+func TestQueriesListFindingsByScanNullRemediationCoalesced(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	q := New(db)
+	now := time.Now().UTC()
+	rows := sqlmock.NewRows([]string{"scan_id", "finding_id", "type", "severity", "title", "human_summary", "path", "evidence", "coalesce", "created_at"}).
+		AddRow("scan-legacy", "f-null", "ownerless_identity", "medium", "Legacy", "summary", []byte("[]"), []byte("{}"), "", now)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT scan_id, finding_id, type, severity, title, human_summary, path, evidence, COALESCE(remediation, ''), created_at
+		 FROM findings
+		 WHERE scan_id = $1
+		 ORDER BY created_at DESC
+		 LIMIT $2`)).WithArgs("scan-legacy", 10).WillReturnRows(rows)
+
+	result, err := q.ListFindingsByScan(context.Background(), "scan-legacy", 10)
+	if err != nil {
+		t.Fatalf("list findings by scan: %v", err)
+	}
+	if len(result) != 1 {
+		t.Fatalf("unexpected result count: %d", len(result))
+	}
+	if result[0].Remediation != "" {
+		t.Fatalf("expected empty remediation, got %q", result[0].Remediation)
 	}
 }
 
@@ -170,7 +199,7 @@ func TestQueriesListRepoFindings(t *testing.T) {
 	now := time.Now().UTC()
 	rows := sqlmock.NewRows([]string{"repo_scan_id", "finding_id", "type", "severity", "title", "human_summary", "path", "evidence", "remediation", "created_at"}).
 		AddRow("repo-scan-1", "rf-1", "secret_exposure", "high", "secret", "summary", []byte(`["a"]`), []byte(`{"k":"v"}`), "fix", now)
-	mock.ExpectQuery(regexp.QuoteMeta(`SELECT repo_scan_id, finding_id, type, severity, title, human_summary, path, evidence, remediation, created_at
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT repo_scan_id, finding_id, type, severity, title, human_summary, path, evidence, COALESCE(remediation, ''), created_at
 		 FROM repo_findings
 		 WHERE ($1 = '' OR repo_scan_id = $1::uuid)
 		   AND ($2 = '' OR severity = $2)
