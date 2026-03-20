@@ -2,7 +2,7 @@ package aws
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net/url"
@@ -444,8 +444,8 @@ func ownerlessFinding(identity domain.Identity, now time.Time) domain.Finding {
 
 func findingID(findingType domain.FindingType, identityID, salt string) string {
 	raw := string(findingType) + "|" + identityID + "|" + salt
-	sum := sha1.Sum([]byte(raw))
-	return "aws:finding:" + hex.EncodeToString(sum[:8])
+	sum := sha256.Sum256([]byte(raw))
+	return "aws:finding:" + hex.EncodeToString(sum[:16])
 }
 
 func displayIdentity(identity domain.Identity) string {

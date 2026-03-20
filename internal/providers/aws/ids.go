@@ -1,7 +1,7 @@
 package aws
 
 import (
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"net/url"
@@ -48,8 +48,8 @@ func accessNodeID(action, resource string) string {
 
 func relationshipID(relationshipType domain.RelationshipType, fromNodeID, toNodeID string) string {
 	raw := string(relationshipType) + "|" + fromNodeID + "|" + toNodeID
-	sum := sha1.Sum([]byte(raw))
-	return "aws:rel:" + hex.EncodeToString(sum[:8])
+	sum := sha256.Sum256([]byte(raw))
+	return "aws:rel:" + hex.EncodeToString(sum[:16])
 }
 
 func normalizeName(input string) string {
