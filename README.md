@@ -10,4 +10,4 @@ It helps teams:
 
 Business outcome: fewer identity-driven incidents, faster remediation cycles, and stronger security posture at lower operational cost.
 
-**...will update the README once I'm done building the first version. Thanks!**
+**...will update the README once I'm done building the first version and stress test it. Thanks!**
