@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Hardened OIDC read authorization behavior:
+  - removed implicit default `read` scope assignment for verified OIDC tokens
+  - enforced readable-scope checks for OIDC-authenticated requests
+  - preserved backward-compatible legacy API-key read behavior in hybrid API-key + OIDC mode
 - Hardened write authorization defaults to remove implicit write access in legacy API-key mode:
   - write endpoints now reject API-key-authenticated requests when `IDENTRAIL_WRITE_API_KEYS` is not configured
   - startup security validation now requires explicit `IDENTRAIL_WRITE_API_KEYS` when using `IDENTRAIL_API_KEYS` without scoped keys

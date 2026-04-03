@@ -95,7 +95,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 
 	v1 := r.Group("/v1")
 	v1.Use(apiKeyAuthMiddleware(opts.APIKeys, opts.APIKeyScopes, opts.OIDCTokenVerifier, opts.OIDCWriteScopes))
-	v1.Use(requireReadableScopeMiddleware(opts.APIKeyScopes))
+	v1.Use(requireReadableScopeMiddleware(opts.APIKeyScopes, opts.OIDCTokenVerifier))
 	v1.Use(rateLimitMiddleware(opts.RateLimitRPM, opts.RateLimitBurst))
 	v1.Use(auditLogMiddleware(logger, opts.AuditSink))
 
@@ -1088,23 +1088,34 @@ func secureKeyEquals(expected string, candidate string) bool {
 	return subtle.ConstantTimeCompare([]byte(expected), []byte(candidate)) == 1
 }
 
-func requireReadableScopeMiddleware(scopedKeys map[string][]string) gin.HandlerFunc {
-	if len(scopedKeys) > 0 {
-		return func(c *gin.Context) {
-			scopeSetValue, exists := c.Get("auth.scope_set")
-			if !exists {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-				return
-			}
-			scopes, ok := scopeSetValue.(scopeSet)
-			if !ok || !scopes.has(scopeRead) {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-				return
-			}
-			c.Next()
-		}
+func requireReadableScopeMiddleware(scopedKeys map[string][]string, tokenVerifier TokenVerifier) gin.HandlerFunc {
+	if len(scopedKeys) == 0 && tokenVerifier == nil {
+		return func(c *gin.Context) { c.Next() }
 	}
-	return func(c *gin.Context) { c.Next() }
+	return func(c *gin.Context) {
+		// Backward compatibility: in legacy API-key mode (no scoped keys), an API key
+		// authenticated request remains read-authorized even when OIDC is also enabled.
+		if len(scopedKeys) == 0 {
+			if _, hasAPIKey := c.Get("auth.api_key"); hasAPIKey {
+				if _, hasScopes := c.Get("auth.scope_set"); !hasScopes {
+					c.Next()
+					return
+				}
+			}
+		}
+
+		scopeSetValue, exists := c.Get("auth.scope_set")
+		if !exists {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		scopes, ok := scopeSetValue.(scopeSet)
+		if !ok || !scopes.has(scopeRead) {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+			return
+		}
+		c.Next()
+	}
 }
 
 type ipRateLimiter struct {
@@ -1317,7 +1328,7 @@ func (s scopeSet) has(required string) bool {
 }
 
 func scopeSetFromOIDCToken(token VerifiedToken, writeScopeOverrides scopeSet) scopeSet {
-	set := scopeSet{scopeRead: {}}
+	set := scopeSet{}
 	for _, scope := range token.Scopes {
 		normalized := strings.ToLower(strings.TrimSpace(scope))
 		if normalized == "" {
