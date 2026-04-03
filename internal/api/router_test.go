@@ -893,7 +893,8 @@ func TestRouterOIDCOnlyAuthentication(t *testing.T) {
 	r := NewRouter(logger, metrics, nil, RouterOptions{
 		OIDCTokenVerifier: fakeTokenVerifier{
 			tokens: map[string]VerifiedToken{
-				"good-token": {Subject: "user-1", Scopes: []string{"read"}},
+				"good-token":     {Subject: "user-1", Scopes: []string{"read"}},
+				"no-scope-token": {Subject: "user-2", Scopes: nil},
 			},
 		},
 	})
@@ -911,6 +912,14 @@ func TestRouterOIDCOnlyAuthentication(t *testing.T) {
 	r.ServeHTTP(authW, authReq)
 	if authW.Code != http.StatusOK {
 		t.Fatalf("expected 200 with valid oidc token, got %d", authW.Code)
+	}
+
+	noScopeReq := httptest.NewRequest(http.MethodGet, "/v1/scans", nil)
+	noScopeReq.Header.Set("Authorization", "Bearer no-scope-token")
+	noScopeW := httptest.NewRecorder()
+	r.ServeHTTP(noScopeW, noScopeReq)
+	if noScopeW.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for oidc token without read scope, got %d", noScopeW.Code)
 	}
 }
 
@@ -943,6 +952,27 @@ func TestRouterOIDCWriteScopeAuthorization(t *testing.T) {
 	r.ServeHTTP(writerW, writerReq)
 	if writerW.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for writer token, got %d", writerW.Code)
+	}
+}
+
+func TestRouterHybridOIDCAndLegacyAPIKeyReadCompatibility(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	metrics := telemetry.NewMetrics()
+	r := NewRouter(logger, metrics, nil, RouterOptions{
+		APIKeys: []string{"legacy-key"},
+		OIDCTokenVerifier: fakeTokenVerifier{
+			tokens: map[string]VerifiedToken{
+				"reader-token": {Subject: "user-read", Scopes: []string{"identrail.read"}},
+			},
+		},
+	})
+
+	readReq := httptest.NewRequest(http.MethodGet, "/v1/scans", nil)
+	readReq.Header.Set("X-API-Key", "legacy-key")
+	readW := httptest.NewRecorder()
+	r.ServeHTTP(readW, readReq)
+	if readW.Code != http.StatusOK {
+		t.Fatalf("expected legacy api key read to pass in hybrid mode, got %d", readW.Code)
 	}
 }
 
