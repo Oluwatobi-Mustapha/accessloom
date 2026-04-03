@@ -398,6 +398,13 @@ func localRepository(target string) (repositoryLocation, bool) {
 	return repositoryLocation{Path: absolute, Bare: true, Display: absolute}, true
 }
 
+// IsLocalRepositoryTarget returns true when target resolves to a local worktree
+// or bare git repository path on the scanner host filesystem.
+func IsLocalRepositoryTarget(target string) bool {
+	_, ok := localRepository(target)
+	return ok
+}
+
 func normalizeRepositoryInput(target string) string {
 	trimmed := strings.TrimSpace(target)
 	if trimmed == "" {

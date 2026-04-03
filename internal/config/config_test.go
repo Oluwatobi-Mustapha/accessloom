@@ -164,8 +164,8 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AlertRetryBackoff != 1*time.Second {
 		t.Fatalf("expected default alert retry backoff 1s, got %v", cfg.AlertRetryBackoff)
 	}
-	if !cfg.RepoScanEnabled {
-		t.Fatal("expected repo scan enabled by default")
+	if cfg.RepoScanEnabled {
+		t.Fatal("expected repo scan disabled by default")
 	}
 	if cfg.RepoScanHistoryLimit != 500 {
 		t.Fatalf("expected default repo scan history limit 500, got %d", cfg.RepoScanHistoryLimit)

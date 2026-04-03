@@ -19,7 +19,7 @@ const (
 	defaultK8sSource                   = "fixture"
 	defaultKubectlPath                 = "kubectl"
 	defaultScanInterval                = 15 * time.Minute
-	defaultRepoScanEnabled             = true
+	defaultRepoScanEnabled             = false
 	defaultRepoScanHistoryLimit        = 500
 	defaultRepoScanMaxFindings         = 200
 	defaultRepoScanHistoryLimitMax     = 5000
@@ -129,7 +129,7 @@ func Load() Config {
 		AlertMaxFindings:         parseInt(getEnv("IDENTRAIL_ALERT_MAX_FINDINGS", "25"), 25),
 		AlertMaxRetries:          parseInt(getEnv("IDENTRAIL_ALERT_MAX_RETRIES", "2"), 2),
 		AlertRetryBackoff:        parseDuration(getEnv("IDENTRAIL_ALERT_RETRY_BACKOFF", "1s"), 1*time.Second),
-		RepoScanEnabled:          parseBool(getEnv("IDENTRAIL_REPO_SCAN_ENABLED", "true"), defaultRepoScanEnabled),
+		RepoScanEnabled:          parseBool(getEnv("IDENTRAIL_REPO_SCAN_ENABLED", "false"), defaultRepoScanEnabled),
 		RepoScanHistoryLimit:     parseInt(getEnv("IDENTRAIL_REPO_SCAN_HISTORY_LIMIT", "500"), defaultRepoScanHistoryLimit),
 		RepoScanMaxFindings:      parseInt(getEnv("IDENTRAIL_REPO_SCAN_MAX_FINDINGS", "200"), defaultRepoScanMaxFindings),
 		RepoScanHistoryLimitMax:  parseInt(getEnv("IDENTRAIL_REPO_SCAN_HISTORY_LIMIT_MAX", "5000"), defaultRepoScanHistoryLimitMax),

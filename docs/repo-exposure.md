@@ -83,14 +83,16 @@ Read APIs:
 
 ## Runtime Configuration
 
-- `IDENTRAIL_REPO_SCAN_ENABLED` (default: `true`)
+- `IDENTRAIL_REPO_SCAN_ENABLED` (default: `false`)
 - `IDENTRAIL_REPO_SCAN_HISTORY_LIMIT` (default: `500`)
 - `IDENTRAIL_REPO_SCAN_MAX_FINDINGS` (default: `200`)
 - `IDENTRAIL_REPO_SCAN_HISTORY_LIMIT_MAX` (default: `5000`)
 - `IDENTRAIL_REPO_SCAN_MAX_FINDINGS_MAX` (default: `1000`)
 - `IDENTRAIL_REPO_SCAN_ALLOWLIST`:
-  - optional comma-separated list of allowed target patterns
+  - required when `IDENTRAIL_REPO_SCAN_ENABLED=true`
+  - comma-separated list of allowed target patterns
   - supports prefix wildcard with `*` (example: `trusted-org/*`)
+  - set `*` only if you intentionally want open target scope
 - Optional worker scheduling:
   - `IDENTRAIL_WORKER_REPO_SCAN_ENABLED` (`false` by default)
   - `IDENTRAIL_WORKER_REPO_SCAN_RUN_NOW` (`false` by default)

@@ -285,6 +285,9 @@ func (s *Service) RunRepoScanPersisted(ctx context.Context, request RepoScanRequ
 	if target == "" {
 		return RunRepoScanResult{}, ErrInvalidRepoScanRequest
 	}
+	if repoexposure.IsLocalRepositoryTarget(target) {
+		return RunRepoScanResult{}, ErrRepoTargetNotAllowed
+	}
 	if !repoTargetAllowed(target, s.RepoScanAllowedTargets) {
 		return RunRepoScanResult{}, ErrRepoTargetNotAllowed
 	}
@@ -789,7 +792,7 @@ func truncateSourceErrors(errors []providers.SourceError, max int) []providers.S
 
 func repoTargetAllowed(target string, allowlist []string) bool {
 	if len(allowlist) == 0 {
-		return true
+		return false
 	}
 	normalizedTarget := strings.ToLower(strings.TrimSpace(target))
 	if normalizedTarget == "" {

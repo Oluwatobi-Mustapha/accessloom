@@ -214,6 +214,9 @@ func ValidateSecurity(cfg Config) error {
 	if maxFindings > maxFindingsMax {
 		return fmt.Errorf("IDENTRAIL_REPO_SCAN_MAX_FINDINGS must be <= IDENTRAIL_REPO_SCAN_MAX_FINDINGS_MAX")
 	}
+	if cfg.RepoScanEnabled && len(cfg.RepoScanAllowlist) == 0 {
+		return fmt.Errorf("IDENTRAIL_REPO_SCAN_ALLOWLIST must include at least one target pattern when IDENTRAIL_REPO_SCAN_ENABLED=true")
+	}
 	if cfg.WorkerRepoScanEnabled {
 		if !cfg.RepoScanEnabled {
 			return fmt.Errorf("IDENTRAIL_WORKER_REPO_SCAN_ENABLED requires IDENTRAIL_REPO_SCAN_ENABLED=true")
