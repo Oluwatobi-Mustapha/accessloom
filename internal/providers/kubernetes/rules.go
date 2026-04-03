@@ -2,7 +2,7 @@ package kubernetes
 
 import (
 	"context"
-	"crypto/sha1"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"sort"
@@ -294,6 +294,6 @@ func severityRank(severity domain.FindingSeverity) int {
 }
 
 func findingID(parts ...string) string {
-	sum := sha1.Sum([]byte(strings.Join(parts, "|")))
+	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return "k8s:finding:" + hex.EncodeToString(sum[:])
 }

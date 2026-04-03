@@ -3,7 +3,6 @@ package repoexposure
 import (
 	"bufio"
 	"context"
-	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -460,8 +459,8 @@ func redactedToken(value string) string {
 	return fmt.Sprintf("[REDACTED:%s...%s]", value[:4], value[len(value)-4:])
 }
 
-func hashSHA1(parts ...string) string {
-	h := sha1.New()
+func hashDeterministicID(parts ...string) string {
+	h := sha256.New()
 	for _, part := range parts {
 		_, _ = h.Write([]byte(part))
 		_, _ = h.Write([]byte("|"))

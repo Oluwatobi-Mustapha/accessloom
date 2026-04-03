@@ -266,6 +266,15 @@ func TestHelperFunctions(t *testing.T) {
 	if severityRank(domain.SeverityCritical) >= severityRank(domain.SeverityHigh) {
 		t.Fatal("expected critical severity to rank above high")
 	}
+	if id := hashDeterministicID("repo", "path", "1"); len(id) != 64 {
+		t.Fatalf("expected sha256 deterministic id length 64, got %d", len(id))
+	}
+	if hashDeterministicID("repo", "path", "1") != hashDeterministicID("repo", "path", "1") {
+		t.Fatal("expected deterministic id hash output for same inputs")
+	}
+	if hashDeterministicID("repo", "path", "1") == hashDeterministicID("repo", "path", "2") {
+		t.Fatal("expected different deterministic id hashes for different inputs")
+	}
 }
 
 func initTestRepoWithHistorySecret(t *testing.T) (string, string) {

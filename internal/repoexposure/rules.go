@@ -149,7 +149,7 @@ func detectSecretFindings(repo string, commit string, path string, line int, tex
 		}
 		sanitized := redactMatch(normalized, match)
 		fingerprint := hashSHA256(match)
-		id := hashSHA1("repo-secret", repo, commit, path, strconv.Itoa(line), rule.ID, fingerprint)
+		id := hashDeterministicID("repo-secret", repo, commit, path, strconv.Itoa(line), rule.ID, fingerprint)
 		findings = append(findings, domain.Finding{
 			ID:           "finding:" + id,
 			Type:         domain.FindingSecretExposure,
@@ -193,7 +193,7 @@ func detectMisconfigFindings(repo string, path string, content []byte, detectedA
 				continue
 			}
 			seen[key] = struct{}{}
-			id := hashSHA1("repo-misconfig", repo, path, strconv.Itoa(lineNumber), rule.ID, line)
+			id := hashDeterministicID("repo-misconfig", repo, path, strconv.Itoa(lineNumber), rule.ID, line)
 			findings = append(findings, domain.Finding{
 				ID:           "finding:" + id,
 				Type:         domain.FindingRepoMisconfig,
@@ -232,7 +232,7 @@ func detectMisconfigFindings(repo string, path string, content []byte, detectedA
 			continue
 		}
 		seen[key] = struct{}{}
-		id := hashSHA1("repo-misconfig", repo, path, strconv.Itoa(lineNumber), rule.ID, matchText)
+		id := hashDeterministicID("repo-misconfig", repo, path, strconv.Itoa(lineNumber), rule.ID, matchText)
 		findings = append(findings, domain.Finding{
 			ID:           "finding:" + id,
 			Type:         domain.FindingRepoMisconfig,

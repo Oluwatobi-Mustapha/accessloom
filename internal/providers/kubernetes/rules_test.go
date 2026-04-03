@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -247,8 +248,15 @@ func TestUtilityHelpers(t *testing.T) {
 	if severityRank(domain.SeverityCritical) >= severityRank(domain.SeverityHigh) {
 		t.Fatal("expected critical rank to be higher priority than high")
 	}
-	if findingID("a", "b") == findingID("a", "c") {
+	idAB := findingID("a", "b")
+	if idAB == findingID("a", "c") {
 		t.Fatal("expected different ids for different finding parts")
+	}
+	if !strings.HasPrefix(idAB, "k8s:finding:") {
+		t.Fatalf("expected k8s finding prefix, got %q", idAB)
+	}
+	if len(strings.TrimPrefix(idAB, "k8s:finding:")) != 64 {
+		t.Fatalf("expected sha256 hash length 64, got id %q", idAB)
 	}
 }
 
