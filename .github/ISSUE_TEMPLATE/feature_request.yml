@@ -1,0 +1,58 @@
+name: Feature request
+description: Propose an improvement with clear problem framing
+title: "[Feature]: "
+labels:
+  - enhancement
+  - needs-triage
+body:
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      options:
+        - label: I searched existing issues and discussions and did not find a duplicate.
+          required: true
+        - label: This request is in scope for Identrail's mission.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem are you trying to solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe your preferred solution and why.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What other approaches did you evaluate?
+
+  - type: textarea
+    id: user-impact
+    attributes:
+      label: User and operator impact
+      description: How will this improve outcomes for users/operators?
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Define concrete success conditions.
+      placeholder: |
+        - [ ] API behavior ...
+        - [ ] Docs updated ...
+        - [ ] Tests added ...
+    validations:
+      required: true

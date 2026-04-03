@@ -1,0 +1,104 @@
+name: Bug report
+description: Report a reproducible defect in Identrail
+title: "[Bug]: "
+labels:
+  - bug
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug.
+
+        Do not use this template for security vulnerabilities.
+        Use private reporting instead: https://github.com/Oluwatobi-Mustapha/identrail/security/advisories/new
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-flight checklist
+      options:
+        - label: I searched existing issues and did not find a duplicate.
+          required: true
+        - label: I am not reporting a security vulnerability in this public issue.
+          required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Where does the bug occur?
+      options:
+        - api
+        - worker
+        - cli
+        - web
+        - deploy
+        - docs
+        - other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Example: v1.0.0, main commit SHA, container tag
+      placeholder: v1.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, runtime, cloud, and relevant tooling versions
+      placeholder: "Ubuntu 24.04, Go 1.25.8, Docker 27.x"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide deterministic steps.
+      placeholder: |
+        1. Run ...
+        2. Call ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots, or traces
+      description: Paste relevant output, redacting secrets.
+      render: shell
+
+  - type: dropdown
+    id: impact
+    attributes:
+      label: Impact
+      description: How severe is this for your workload?
+      options:
+        - low
+        - medium
+        - high
+        - critical
+    validations:
+      required: true
