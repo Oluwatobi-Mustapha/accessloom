@@ -122,6 +122,9 @@ func ValidateSecurity(cfg Config) error {
 			}
 		}
 	}
+	if len(cfg.APIKeyScopes) == 0 && len(cfg.APIKeys) > 0 && len(cfg.WriteAPIKeys) == 0 {
+		return fmt.Errorf("IDENTRAIL_WRITE_API_KEYS must include at least one key when using IDENTRAIL_API_KEYS without scoped keys")
+	}
 
 	if cfg.AlertMaxFindings > maxAlertFindingsLimit {
 		return fmt.Errorf("IDENTRAIL_ALERT_MAX_FINDINGS must be <= %d", maxAlertFindingsLimit)

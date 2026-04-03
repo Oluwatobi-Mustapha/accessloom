@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Hardened write authorization defaults to remove implicit write access in legacy API-key mode:
+  - write endpoints now reject API-key-authenticated requests when `IDENTRAIL_WRITE_API_KEYS` is not configured
+  - startup security validation now requires explicit `IDENTRAIL_WRITE_API_KEYS` when using `IDENTRAIL_API_KEYS` without scoped keys
+  - added router and security regression tests for empty-write-key misconfiguration paths
 - Hardened AWS deterministic ID hashing for findings and relationships:
   - replaced truncated SHA-1 IDs with SHA-256-derived 128-bit ID prefixes
   - reduced collision risk in large multi-account datasets

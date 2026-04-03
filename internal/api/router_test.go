@@ -811,6 +811,24 @@ func TestRouterWriteAuthorization(t *testing.T) {
 	}
 }
 
+func TestRouterWriteAuthorizationRequiresConfiguredWriteKeys(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	metrics := telemetry.NewMetrics()
+	store := db.NewMemoryStore()
+	svc := NewService(store, routerScanner{}, "aws")
+	r := NewRouter(logger, metrics, svc, RouterOptions{
+		APIKeys: []string{"read-key"},
+	})
+
+	writeReq := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	writeReq.Header.Set("X-API-Key", "read-key")
+	writeW := httptest.NewRecorder()
+	r.ServeHTTP(writeW, writeReq)
+	if writeW.Code != http.StatusForbidden {
+		t.Fatalf("expected write to be forbidden when no write keys are configured, got %d", writeW.Code)
+	}
+}
+
 func TestRouterScopedAuthorizationPrefersScopeMap(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	metrics := telemetry.NewMetrics()

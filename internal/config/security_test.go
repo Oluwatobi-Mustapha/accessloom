@@ -42,6 +42,15 @@ func TestValidateSecurityWriteKeyMustBeInAPIKeys(t *testing.T) {
 	}
 }
 
+func TestValidateSecurityRejectsLegacyAPIKeysWithoutWriteKeys(t *testing.T) {
+	cfg := Config{
+		APIKeys: []string{"reader"},
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected error when legacy API keys are configured without write keys")
+	}
+}
+
 func TestValidateSecurityWriteKeyCheckSkippedWhenScopedKeysPresent(t *testing.T) {
 	cfg := Config{
 		WriteAPIKeys: []string{"writer"},
@@ -87,10 +96,11 @@ func TestValidateSecurityRejectsEmptyAWSRegionInSDKMode(t *testing.T) {
 
 func TestValidateSecurityAcceptsAWSSDKMode(t *testing.T) {
 	cfg := Config{
-		Provider:  "aws",
-		AWSSource: "sdk",
-		AWSRegion: "us-east-1",
-		APIKeys:   []string{"reader"},
+		Provider:     "aws",
+		AWSSource:    "sdk",
+		AWSRegion:    "us-east-1",
+		APIKeys:      []string{"reader", "writer"},
+		WriteAPIKeys: []string{"writer"},
 	}
 	if err := ValidateSecurity(cfg); err != nil {
 		t.Fatalf("expected aws sdk mode to be valid, got %v", err)
@@ -125,7 +135,8 @@ func TestValidateSecurityAcceptsKubectlMode(t *testing.T) {
 		Provider:         "kubernetes",
 		KubernetesSource: "kubectl",
 		KubectlPath:      "/usr/bin/kubectl",
-		APIKeys:          []string{"reader"},
+		APIKeys:          []string{"reader", "writer"},
+		WriteAPIKeys:     []string{"writer"},
 	}
 	if err := ValidateSecurity(cfg); err != nil {
 		t.Fatalf("expected kubectl mode to be valid, got %v", err)
@@ -276,7 +287,8 @@ func TestValidateSecurityWorkerRepoScanAllowlistEnforced(t *testing.T) {
 
 func TestValidateSecurityWorkerRepoScanSuccess(t *testing.T) {
 	cfg := Config{
-		APIKeys:                 []string{"reader"},
+		APIKeys:                 []string{"reader", "writer"},
+		WriteAPIKeys:            []string{"writer"},
 		RepoScanEnabled:         true,
 		RepoScanAllowlist:       []string{"trusted/*"},
 		RepoScanHistoryLimitMax: 5000,
@@ -324,7 +336,8 @@ func TestValidateSecurityRejectsInvalidTrustedProxyEntry(t *testing.T) {
 
 func TestValidateSecurityAcceptsTrustedProxyEntries(t *testing.T) {
 	cfg := Config{
-		APIKeys:        []string{"reader"},
+		APIKeys:        []string{"reader", "writer"},
+		WriteAPIKeys:   []string{"writer"},
 		TrustedProxies: []string{"10.0.0.0/8", "127.0.0.1"},
 	}
 	if err := ValidateSecurity(cfg); err != nil {

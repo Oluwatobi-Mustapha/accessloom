@@ -1038,6 +1038,12 @@ func requireWriteKeyMiddleware(writeKeys []string, scopedKeys map[string][]strin
 		}
 
 		if len(allowed) == 0 {
+			// When auth middleware is disabled (test/local stubs), keep route behavior unchanged.
+			// In authenticated API-key mode, empty write-key config must not grant write access.
+			if _, exists := c.Get("auth.api_key"); exists {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+				return
+			}
 			c.Next()
 			return
 		}
