@@ -12,6 +12,7 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_PROVIDER", "")
 	t.Setenv("IDENTRAIL_SERVICE_NAME", "")
 	t.Setenv("IDENTRAIL_TRUSTED_PROXIES", "")
+	t.Setenv("IDENTRAIL_CORS_ALLOWED_ORIGINS", "")
 	t.Setenv("IDENTRAIL_DATABASE_URL", "")
 	t.Setenv("IDENTRAIL_AWS_SOURCE", "")
 	t.Setenv("IDENTRAIL_AWS_REGION", "")
@@ -73,6 +74,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if len(cfg.TrustedProxies) != 0 {
 		t.Fatalf("expected no trusted proxies by default, got %+v", cfg.TrustedProxies)
+	}
+	if len(cfg.CORSAllowedOrigins) != 0 {
+		t.Fatalf("expected no cors allowed origins by default, got %+v", cfg.CORSAllowedOrigins)
 	}
 	if cfg.DatabaseURL != "" {
 		t.Fatalf("expected empty database url, got %q", cfg.DatabaseURL)
@@ -223,6 +227,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_PROVIDER", "AWS")
 	t.Setenv("IDENTRAIL_SERVICE_NAME", "identrail-dev")
 	t.Setenv("IDENTRAIL_TRUSTED_PROXIES", "10.0.0.0/8,127.0.0.1")
+	t.Setenv("IDENTRAIL_CORS_ALLOWED_ORIGINS", "https://app.identrail.io,https://console.identrail.io")
 	t.Setenv("IDENTRAIL_DATABASE_URL", "postgres://example")
 	t.Setenv("IDENTRAIL_AWS_SOURCE", "sdk")
 	t.Setenv("IDENTRAIL_AWS_REGION", "eu-west-1")
@@ -287,6 +292,9 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if len(cfg.TrustedProxies) != 2 || cfg.TrustedProxies[0] != "10.0.0.0/8" || cfg.TrustedProxies[1] != "127.0.0.1" {
 		t.Fatalf("unexpected trusted proxies: %+v", cfg.TrustedProxies)
+	}
+	if len(cfg.CORSAllowedOrigins) != 2 || cfg.CORSAllowedOrigins[0] != "https://app.identrail.io" || cfg.CORSAllowedOrigins[1] != "https://console.identrail.io" {
+		t.Fatalf("unexpected cors allowed origins: %+v", cfg.CORSAllowedOrigins)
 	}
 	if cfg.DatabaseURL != "postgres://example" {
 		t.Fatalf("unexpected database url: %q", cfg.DatabaseURL)

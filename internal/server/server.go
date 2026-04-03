@@ -104,15 +104,16 @@ func NewBootstrap(ctx context.Context, cfg config.Config) (Bootstrap, error) {
 	}
 
 	router := api.NewRouter(logger, metrics, svc, api.RouterOptions{
-		APIKeys:           cfg.APIKeys,
-		WriteAPIKeys:      cfg.WriteAPIKeys,
-		APIKeyScopes:      cfg.APIKeyScopes,
-		OIDCTokenVerifier: tokenVerifier,
-		OIDCWriteScopes:   cfg.OIDCWriteScopes,
-		RateLimitRPM:      cfg.RateLimitRPM,
-		RateLimitBurst:    cfg.RateLimitBurst,
-		AuditSink:         auditSink,
-		TrustedProxies:    cfg.TrustedProxies,
+		APIKeys:            cfg.APIKeys,
+		WriteAPIKeys:       cfg.WriteAPIKeys,
+		APIKeyScopes:       cfg.APIKeyScopes,
+		OIDCTokenVerifier:  tokenVerifier,
+		OIDCWriteScopes:    cfg.OIDCWriteScopes,
+		RateLimitRPM:       cfg.RateLimitRPM,
+		RateLimitBurst:     cfg.RateLimitBurst,
+		AuditSink:          auditSink,
+		TrustedProxies:     cfg.TrustedProxies,
+		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
 	})
 	return Bootstrap{
 		Logger:        logger,

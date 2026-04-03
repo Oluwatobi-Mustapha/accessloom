@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -87,6 +88,97 @@ func TestRouterHealthz(t *testing.T) {
 	}
 	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Fatalf("expected security header nosniff, got %q", got)
+	}
+}
+
+func TestRouterCORSDisabledByDefault(t *testing.T) {
+	logger := zap.NewNop()
+	metrics := telemetry.NewMetrics()
+	r := NewRouter(logger, metrics, nil, RouterOptions{})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "https://app.identrail.io")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("expected no cors allow origin header, got %q", got)
+	}
+}
+
+func TestRouterCORSAllowsConfiguredOrigin(t *testing.T) {
+	logger := zap.NewNop()
+	metrics := telemetry.NewMetrics()
+	r := NewRouter(logger, metrics, nil, RouterOptions{
+		CORSAllowedOrigins: []string{"https://app.identrail.io"},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "https://app.identrail.io")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "https://app.identrail.io" {
+		t.Fatalf("expected cors allow origin header, got %q", got)
+	}
+	if !varyHeaderContains(w.Header().Get("Vary"), "Origin") {
+		t.Fatalf("expected Vary header to include Origin, got %q", w.Header().Get("Vary"))
+	}
+}
+
+func TestRouterCORSPreflightBypassesAuth(t *testing.T) {
+	logger := zap.NewNop()
+	metrics := telemetry.NewMetrics()
+	r := NewRouter(logger, metrics, nil, RouterOptions{
+		APIKeys:            []string{"reader-key"},
+		WriteAPIKeys:       []string{"reader-key"},
+		CORSAllowedOrigins: []string{"https://app.identrail.io"},
+	})
+
+	req := httptest.NewRequest(http.MethodOptions, "/v1/findings", nil)
+	req.Header.Set("Origin", "https://app.identrail.io")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	req.Header.Set("Access-Control-Request-Headers", "Authorization,X-API-Key")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204, got %d", w.Code)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "https://app.identrail.io" {
+		t.Fatalf("expected cors allow origin header, got %q", got)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodGet) {
+		t.Fatalf("expected allow methods header to include GET, got %q", got)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "x-api-key") {
+		t.Fatalf("expected allow headers to include x-api-key, got %q", got)
+	}
+}
+
+func TestRouterCORSSkipsUnlistedOrigin(t *testing.T) {
+	logger := zap.NewNop()
+	metrics := telemetry.NewMetrics()
+	r := NewRouter(logger, metrics, nil, RouterOptions{
+		CORSAllowedOrigins: []string{"https://app.identrail.io"},
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("Origin", "https://evil.example.com")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("expected no cors allow origin for unlisted origin, got %q", got)
 	}
 }
 
@@ -753,6 +845,15 @@ func TestSecureKeyHelpers(t *testing.T) {
 	if scopes, ok := scopedKeyLookup(scoped, "writer"); !ok || !scopes.has("write") {
 		t.Fatalf("expected writer scopes to resolve, got ok=%t scopes=%+v", ok, scopes)
 	}
+}
+
+func varyHeaderContains(varyHeader string, value string) bool {
+	for _, token := range strings.Split(varyHeader, ",") {
+		if strings.EqualFold(strings.TrimSpace(token), strings.TrimSpace(value)) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRouterRequiresAPIKeyForV1(t *testing.T) {

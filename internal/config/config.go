@@ -40,6 +40,7 @@ type Config struct {
 	Provider                 string
 	ServiceName              string
 	TrustedProxies           []string
+	CORSAllowedOrigins       []string
 	DatabaseURL              string
 	AWSSource                string
 	AWSRegion                string
@@ -98,6 +99,7 @@ func Load() Config {
 		Provider:                 strings.ToLower(getEnv("IDENTRAIL_PROVIDER", defaultProvider)),
 		ServiceName:              getEnv("IDENTRAIL_SERVICE_NAME", defaultServiceName),
 		TrustedProxies:           parseCommaSeparated(getEnv("IDENTRAIL_TRUSTED_PROXIES", "")),
+		CORSAllowedOrigins:       parseCommaSeparated(getEnv("IDENTRAIL_CORS_ALLOWED_ORIGINS", "")),
 		DatabaseURL:              getEnv("IDENTRAIL_DATABASE_URL", ""),
 		AWSSource:                strings.ToLower(getEnv("IDENTRAIL_AWS_SOURCE", defaultAWSSource)),
 		AWSRegion:                getEnv("IDENTRAIL_AWS_REGION", defaultAWSRegion),

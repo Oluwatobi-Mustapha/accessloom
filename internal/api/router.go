@@ -33,6 +33,9 @@ const (
 	rateLimiterEntryTTL    = 15 * time.Minute
 	rateLimiterMaxEntries  = 10000
 	rateLimiterCleanupTick = 256
+	corsAllowMethods       = "GET,POST,OPTIONS"
+	corsAllowHeaders       = "Authorization,Content-Type,X-API-Key"
+	corsMaxAgeSeconds      = "600"
 	scopeRead              = "read"
 	scopeWrite             = "write"
 	scopeAdmin             = "admin"
@@ -40,15 +43,16 @@ const (
 
 // RouterOptions controls API middleware behavior.
 type RouterOptions struct {
-	APIKeys           []string
-	WriteAPIKeys      []string
-	APIKeyScopes      map[string][]string
-	OIDCTokenVerifier TokenVerifier
-	OIDCWriteScopes   []string
-	RateLimitRPM      int
-	RateLimitBurst    int
-	AuditSink         AuditSink
-	TrustedProxies    []string
+	APIKeys            []string
+	WriteAPIKeys       []string
+	APIKeyScopes       map[string][]string
+	OIDCTokenVerifier  TokenVerifier
+	OIDCWriteScopes    []string
+	RateLimitRPM       int
+	RateLimitBurst     int
+	AuditSink          AuditSink
+	TrustedProxies     []string
+	CORSAllowedOrigins []string
 }
 
 // VerifiedToken contains normalized claims extracted from a validated OIDC token.
@@ -69,6 +73,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	configureTrustedProxies(r, logger, opts.TrustedProxies)
 	r.Use(gin.Recovery())
 	r.Use(securityHeadersMiddleware())
+	r.Use(corsMiddleware(opts.CORSAllowedOrigins))
 
 	registry := prometheus.NewRegistry()
 	registry.MustRegister(
@@ -924,6 +929,81 @@ func pageWithCursor[T any](items []T, offset int, limit int) ([]T, string) {
 		next = strconv.Itoa(end)
 	}
 	return items[offset:end], next
+}
+
+func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {
+	allowAll := false
+	allowed := map[string]struct{}{}
+	for _, origin := range allowedOrigins {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed == "" {
+			continue
+		}
+		if trimmed == "*" {
+			allowAll = true
+			continue
+		}
+		allowed[trimmed] = struct{}{}
+	}
+
+	if !allowAll && len(allowed) == 0 {
+		return func(c *gin.Context) { c.Next() }
+	}
+
+	return func(c *gin.Context) {
+		origin := strings.TrimSpace(c.GetHeader("Origin"))
+		if origin == "" {
+			c.Next()
+			return
+		}
+
+		allowedOrigin := ""
+		if allowAll {
+			allowedOrigin = "*"
+		} else if _, ok := allowed[origin]; ok {
+			allowedOrigin = origin
+		}
+		if allowedOrigin == "" {
+			c.Next()
+			return
+		}
+
+		addVaryHeader(c.Writer.Header(), "Origin")
+		c.Header("Access-Control-Allow-Origin", allowedOrigin)
+		c.Header("Access-Control-Allow-Methods", corsAllowMethods)
+		c.Header("Access-Control-Allow-Headers", corsAllowHeaders)
+		c.Header("Access-Control-Max-Age", corsMaxAgeSeconds)
+
+		if c.Request.Method == http.MethodOptions && strings.TrimSpace(c.GetHeader("Access-Control-Request-Method")) != "" {
+			addVaryHeader(c.Writer.Header(), "Access-Control-Request-Method")
+			addVaryHeader(c.Writer.Header(), "Access-Control-Request-Headers")
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Next()
+	}
+}
+
+func addVaryHeader(headers http.Header, value string) {
+	if headers == nil {
+		return
+	}
+	normalized := strings.TrimSpace(value)
+	if normalized == "" {
+		return
+	}
+	for _, existing := range strings.Split(headers.Get("Vary"), ",") {
+		if strings.EqualFold(strings.TrimSpace(existing), normalized) {
+			return
+		}
+	}
+	current := strings.TrimSpace(headers.Get("Vary"))
+	if current == "" {
+		headers.Set("Vary", normalized)
+		return
+	}
+	headers.Set("Vary", current+", "+normalized)
 }
 
 func securityHeadersMiddleware() gin.HandlerFunc {
