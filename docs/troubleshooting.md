@@ -34,5 +34,6 @@ Checks:
 
 Checks:
 1. `IDENTRAIL_REPO_SCAN_ENABLED=true`.
-2. Repository is allowed by `IDENTRAIL_REPO_SCAN_ALLOWLIST` (if configured).
-3. Request uses write-authorized API key/scope.
+2. `IDENTRAIL_REPO_SCAN_ALLOWLIST` is set and includes the target.
+3. API target is remote (`owner/repo`, `https://...`, or `ssh://...`) and not a local filesystem path.
+4. Request uses write-authorized API key/scope.

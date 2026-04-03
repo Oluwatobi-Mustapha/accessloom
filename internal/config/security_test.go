@@ -250,11 +250,22 @@ func TestValidateSecurityWorkerRepoScanRequiresTargets(t *testing.T) {
 	cfg := Config{
 		APIKeys:                []string{"reader"},
 		RepoScanEnabled:        true,
+		RepoScanAllowlist:      []string{"trusted/*"},
 		WorkerRepoScanEnabled:  true,
 		WorkerRepoScanInterval: 30 * time.Minute,
 	}
 	if err := ValidateSecurity(cfg); err == nil {
 		t.Fatal("expected worker repo target validation error")
+	}
+}
+
+func TestValidateSecurityRepoScanEnabledRequiresAllowlist(t *testing.T) {
+	cfg := Config{
+		APIKeys:         []string{"reader"},
+		RepoScanEnabled: true,
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected allowlist requirement when repo scan is enabled")
 	}
 }
 

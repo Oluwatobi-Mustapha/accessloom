@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -701,6 +703,7 @@ func TestServiceGetFindingsTrendFiltered(t *testing.T) {
 func TestServiceRunRepoScanSuccess(t *testing.T) {
 	store := db.NewMemoryStore()
 	svc := NewService(store, fakeScanner{}, "aws")
+	svc.RepoScanAllowedTargets = []string{"owner/repo"}
 	executor := &fakeRepoExecutor{
 		result: repoexposure.ScanResult{
 			Repository:     "owner/repo",
@@ -739,6 +742,7 @@ func TestServiceRunRepoScanSuccess(t *testing.T) {
 func TestServiceRunRepoScanPersistedStoresRecords(t *testing.T) {
 	store := db.NewMemoryStore()
 	svc := NewService(store, fakeScanner{}, "aws")
+	svc.RepoScanAllowedTargets = []string{"owner/repo"}
 	svc.Now = func() time.Time { return time.Date(2026, 3, 17, 15, 0, 0, 0, time.UTC) }
 	svc.RepoScannerFactory = func(historyLimit int, maxFindings int) RepoScanExecutor {
 		return &fakeRepoExecutor{
@@ -800,6 +804,7 @@ func TestServiceRunRepoScanGuards(t *testing.T) {
 		t.Fatalf("expected invalid request error for missing repo, got %v", err)
 	}
 
+	svc.RepoScanAllowedTargets = []string{"owner/repo"}
 	if _, err := svc.RunRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo", HistoryLimit: -1, MaxFindings: 10}); !errors.Is(err, ErrInvalidRepoScanRequest) {
 		t.Fatalf("expected invalid request error for negative history, got %v", err)
 	}
@@ -808,6 +813,7 @@ func TestServiceRunRepoScanGuards(t *testing.T) {
 func TestServiceRunRepoScanLocked(t *testing.T) {
 	store := db.NewMemoryStore()
 	svc := NewService(store, fakeScanner{}, "aws")
+	svc.RepoScanAllowedTargets = []string{"owner/repo"}
 	locker := scheduler.NewInMemoryLocker()
 	release, ok := locker.TryAcquire("identrail:repo-scan:owner/repo")
 	if !ok {
@@ -849,6 +855,7 @@ func TestServiceListFindingsWrapperAndRepoScanDetailGuard(t *testing.T) {
 func TestServiceRunRepoScanPersistedScannerError(t *testing.T) {
 	store := db.NewMemoryStore()
 	svc := NewService(store, fakeScanner{}, "aws")
+	svc.RepoScanAllowedTargets = []string{"owner/repo"}
 	svc.RepoScannerFactory = func(int, int) RepoScanExecutor {
 		return &fakeRepoExecutor{err: errors.New("scanner failed")}
 	}
@@ -867,14 +874,28 @@ func TestServiceRunRepoScanPersistedScannerError(t *testing.T) {
 }
 
 func TestRepoTargetAllowed(t *testing.T) {
-	if !repoTargetAllowed("owner/repo", nil) {
-		t.Fatal("expected open allowlist to allow target")
+	if repoTargetAllowed("owner/repo", nil) {
+		t.Fatal("expected empty allowlist to deny target")
 	}
 	if !repoTargetAllowed("trusted/team-repo", []string{"trusted/*"}) {
 		t.Fatal("expected wildcard allowlist to allow target")
 	}
 	if repoTargetAllowed("owner/repo", []string{"trusted/*"}) {
 		t.Fatal("expected disallowed target")
+	}
+}
+
+func TestServiceRunRepoScanRejectsLocalRepositoryTarget(t *testing.T) {
+	svc := NewService(db.NewMemoryStore(), fakeScanner{}, "aws")
+	svc.RepoScanAllowedTargets = []string{"*"}
+
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatalf("prepare local repo fixture: %v", err)
+	}
+
+	if _, err := svc.RunRepoScan(context.Background(), RepoScanRequest{Repository: repo}); !errors.Is(err, ErrRepoTargetNotAllowed) {
+		t.Fatalf("expected local repo target rejection, got %v", err)
 	}
 }
 

@@ -152,6 +152,16 @@ func TestLocalRepositoryDetection(t *testing.T) {
 	}
 }
 
+func TestIsLocalRepositoryTarget(t *testing.T) {
+	worktree, _ := initTestRepoWithHistorySecret(t)
+	if !IsLocalRepositoryTarget(worktree) {
+		t.Fatal("expected worktree path to be recognized as local repository target")
+	}
+	if IsLocalRepositoryTarget("owner/repo") {
+		t.Fatal("expected owner/repo shorthand to not be treated as a local repository target")
+	}
+}
+
 func TestPrepareRepositoryCloneFailure(t *testing.T) {
 	scanner := NewScanner(func(context.Context, string, ...string) ([]byte, error) {
 		return nil, errors.New("clone failed")

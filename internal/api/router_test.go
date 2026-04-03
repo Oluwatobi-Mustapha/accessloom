@@ -156,6 +156,7 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 	metrics := telemetry.NewMetrics()
 	store := db.NewMemoryStore()
 	svc := NewService(store, routerScanner{}, "aws")
+	svc.RepoScanAllowedTargets = []string{"owner/repo"}
 	svc.RepoScannerFactory = func(historyLimit int, maxFindings int) RepoScanExecutor {
 		return &fakeRepoExecutor{
 			result: repoexposure.ScanResult{
@@ -501,6 +502,7 @@ func TestRouterRepoScanConflictWhenLocked(t *testing.T) {
 	metrics := telemetry.NewMetrics()
 	store := db.NewMemoryStore()
 	svc := NewService(store, routerScanner{}, "aws")
+	svc.RepoScanAllowedTargets = []string{"owner/repo"}
 	locker := scheduler.NewInMemoryLocker()
 	release, ok := locker.TryAcquire("identrail:repo-scan:owner/repo")
 	if !ok {
