@@ -15,6 +15,9 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@emnapi/core": "^1.9.2",
+    "@emnapi/runtime": "^1.9.2",
+    "@emnapi/wasi-threads": "^1.2.1",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^18.3.18",
