@@ -33,3 +33,20 @@ func TestMatchScope(t *testing.T) {
 		t.Fatal("expected scope mismatch for workspace")
 	}
 }
+
+func TestRequireScopeMissing(t *testing.T) {
+	if _, err := RequireScope(context.Background()); err == nil {
+		t.Fatal("expected missing scope error")
+	}
+}
+
+func TestRequireScopeSuccess(t *testing.T) {
+	ctx := WithScope(context.Background(), Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"})
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		t.Fatalf("require scope: %v", err)
+	}
+	if scope.TenantID != "tenant-a" || scope.WorkspaceID != "workspace-a" {
+		t.Fatalf("unexpected scope: %+v", scope)
+	}
+}

@@ -117,3 +117,24 @@ func TestSixthMigrationContainsTenantWorkspaceScope(t *testing.T) {
 		}
 	}
 }
+
+func TestSeventhMigrationContainsScopedTriageGuardrails(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "000007_scope_guardrails_for_triage.up.sql")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	text := string(content)
+	required := []string{
+		"ADD COLUMN IF NOT EXISTS tenant_id",
+		"ADD COLUMN IF NOT EXISTS workspace_id",
+		"PRIMARY KEY (tenant_id, workspace_id, finding_id)",
+		"idx_finding_triage_states_scope_status",
+		"idx_finding_triage_events_scope_finding_created",
+	}
+	for _, item := range required {
+		if !strings.Contains(text, item) {
+			t.Fatalf("expected scoped triage migration item %q", item)
+		}
+	}
+}

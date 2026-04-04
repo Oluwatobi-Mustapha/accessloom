@@ -59,7 +59,11 @@ func (m *MemoryStore) CreateScan(ctx context.Context, provider string, startedAt
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.createScanLocked(ScopeFromContext(ctx), provider, "running", startedAt), nil
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return ScanRecord{}, err
+	}
+	return m.createScanLocked(scope, provider, "running", startedAt), nil
 }
 
 // CreateQueuedScan persists one queued scan request.
@@ -67,7 +71,11 @@ func (m *MemoryStore) CreateQueuedScan(ctx context.Context, provider string, que
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.createScanLocked(ScopeFromContext(ctx), provider, "queued", queuedAt), nil
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return ScanRecord{}, err
+	}
+	return m.createScanLocked(scope, provider, "queued", queuedAt), nil
 }
 
 // ClaimNextQueuedScan moves one queued scan to running for execution.
@@ -75,7 +83,10 @@ func (m *MemoryStore) ClaimNextQueuedScan(ctx context.Context, provider string) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return ScanRecord{}, err
+	}
 	normalizedProvider := strings.TrimSpace(provider)
 	found := false
 	var bestRecord ScanRecord
@@ -110,7 +121,10 @@ func (m *MemoryStore) CountQueuedScans(ctx context.Context, provider string) (in
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return 0, err
+	}
 	normalizedProvider := strings.TrimSpace(provider)
 	count := 0
 	for _, record := range m.scans {
@@ -148,7 +162,10 @@ func (m *MemoryStore) GetScan(ctx context.Context, scanID string) (ScanRecord, e
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return ScanRecord{}, err
+	}
 	record, exists := m.scans[scanID]
 	if !exists || !MatchScope(scope, record.TenantID, record.WorkspaceID) {
 		return ScanRecord{}, ErrNotFound
@@ -161,7 +178,10 @@ func (m *MemoryStore) CompleteScan(ctx context.Context, scanID string, status st
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
 	record, exists := m.scans[scanID]
 	if !exists || !MatchScope(scope, record.TenantID, record.WorkspaceID) {
 		return ErrNotFound
@@ -181,7 +201,10 @@ func (m *MemoryStore) UpsertFindings(ctx context.Context, scanID string, finding
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
 	scan, exists := m.scans[scanID]
 	if !exists || !MatchScope(scope, scan.TenantID, scan.WorkspaceID) {
 		return ErrNotFound
@@ -196,11 +219,15 @@ func (m *MemoryStore) UpsertFindings(ctx context.Context, scanID string, finding
 }
 
 // GetFindingTriageState returns triage workflow state for one finding id.
-func (m *MemoryStore) GetFindingTriageState(_ context.Context, findingID string) (FindingTriageState, error) {
+func (m *MemoryStore) GetFindingTriageState(ctx context.Context, findingID string) (FindingTriageState, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	state, exists := m.triageStates[strings.TrimSpace(findingID)]
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return FindingTriageState{}, err
+	}
+	state, exists := m.triageStates[findingScopeKey(scope, findingID)]
 	if !exists {
 		return FindingTriageState{}, ErrNotFound
 	}
@@ -208,10 +235,14 @@ func (m *MemoryStore) GetFindingTriageState(_ context.Context, findingID string)
 }
 
 // ListFindingTriageStates returns triage states for provided finding ids.
-func (m *MemoryStore) ListFindingTriageStates(_ context.Context, findingIDs []string) ([]FindingTriageState, error) {
+func (m *MemoryStore) ListFindingTriageStates(ctx context.Context, findingIDs []string) ([]FindingTriageState, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
 	seen := map[string]struct{}{}
 	result := make([]FindingTriageState, 0, len(findingIDs))
 	for _, findingID := range findingIDs {
@@ -223,7 +254,7 @@ func (m *MemoryStore) ListFindingTriageStates(_ context.Context, findingIDs []st
 			continue
 		}
 		seen[normalized] = struct{}{}
-		state, exists := m.triageStates[normalized]
+		state, exists := m.triageStates[findingScopeKey(scope, normalized)]
 		if !exists {
 			continue
 		}
@@ -233,31 +264,40 @@ func (m *MemoryStore) ListFindingTriageStates(_ context.Context, findingIDs []st
 }
 
 // UpsertFindingTriageState creates or updates mutable triage metadata.
-func (m *MemoryStore) UpsertFindingTriageState(_ context.Context, state FindingTriageState) error {
+func (m *MemoryStore) UpsertFindingTriageState(ctx context.Context, state FindingTriageState) error {
 	normalized, err := normalizeFindingTriageStateForWrite(state)
 	if err != nil {
 		return err
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.triageStates[normalized.FindingID] = normalized
-	return nil
-}
-
-// AppendFindingTriageEvent records one immutable triage action.
-func (m *MemoryStore) AppendFindingTriageEvent(_ context.Context, event FindingTriageEvent) error {
-	normalized, err := normalizeFindingTriageEventForWrite(event)
+	scope, err := RequireScope(ctx)
 	if err != nil {
 		return err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.triageEvents[normalized.FindingID] = append(m.triageEvents[normalized.FindingID], normalized)
+	m.triageStates[findingScopeKey(scope, normalized.FindingID)] = normalized
+	return nil
+}
+
+// AppendFindingTriageEvent records one immutable triage action.
+func (m *MemoryStore) AppendFindingTriageEvent(ctx context.Context, event FindingTriageEvent) error {
+	normalized, err := normalizeFindingTriageEventForWrite(event)
+	if err != nil {
+		return err
+	}
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := findingScopeKey(scope, normalized.FindingID)
+	m.triageEvents[key] = append(m.triageEvents[key], normalized)
 	return nil
 }
 
 // ApplyFindingTriageTransition persists state and audit history atomically.
-func (m *MemoryStore) ApplyFindingTriageTransition(_ context.Context, state FindingTriageState, event FindingTriageEvent) error {
+func (m *MemoryStore) ApplyFindingTriageTransition(ctx context.Context, state FindingTriageState, event FindingTriageEvent) error {
 	normalizedState, err := normalizeFindingTriageStateForWrite(state)
 	if err != nil {
 		return err
@@ -269,24 +309,33 @@ func (m *MemoryStore) ApplyFindingTriageTransition(_ context.Context, state Find
 	if normalizedState.FindingID != normalizedEvent.FindingID {
 		return fmt.Errorf("finding id mismatch between state and event")
 	}
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.triageStates[normalizedState.FindingID] = normalizedState
-	m.triageEvents[normalizedState.FindingID] = append(m.triageEvents[normalizedState.FindingID], normalizedEvent)
+	key := findingScopeKey(scope, normalizedState.FindingID)
+	m.triageStates[key] = normalizedState
+	m.triageEvents[key] = append(m.triageEvents[key], normalizedEvent)
 	return nil
 }
 
 // ListFindingTriageEvents returns triage actions newest-first for one finding id.
-func (m *MemoryStore) ListFindingTriageEvents(_ context.Context, findingID string, limit int) ([]FindingTriageEvent, error) {
+func (m *MemoryStore) ListFindingTriageEvents(ctx context.Context, findingID string, limit int) ([]FindingTriageEvent, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
 	normalizedID := strings.TrimSpace(findingID)
 	if normalizedID == "" {
 		return nil, ErrNotFound
 	}
-	events := append([]FindingTriageEvent(nil), m.triageEvents[normalizedID]...)
+	events := append([]FindingTriageEvent(nil), m.triageEvents[findingScopeKey(scope, normalizedID)]...)
 	sort.Slice(events, func(i, j int) bool {
 		return events[i].CreatedAt.After(events[j].CreatedAt)
 	})
@@ -301,7 +350,10 @@ func (m *MemoryStore) UpsertArtifacts(ctx context.Context, scanID string, artifa
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
 	scan, exists := m.scans[scanID]
 	if !exists || !MatchScope(scope, scan.TenantID, scan.WorkspaceID) {
 		return ErrNotFound
@@ -335,7 +387,10 @@ func (m *MemoryStore) ListScans(ctx context.Context, limit int) ([]ScanRecord, e
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
 	records := make([]ScanRecord, 0, len(m.scanIDs))
 	for _, scanID := range m.scanIDs {
 		record := m.scans[scanID]
@@ -358,7 +413,10 @@ func (m *MemoryStore) ListFindings(ctx context.Context, limit int) ([]domain.Fin
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]domain.Finding, 0, len(m.findings))
 	for _, finding := range m.findings {
 		scan, exists := m.scans[finding.ScanID]
@@ -381,7 +439,10 @@ func (m *MemoryStore) ListFindingsByScan(ctx context.Context, scanID string, lim
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
 	scan, exists := m.scans[scanID]
 	if !exists || !MatchScope(scope, scan.TenantID, scan.WorkspaceID) {
 		return nil, ErrNotFound
@@ -408,7 +469,10 @@ func (m *MemoryStore) ListIdentities(ctx context.Context, filter IdentityFilter,
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
 	filteredScanID := strings.TrimSpace(filter.ScanID)
 	if filteredScanID != "" {
 		scan, exists := m.scans[filteredScanID]
@@ -453,7 +517,10 @@ func (m *MemoryStore) ListRelationships(ctx context.Context, filter Relationship
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
 	filteredScanID := strings.TrimSpace(filter.ScanID)
 	if filteredScanID != "" {
 		scan, exists := m.scans[filteredScanID]
@@ -498,7 +565,10 @@ func (m *MemoryStore) AppendScanEvent(ctx context.Context, scanID string, level 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
 	scan, exists := m.scans[scanID]
 	if !exists || !MatchScope(scope, scan.TenantID, scan.WorkspaceID) {
 		return ErrNotFound
@@ -523,7 +593,10 @@ func (m *MemoryStore) ListScanEvents(ctx context.Context, scanID string, limit i
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
 	scan, exists := m.scans[scanID]
 	if !exists || !MatchScope(scope, scan.TenantID, scan.WorkspaceID) {
 		return nil, ErrNotFound
@@ -544,6 +617,11 @@ func scanKeyPrefix(key string) string {
 		return ""
 	}
 	return parts[0]
+}
+
+func findingScopeKey(scope Scope, findingID string) string {
+	normalized := scope.Normalize()
+	return normalized.TenantID + "|" + normalized.WorkspaceID + "|" + strings.TrimSpace(findingID)
 }
 
 func normalizeFindingTriageStateForWrite(state FindingTriageState) (FindingTriageState, error) {
@@ -588,7 +666,11 @@ func (m *MemoryStore) CreateRepoScan(ctx context.Context, repository string, sta
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.createRepoScanLocked(ScopeFromContext(ctx), strings.TrimSpace(repository), "running", 0, 0, startedAt), nil
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return RepoScanRecord{}, err
+	}
+	return m.createRepoScanLocked(scope, strings.TrimSpace(repository), "running", 0, 0, startedAt), nil
 }
 
 // CreateQueuedRepoScan persists one queued repository exposure scan request.
@@ -596,7 +678,11 @@ func (m *MemoryStore) CreateQueuedRepoScan(ctx context.Context, repository strin
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	return m.createRepoScanLocked(ScopeFromContext(ctx), strings.TrimSpace(repository), "queued", historyLimit, maxFindings, queuedAt), nil
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return RepoScanRecord{}, err
+	}
+	return m.createRepoScanLocked(scope, strings.TrimSpace(repository), "queued", historyLimit, maxFindings, queuedAt), nil
 }
 
 // ClaimNextQueuedRepoScan moves one queued repository scan to running for execution.
@@ -604,7 +690,10 @@ func (m *MemoryStore) ClaimNextQueuedRepoScan(ctx context.Context) (RepoScanReco
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return RepoScanRecord{}, err
+	}
 	var claimed RepoScanRecord
 	found := false
 	for _, scanID := range m.repoScanIDs {
@@ -635,7 +724,10 @@ func (m *MemoryStore) CountQueuedRepoScans(ctx context.Context) (int, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return 0, err
+	}
 	count := 0
 	for _, record := range m.repoScans {
 		if !MatchScope(scope, record.TenantID, record.WorkspaceID) {
@@ -653,7 +745,10 @@ func (m *MemoryStore) CountPendingRepoScansByRepository(ctx context.Context, rep
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return 0, err
+	}
 	normalizedRepository := strings.TrimSpace(repository)
 	if normalizedRepository == "" {
 		return 0, nil
@@ -678,7 +773,10 @@ func (m *MemoryStore) RequeueRepoScan(ctx context.Context, repoScanID string) er
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
 	record, exists := m.repoScans[repoScanID]
 	if !exists || !MatchScope(scope, record.TenantID, record.WorkspaceID) {
 		return ErrNotFound
@@ -716,7 +814,10 @@ func (m *MemoryStore) GetRepoScan(ctx context.Context, repoScanID string) (RepoS
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return RepoScanRecord{}, err
+	}
 	record, exists := m.repoScans[repoScanID]
 	if !exists || !MatchScope(scope, record.TenantID, record.WorkspaceID) {
 		return RepoScanRecord{}, ErrNotFound
@@ -729,7 +830,10 @@ func (m *MemoryStore) CompleteRepoScan(ctx context.Context, repoScanID string, s
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
 	record, exists := m.repoScans[repoScanID]
 	if !exists || !MatchScope(scope, record.TenantID, record.WorkspaceID) {
 		return ErrNotFound
@@ -751,7 +855,10 @@ func (m *MemoryStore) UpsertRepoFindings(ctx context.Context, repoScanID string,
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
 	repoScan, exists := m.repoScans[repoScanID]
 	if !exists || !MatchScope(scope, repoScan.TenantID, repoScan.WorkspaceID) {
 		return ErrNotFound
@@ -769,7 +876,10 @@ func (m *MemoryStore) ListRepoScans(ctx context.Context, limit int) ([]RepoScanR
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
 	result := make([]RepoScanRecord, 0, len(m.repoScanIDs))
 	for _, scanID := range m.repoScanIDs {
 		record := m.repoScans[scanID]
@@ -792,7 +902,10 @@ func (m *MemoryStore) ListRepoFindings(ctx context.Context, filter RepoFindingFi
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	scope := ScopeFromContext(ctx)
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
 	repoScanID := strings.TrimSpace(filter.RepoScanID)
 	if repoScanID != "" {
 		record, exists := m.repoScans[repoScanID]
