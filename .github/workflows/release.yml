@@ -38,7 +38,7 @@ jobs:
           if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
             tag="${GITHUB_REF_NAME}"
           else
-            tag="${{ inputs.tag }}"
+            tag="${{ github.event.inputs.tag }}"
           fi
 
           if ! [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
@@ -165,7 +165,7 @@ jobs:
           tag="${{ needs.prepare.outputs.tag }}"
           publish_latest="${{ needs.prepare.outputs.publish_latest }}"
           web_api_url="${{ vars.IDENTRAIL_WEB_API_URL }}"
-          input_web_api_url="${{ inputs.web_api_url }}"
+          input_web_api_url="${{ github.event.inputs.web_api_url }}"
 
           if [ -n "${input_web_api_url}" ]; then
             web_api_url="${input_web_api_url}"
