@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"regexp"
 	"testing"
 	"time"
@@ -804,5 +805,196 @@ func TestPostgresStoreRepoQueueLifecycle(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreInjectScopeCTEBypassWhenDisabled(t *testing.T) {
+	store := &PostgresStore{}
+	query := "SELECT id FROM scans WHERE tenant_id = $1"
+	args := []any{"tenant-a"}
+
+	gotQuery, gotArgs, err := store.injectScopeCTE(defaultScopeContext(), query, args)
+	if err != nil {
+		t.Fatalf("inject scope cte: %v", err)
+	}
+	if gotQuery != query {
+		t.Fatalf("expected query unchanged, got %q", gotQuery)
+	}
+	if !reflect.DeepEqual(gotArgs, args) {
+		t.Fatalf("expected args unchanged, got %+v", gotArgs)
+	}
+}
+
+func TestPostgresStoreInjectScopeCTERewritesQueryWhenEnabled(t *testing.T) {
+	store := &PostgresStore{}
+	store.SetScopeRLSEnforcement(true)
+
+	ctx := WithScope(context.Background(), Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"})
+	query := "SELECT id FROM scans WHERE tenant_id = $1 AND workspace_id = $2 LIMIT $3"
+	args := []any{"tenant-a", "workspace-a", 10}
+
+	gotQuery, gotArgs, err := store.injectScopeCTE(ctx, query, args)
+	if err != nil {
+		t.Fatalf("inject scope cte: %v", err)
+	}
+
+	expectedQuery := "WITH _identrail_scope AS (SELECT set_config('identrail.tenant_id', $4, true), set_config('identrail.workspace_id', $5, true), set_config('identrail.rls_enforce', $6, true)) " + query
+	if gotQuery != expectedQuery {
+		t.Fatalf("unexpected rewritten query:\nexpected: %s\ngot:      %s", expectedQuery, gotQuery)
+	}
+
+	expectedArgs := []any{"tenant-a", "workspace-a", 10, "tenant-a", "workspace-a", "on"}
+	if !reflect.DeepEqual(gotArgs, expectedArgs) {
+		t.Fatalf("unexpected rewritten args: %+v", gotArgs)
+	}
+}
+
+func TestPostgresStoreInjectScopeCTEHandlesWithRecursive(t *testing.T) {
+	store := &PostgresStore{}
+	store.SetScopeRLSEnforcement(true)
+
+	ctx := WithScope(context.Background(), Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"})
+	query := "WITH RECURSIVE chain AS (SELECT 1 AS n) SELECT n FROM chain"
+
+	gotQuery, gotArgs, err := store.injectScopeCTE(ctx, query, nil)
+	if err != nil {
+		t.Fatalf("inject scope cte: %v", err)
+	}
+
+	expectedQuery := "WITH RECURSIVE _identrail_scope AS (SELECT set_config('identrail.tenant_id', $1, true), set_config('identrail.workspace_id', $2, true), set_config('identrail.rls_enforce', $3, true)), chain AS (SELECT 1 AS n) SELECT n FROM chain"
+	if gotQuery != expectedQuery {
+		t.Fatalf("unexpected recursive rewritten query:\nexpected: %s\ngot:      %s", expectedQuery, gotQuery)
+	}
+
+	expectedArgs := []any{"tenant-a", "workspace-a", "on"}
+	if !reflect.DeepEqual(gotArgs, expectedArgs) {
+		t.Fatalf("unexpected rewritten args: %+v", gotArgs)
+	}
+}
+
+func TestPostgresStoreInjectScopeCTERequiresScopeWhenEnabled(t *testing.T) {
+	store := &PostgresStore{}
+	store.SetScopeRLSEnforcement(true)
+
+	if _, _, err := store.injectScopeCTE(context.Background(), "SELECT 1", nil); !errors.Is(err, ErrScopeRequired) {
+		t.Fatalf("expected ErrScopeRequired, got %v", err)
+	}
+}
+
+func TestPostgresStoreBeginTxSetsRLSScopeContext(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	store.SetScopeRLSEnforcement(true)
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`SELECT set_config('identrail.tenant_id', $1, true), set_config('identrail.workspace_id', $2, true), set_config('identrail.rls_enforce', $3, true)`)).
+		WithArgs("default", "default", "on").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectRollback()
+
+	tx, err := store.beginTx(defaultScopeContext())
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback tx: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreBeginTxRequiresScopeWhenRLSEnabled(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	store.SetScopeRLSEnforcement(true)
+
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+
+	if _, err := store.beginTx(context.Background()); !errors.Is(err, ErrScopeRequired) {
+		t.Fatalf("expected ErrScopeRequired, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestCheckedSliceCapacity(t *testing.T) {
+	got, err := checkedSliceCapacity(4, 3)
+	if err != nil {
+		t.Fatalf("checked slice capacity: %v", err)
+	}
+	if got != 7 {
+		t.Fatalf("expected capacity 7, got %d", got)
+	}
+
+	maxInt := int(^uint(0) >> 1)
+	if _, err := checkedSliceCapacity(maxInt, 1); !errors.Is(err, errQueryArgCapacityOverflow) {
+		t.Fatalf("expected overflow error, got %v", err)
+	}
+
+	if _, err := checkedSliceCapacity(-1, 1); err == nil {
+		t.Fatal("expected invalid input error")
+	}
+}
+
+func TestPostgresStoreDBAndScopeFlagHelpers(t *testing.T) {
+	var nilStore *PostgresStore
+	if got := nilStore.DB(); got != nil {
+		t.Fatalf("expected nil DB from nil store, got %v", got)
+	}
+	if nilStore.ScopeRLSEnforcementEnabled() {
+		t.Fatal("expected nil store scope rls enforcement to be false")
+	}
+
+	sqlDB := &sql.DB{}
+	store := NewPostgresStoreWithDB(sqlDB)
+	if got := store.DB(); got != sqlDB {
+		t.Fatalf("expected DB pointer to match")
+	}
+	if store.ScopeRLSEnforcementEnabled() {
+		t.Fatal("expected scope rls enforcement disabled by default")
+	}
+
+	store.SetScopeRLSEnforcement(true)
+	if !store.ScopeRLSEnforcementEnabled() {
+		t.Fatal("expected scope rls enforcement enabled")
+	}
+}
+
+func TestPostgresStoreWrapperScopeErrors(t *testing.T) {
+	store := &PostgresStore{}
+	store.SetScopeRLSEnforcement(true)
+
+	if _, err := store.execContext(context.Background(), "SELECT 1"); !errors.Is(err, ErrScopeRequired) {
+		t.Fatalf("expected ErrScopeRequired from execContext, got %v", err)
+	}
+	if _, err := store.queryContext(context.Background(), "SELECT 1"); !errors.Is(err, ErrScopeRequired) {
+		t.Fatalf("expected ErrScopeRequired from queryContext, got %v", err)
+	}
+	if err := store.queryRowContext(context.Background(), "SELECT 1").Scan(new(int)); !errors.Is(err, ErrScopeRequired) {
+		t.Fatalf("expected ErrScopeRequired from queryRowContext scan, got %v", err)
+	}
+}
+
+func TestErrorsIsNoRows(t *testing.T) {
+	if !errorsIsNoRows(sql.ErrNoRows) {
+		t.Fatal("expected true for sql.ErrNoRows")
+	}
+	if errorsIsNoRows(errors.New("different error")) {
+		t.Fatal("expected false for non-no-rows error")
 	}
 }

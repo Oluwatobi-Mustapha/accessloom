@@ -138,3 +138,24 @@ func TestSeventhMigrationContainsScopedTriageGuardrails(t *testing.T) {
 		}
 	}
 }
+
+func TestEighthMigrationContainsPostgresRLSGuardrails(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "000008_postgres_rls_scope_guardrails.up.sql")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	text := string(content)
+	required := []string{
+		"CREATE OR REPLACE FUNCTION identrail_rls_scope_matches",
+		"ALTER TABLE scans ENABLE ROW LEVEL SECURITY",
+		"CREATE POLICY scans_scope_isolation",
+		"CREATE POLICY repo_scans_scope_isolation",
+		"CREATE POLICY finding_triage_states_scope_isolation",
+	}
+	for _, item := range required {
+		if !strings.Contains(text, item) {
+			t.Fatalf("expected postgres rls migration item %q", item)
+		}
+	}
+}

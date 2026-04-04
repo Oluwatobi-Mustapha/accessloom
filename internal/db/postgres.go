@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,12 +20,40 @@ import (
 
 // PostgresStore persists scans/findings in PostgreSQL.
 type PostgresStore struct {
-	db      *sql.DB
-	queries *sqlcdb.Queries
+	db              *sql.DB
+	queries         *sqlcdb.Queries
+	enforceScopeRLS bool
 }
 
 type sqlExecutor interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+type errScanner struct {
+	err error
+}
+
+func (e errScanner) Scan(_ ...any) error {
+	return e.err
+}
+
+var placeholderPattern = regexp.MustCompile(`\$(\d+)`)
+
+var errQueryArgCapacityOverflow = errors.New("query argument capacity overflow")
+
+func checkedSliceCapacity(base int, extra int) (int, error) {
+	if base < 0 || extra < 0 {
+		return 0, fmt.Errorf("invalid slice capacity inputs")
+	}
+	maxInt := int(^uint(0) >> 1)
+	if base > maxInt-extra {
+		return 0, errQueryArgCapacityOverflow
+	}
+	return base + extra, nil
 }
 
 // NewPostgresStore opens a PostgreSQL connection and validates connectivity.
@@ -56,6 +87,127 @@ func (p *PostgresStore) DB() *sql.DB {
 	return p.db
 }
 
+// SetScopeRLSEnforcement toggles statement-level RLS enforcement with scoped GUCs.
+func (p *PostgresStore) SetScopeRLSEnforcement(enabled bool) {
+	if p == nil {
+		return
+	}
+	p.enforceScopeRLS = enabled
+}
+
+// ScopeRLSEnforcementEnabled returns true when scoped RLS enforcement is enabled.
+func (p *PostgresStore) ScopeRLSEnforcementEnabled() bool {
+	if p == nil {
+		return false
+	}
+	return p.enforceScopeRLS
+}
+
+func (p *PostgresStore) injectScopeCTE(ctx context.Context, query string, args []any) (string, []any, error) {
+	if !p.enforceScopeRLS {
+		return query, args, nil
+	}
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+
+	maxPlaceholder := 0
+	for _, match := range placeholderPattern.FindAllStringSubmatch(query, -1) {
+		if len(match) != 2 {
+			continue
+		}
+		value, convErr := strconv.Atoi(match[1])
+		if convErr != nil {
+			continue
+		}
+		if value > maxPlaceholder {
+			maxPlaceholder = value
+		}
+	}
+
+	tenantPos := maxPlaceholder + 1
+	workspacePos := maxPlaceholder + 2
+	enforcePos := maxPlaceholder + 3
+	scopeCTE := fmt.Sprintf(
+		"_identrail_scope AS (SELECT set_config('identrail.tenant_id', $%d, true), set_config('identrail.workspace_id', $%d, true), set_config('identrail.rls_enforce', $%d, true))",
+		tenantPos,
+		workspacePos,
+		enforcePos,
+	)
+	trimmed := strings.TrimSpace(query)
+	upper := strings.ToUpper(trimmed)
+	if strings.HasPrefix(upper, "WITH RECURSIVE ") {
+		trimmed = strings.TrimSpace(trimmed[len("WITH RECURSIVE "):])
+		query = "WITH RECURSIVE " + scopeCTE + ", " + trimmed
+	} else if strings.HasPrefix(upper, "WITH ") {
+		trimmed = strings.TrimSpace(trimmed[5:])
+		query = "WITH " + scopeCTE + ", " + trimmed
+	} else {
+		query = "WITH " + scopeCTE + " " + query
+	}
+
+	capacity, err := checkedSliceCapacity(len(args), 3)
+	if err != nil {
+		return "", nil, err
+	}
+
+	scopedArgs := make([]any, 0, capacity)
+	scopedArgs = append(scopedArgs, args...)
+	scopedArgs = append(scopedArgs, scope.TenantID, scope.WorkspaceID, "on")
+	return query, scopedArgs, nil
+}
+
+func (p *PostgresStore) execContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	scopedQuery, scopedArgs, err := p.injectScopeCTE(ctx, query, args)
+	if err != nil {
+		return nil, err
+	}
+	return p.db.ExecContext(ctx, scopedQuery, scopedArgs...)
+}
+
+func (p *PostgresStore) queryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	scopedQuery, scopedArgs, err := p.injectScopeCTE(ctx, query, args)
+	if err != nil {
+		return nil, err
+	}
+	return p.db.QueryContext(ctx, scopedQuery, scopedArgs...)
+}
+
+func (p *PostgresStore) queryRowContext(ctx context.Context, query string, args ...any) rowScanner {
+	scopedQuery, scopedArgs, err := p.injectScopeCTE(ctx, query, args)
+	if err != nil {
+		return errScanner{err: err}
+	}
+	return p.db.QueryRowContext(ctx, scopedQuery, scopedArgs...)
+}
+
+func (p *PostgresStore) beginTx(ctx context.Context) (*sql.Tx, error) {
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	if !p.enforceScopeRLS {
+		return tx, nil
+	}
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		_ = tx.Rollback()
+		return nil, err
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`SELECT set_config('identrail.tenant_id', $1, true), set_config('identrail.workspace_id', $2, true), set_config('identrail.rls_enforce', $3, true)`,
+		scope.TenantID,
+		scope.WorkspaceID,
+		"on",
+	); err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("set rls scope context: %w", err)
+	}
+	return tx, nil
+}
+
 // CreateScan inserts a new scan row.
 func (p *PostgresStore) CreateScan(ctx context.Context, provider string, startedAt time.Time) (ScanRecord, error) {
 	return p.createScanWithStatus(ctx, provider, "running", startedAt)
@@ -72,7 +224,7 @@ func (p *PostgresStore) ClaimNextQueuedScan(ctx context.Context, provider string
 	if err != nil {
 		return ScanRecord{}, err
 	}
-	row := p.db.QueryRowContext(
+	row := p.queryRowContext(
 		ctx,
 		`WITH next_scan AS (
 			SELECT id
@@ -129,7 +281,7 @@ func (p *PostgresStore) CountQueuedScans(ctx context.Context, provider string) (
 		return 0, err
 	}
 	var count int
-	if err := p.db.QueryRowContext(
+	if err := p.queryRowContext(
 		ctx,
 		`SELECT COUNT(*)
 		 FROM scans
@@ -152,7 +304,7 @@ func (p *PostgresStore) GetScan(ctx context.Context, scanID string) (ScanRecord,
 	if err != nil {
 		return ScanRecord{}, err
 	}
-	row := p.db.QueryRowContext(
+	row := p.queryRowContext(
 		ctx,
 		`SELECT id, tenant_id, workspace_id, provider, status, started_at, finished_at, asset_count, finding_count, COALESCE(error_message, '')
 		 FROM scans
@@ -179,7 +331,7 @@ func (p *PostgresStore) CompleteScan(ctx context.Context, scanID string, status 
 	if err != nil {
 		return err
 	}
-	result, err := p.db.ExecContext(
+	result, err := p.execContext(
 		ctx,
 		`UPDATE scans
 		 SET status=$2, finished_at=$3, asset_count=$4, finding_count=$5, error_message=$6
@@ -209,7 +361,7 @@ func (p *PostgresStore) UpsertArtifacts(ctx context.Context, scanID string, arti
 	if err := p.ensureScanInScope(ctx, scanID); err != nil {
 		return err
 	}
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.beginTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin artifacts transaction: %w", err)
 	}
@@ -242,7 +394,7 @@ func (p *PostgresStore) UpsertFindings(ctx context.Context, scanID string, findi
 	if err := p.ensureScanInScope(ctx, scanID); err != nil {
 		return err
 	}
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.beginTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
 	}
@@ -309,7 +461,7 @@ func (p *PostgresStore) GetFindingTriageState(ctx context.Context, findingID str
 	if err != nil {
 		return FindingTriageState{}, err
 	}
-	row := p.db.QueryRowContext(
+	row := p.queryRowContext(
 		ctx,
 		`SELECT finding_id, status, assignee, suppression_expires_at, updated_at, updated_by
 		 FROM finding_triage_states
@@ -381,7 +533,7 @@ func (p *PostgresStore) ListFindingTriageStates(ctx context.Context, findingIDs 
 		   AND finding_id IN (%s)`,
 		strings.Join(placeholders, ", "),
 	)
-	rows, err := p.db.QueryContext(ctx, query, args...)
+	rows, err := p.queryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query finding triage states: %w", err)
 	}
@@ -504,7 +656,7 @@ func (p *PostgresStore) ApplyFindingTriageTransition(ctx context.Context, state 
 		return fmt.Errorf("finding id mismatch between state and event")
 	}
 
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.beginTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin triage transition tx: %w", err)
 	}
@@ -534,7 +686,7 @@ func (p *PostgresStore) ListFindingTriageEvents(ctx context.Context, findingID s
 	} else if limit > maxFindingTriageEventsLimit {
 		limit = maxFindingTriageEventsLimit
 	}
-	rows, err := p.db.QueryContext(
+	rows, err := p.queryContext(
 		ctx,
 		`SELECT id, finding_id, action, from_status, to_status, assignee, suppression_expires_at, comment, actor, created_at
 		 FROM finding_triage_events
@@ -593,7 +745,7 @@ func (p *PostgresStore) ListScans(ctx context.Context, limit int) ([]ScanRecord,
 	if err != nil {
 		return nil, err
 	}
-	rows, err := p.db.QueryContext(
+	rows, err := p.queryContext(
 		ctx,
 		`SELECT id, tenant_id, workspace_id, provider, status, started_at, finished_at, asset_count, finding_count, COALESCE(error_message, '')
 		 FROM scans
@@ -632,7 +784,7 @@ func (p *PostgresStore) ListFindings(ctx context.Context, limit int) ([]domain.F
 	if err != nil {
 		return nil, err
 	}
-	rows, err := p.db.QueryContext(
+	rows, err := p.queryContext(
 		ctx,
 		`SELECT f.scan_id, f.finding_id, f.type, f.severity, f.title, f.human_summary, f.path, f.evidence, COALESCE(f.remediation, ''), f.created_at
 		 FROM findings f
@@ -664,7 +816,7 @@ func (p *PostgresStore) ListFindingsByScan(ctx context.Context, scanID string, l
 	if err != nil {
 		return nil, err
 	}
-	rows, err := p.db.QueryContext(
+	rows, err := p.queryContext(
 		ctx,
 		`SELECT f.scan_id, f.finding_id, f.type, f.severity, f.title, f.human_summary, f.path, f.evidence, COALESCE(f.remediation, ''), f.created_at
 		 FROM findings f
@@ -700,7 +852,7 @@ func (p *PostgresStore) ListIdentities(ctx context.Context, filter IdentityFilte
 			return nil, err
 		}
 	}
-	rows, err := p.db.QueryContext(
+	rows, err := p.queryContext(
 		ctx,
 		`SELECT i.id, i.provider, i.type, i.name, COALESCE(i.arn, ''), COALESCE(i.owner_hint, ''), i.created_at, i.last_used_at, i.tags, i.raw_ref
 		 FROM identities i
@@ -772,7 +924,7 @@ func (p *PostgresStore) ListRelationships(ctx context.Context, filter Relationsh
 			return nil, err
 		}
 	}
-	rows, err := p.db.QueryContext(
+	rows, err := p.queryContext(
 		ctx,
 		`SELECT r.id, r.type, r.from_node_id, r.to_node_id, COALESCE(r.evidence_ref, ''), r.discovered_at
 		 FROM relationships r
@@ -828,7 +980,7 @@ func (p *PostgresStore) AppendScanEvent(ctx context.Context, scanID string, leve
 	if err != nil {
 		return fmt.Errorf("marshal scan event metadata: %w", err)
 	}
-	result, err := p.db.ExecContext(
+	result, err := p.execContext(
 		ctx,
 		`INSERT INTO scan_events (id, scan_id, level, message, metadata, created_at)
 		 SELECT $1, $2, $3, $4, $5, NOW()
@@ -865,7 +1017,7 @@ func (p *PostgresStore) ListScanEvents(ctx context.Context, scanID string, limit
 	if err != nil {
 		return nil, err
 	}
-	rows, err := p.db.QueryContext(
+	rows, err := p.queryContext(
 		ctx,
 		`SELECT e.id, e.scan_id, e.level, e.message, e.metadata, e.created_at
 		 FROM scan_events e
@@ -927,7 +1079,7 @@ func (p *PostgresStore) ClaimNextQueuedRepoScan(ctx context.Context) (RepoScanRe
 	if err != nil {
 		return RepoScanRecord{}, err
 	}
-	row := p.db.QueryRowContext(
+	row := p.queryRowContext(
 		ctx,
 		`WITH next_repo_scan AS (
 			SELECT id
@@ -980,7 +1132,7 @@ func (p *PostgresStore) CountQueuedRepoScans(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	var count int
-	if err := p.db.QueryRowContext(
+	if err := p.queryRowContext(
 		ctx,
 		`SELECT COUNT(*)
 		 FROM repo_scans
@@ -1002,7 +1154,7 @@ func (p *PostgresStore) CountPendingRepoScansByRepository(ctx context.Context, r
 		return 0, err
 	}
 	var count int
-	if err := p.db.QueryRowContext(
+	if err := p.queryRowContext(
 		ctx,
 		`SELECT COUNT(*)
 		 FROM repo_scans
@@ -1025,7 +1177,7 @@ func (p *PostgresStore) RequeueRepoScan(ctx context.Context, repoScanID string) 
 	if err != nil {
 		return err
 	}
-	result, err := p.db.ExecContext(
+	result, err := p.execContext(
 		ctx,
 		`UPDATE repo_scans
 		 SET status = 'queued',
@@ -1068,7 +1220,7 @@ func (p *PostgresStore) createRepoScanWithStatus(ctx context.Context, repository
 		HistoryLimit: historyLimit,
 		MaxFindings:  maxFindings,
 	}
-	_, err = p.db.ExecContext(
+	_, err = p.execContext(
 		ctx,
 		`INSERT INTO repo_scans (id, tenant_id, workspace_id, repository, status, started_at, commits_scanned, files_scanned, finding_count, truncated, history_limit, max_findings_limit)
 		 VALUES ($1, $2, $3, $4, $5, $6, 0, 0, 0, false, $7, $8)`,
@@ -1093,7 +1245,7 @@ func (p *PostgresStore) GetRepoScan(ctx context.Context, repoScanID string) (Rep
 	if err != nil {
 		return RepoScanRecord{}, err
 	}
-	row := p.db.QueryRowContext(
+	row := p.queryRowContext(
 		ctx,
 		`SELECT id, tenant_id, workspace_id, repository, status, started_at, finished_at, commits_scanned, files_scanned, finding_count, truncated, COALESCE(error_message, ''), history_limit, max_findings_limit
 		 FROM repo_scans
@@ -1120,7 +1272,7 @@ func (p *PostgresStore) CompleteRepoScan(ctx context.Context, repoScanID string,
 	if err != nil {
 		return err
 	}
-	result, err := p.db.ExecContext(
+	result, err := p.execContext(
 		ctx,
 		`UPDATE repo_scans
 		 SET status = $2,
@@ -1158,7 +1310,7 @@ func (p *PostgresStore) UpsertRepoFindings(ctx context.Context, repoScanID strin
 	if err := p.ensureRepoScanInScope(ctx, repoScanID); err != nil {
 		return err
 	}
-	tx, err := p.db.BeginTx(ctx, nil)
+	tx, err := p.beginTx(ctx)
 	if err != nil {
 		return fmt.Errorf("begin repo findings transaction: %w", err)
 	}
@@ -1224,7 +1376,7 @@ func (p *PostgresStore) ListRepoScans(ctx context.Context, limit int) ([]RepoSca
 	if err != nil {
 		return nil, err
 	}
-	rows, err := p.db.QueryContext(
+	rows, err := p.queryContext(
 		ctx,
 		`SELECT id, tenant_id, workspace_id, repository, status, started_at, finished_at, commits_scanned, files_scanned, finding_count, truncated, COALESCE(error_message, ''), history_limit, max_findings_limit
 		 FROM repo_scans
@@ -1269,7 +1421,7 @@ func (p *PostgresStore) ListRepoFindings(ctx context.Context, filter RepoFinding
 	if err != nil {
 		return nil, err
 	}
-	rows, err := p.db.QueryContext(
+	rows, err := p.queryContext(
 		ctx,
 		`SELECT rf.repo_scan_id, rf.finding_id, rf.type, rf.severity, rf.title, rf.human_summary, rf.path, rf.evidence, COALESCE(rf.remediation, ''), rf.created_at
 		 FROM repo_findings rf
@@ -1538,7 +1690,7 @@ func (p *PostgresStore) createScanWithStatus(ctx context.Context, provider strin
 		Status:      strings.TrimSpace(status),
 		StartedAt:   startedAt.UTC(),
 	}
-	_, err = p.db.ExecContext(
+	_, err = p.execContext(
 		ctx,
 		`INSERT INTO scans (id, tenant_id, workspace_id, provider, status, started_at, asset_count, finding_count) VALUES ($1, $2, $3, $4, $5, $6, 0, 0)`,
 		record.ID,
@@ -1689,7 +1841,7 @@ func (p *PostgresStore) ensureScanInScope(ctx context.Context, scanID string) er
 		return err
 	}
 	var exists bool
-	err = p.db.QueryRowContext(
+	err = p.queryRowContext(
 		ctx,
 		`SELECT EXISTS (
 			SELECT 1
@@ -1717,7 +1869,7 @@ func (p *PostgresStore) ensureRepoScanInScope(ctx context.Context, repoScanID st
 		return err
 	}
 	var exists bool
-	err = p.db.QueryRowContext(
+	err = p.queryRowContext(
 		ctx,
 		`SELECT EXISTS (
 			SELECT 1
