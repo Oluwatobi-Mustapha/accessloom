@@ -1,0 +1,57 @@
+version: "3"
+
+tasks:
+  default:
+    desc: Show task list
+    cmds:
+      - task --list
+
+  bootstrap:
+    desc: Install local dependencies for Go and web
+    cmds:
+      - make bootstrap
+
+  fmt:
+    desc: Auto-format Go and Terraform files
+    cmds:
+      - make fmt
+
+  fmt-check:
+    desc: Check formatting without modifying files
+    cmds:
+      - make fmt-check
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - make vet
+
+  test:
+    desc: Run Go tests
+    cmds:
+      - make test
+
+  test-integration:
+    desc: Run Go integration tests
+    cmds:
+      - make test-integration
+
+  web-test:
+    desc: Run web tests
+    cmds:
+      - make web-test
+
+  web-build:
+    desc: Build web frontend
+    cmds:
+      - make web-build
+
+  ci:
+    desc: Run core local CI checks
+    cmds:
+      - make ci
+
+  pre-commit:
+    desc: Run pre-commit hooks across repository
+    cmds:
+      - make pre-commit

@@ -1,0 +1,23 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: local
+    hooks:
+      - id: gofmt-check
+        name: gofmt check
+        entry: bash -c 'set -euo pipefail; files="$(git ls-files "*.go")"; [ -z "$files" ] && exit 0; unformatted="$(echo "$files" | xargs gofmt -l)"; [ -z "$unformatted" ] || { echo "Go files not formatted:"; echo "$unformatted"; exit 1; }'
+        language: system
+        pass_filenames: false
+
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
