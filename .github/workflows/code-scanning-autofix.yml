@@ -43,19 +43,20 @@ jobs:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+            const inputs = context.payload.inputs || {};
 
             const isScheduled = context.eventName === "schedule";
-            const applyInput = core.getInput("apply_changes");
+            const applyInput = String(inputs.apply_changes ?? "false").toLowerCase();
             const applyChanges = isScheduled || applyInput === "true";
 
-            const maxAlertsInput = core.getInput("max_alerts") || "3";
+            const maxAlertsInput = String(inputs.max_alerts ?? "3");
             const maxAlerts = Number.parseInt(maxAlertsInput, 10);
             if (!Number.isFinite(maxAlerts) || maxAlerts <= 0) {
               core.setFailed(`Invalid max_alerts value: ${maxAlertsInput}`);
               return;
             }
 
-            const severitiesInput = core.getInput("severities") || "critical,high";
+            const severitiesInput = String(inputs.severities ?? "critical,high");
             const severities = severitiesInput
               .split(",")
               .map((value) => value.trim().toLowerCase())
@@ -63,7 +64,7 @@ jobs:
 
             const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-            const alertsResp = await github.request("GET /repos/{owner}/{repo}/code-scanning/alerts", {
+            const allOpenAlerts = await github.paginate("GET /repos/{owner}/{repo}/code-scanning/alerts", {
               owner,
               repo,
               state: "open",
@@ -71,7 +72,7 @@ jobs:
               per_page: 100,
             });
 
-            const matchingAlerts = alertsResp.data
+            const matchingAlerts = allOpenAlerts
               .filter((alert) => {
                 const sev = (alert.rule?.security_severity_level || alert.rule?.severity || "").toLowerCase();
                 return severities.includes(sev);
