@@ -193,16 +193,6 @@ func optionalStringArrayClaim(claims map[string]any, claim string) ([]string, er
 
 func claimStringArray(raw any, claim string) ([]string, error) {
 	switch values := raw.(type) {
-	case []string:
-		result := make([]string, 0, len(values))
-		for _, item := range values {
-			normalized := strings.TrimSpace(item)
-			if normalized == "" {
-				return nil, fmt.Errorf("oidc claim %q must contain non-empty string values", claim)
-			}
-			result = append(result, normalized)
-		}
-		return result, nil
 	case []any:
 		result := make([]string, 0, len(values))
 		for _, item := range values {
