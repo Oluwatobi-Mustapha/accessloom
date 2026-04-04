@@ -331,7 +331,7 @@ func (p *PostgresStore) ListFindings(ctx context.Context, limit int) ([]domain.F
 	scope := ScopeFromContext(ctx)
 	rows, err := p.db.QueryContext(
 		ctx,
-		`SELECT f.scan_id, f.finding_id, f.type, f.severity, f.title, f.human_summary, f.path, f.evidence, f.remediation, f.created_at
+		`SELECT f.scan_id, f.finding_id, f.type, f.severity, f.title, f.human_summary, f.path, f.evidence, COALESCE(f.remediation, ''), f.created_at
 		 FROM findings f
 		 JOIN scans s ON s.id = f.scan_id
 		 WHERE s.tenant_id = $1
@@ -360,7 +360,7 @@ func (p *PostgresStore) ListFindingsByScan(ctx context.Context, scanID string, l
 	scope := ScopeFromContext(ctx)
 	rows, err := p.db.QueryContext(
 		ctx,
-		`SELECT f.scan_id, f.finding_id, f.type, f.severity, f.title, f.human_summary, f.path, f.evidence, f.remediation, f.created_at
+		`SELECT f.scan_id, f.finding_id, f.type, f.severity, f.title, f.human_summary, f.path, f.evidence, COALESCE(f.remediation, ''), f.created_at
 		 FROM findings f
 		 JOIN scans s ON s.id = f.scan_id
 		 WHERE f.scan_id = $1
@@ -926,7 +926,7 @@ func (p *PostgresStore) ListRepoFindings(ctx context.Context, filter RepoFinding
 	scope := ScopeFromContext(ctx)
 	rows, err := p.db.QueryContext(
 		ctx,
-		`SELECT rf.repo_scan_id, rf.finding_id, rf.type, rf.severity, rf.title, rf.human_summary, rf.path, rf.evidence, rf.remediation, rf.created_at
+		`SELECT rf.repo_scan_id, rf.finding_id, rf.type, rf.severity, rf.title, rf.human_summary, rf.path, rf.evidence, COALESCE(rf.remediation, ''), rf.created_at
 		 FROM repo_findings rf
 		 JOIN repo_scans rs ON rs.id = rf.repo_scan_id
 		 WHERE ($1 = '' OR rf.repo_scan_id = $1::uuid)
