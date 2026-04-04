@@ -304,9 +304,9 @@ func TestPostgresStoreRepoScanLifecycle(t *testing.T) {
 	store := NewPostgresStoreWithDB(db)
 	now := time.Now().UTC()
 
-	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO repo_scans (id, repository, status, started_at, commits_scanned, files_scanned, finding_count, truncated)
-		 VALUES ($1, $2, $3, $4, 0, 0, 0, false)`)).
-		WithArgs(sqlmock.AnyArg(), "owner/repo", "running", sqlmock.AnyArg()).
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO repo_scans (id, repository, status, started_at, commits_scanned, files_scanned, finding_count, truncated, history_limit, max_findings_limit)
+		 VALUES ($1, $2, $3, $4, 0, 0, 0, false, $5, $6)`)).
+		WithArgs(sqlmock.AnyArg(), "owner/repo", "running", sqlmock.AnyArg(), 0, 0).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	record, err := store.CreateRepoScan(context.Background(), "owner/repo", now)
@@ -381,6 +381,152 @@ func TestPostgresStoreRepoScanLifecycle(t *testing.T) {
 	}
 	if gotRepoScan.ID != record.ID {
 		t.Fatalf("unexpected repo scan: %+v", gotRepoScan)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreScanQueueLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	now := time.Now().UTC()
+
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO scans (id, provider, status, started_at, asset_count, finding_count) VALUES ($1, $2, $3, $4, 0, 0)`)).
+		WithArgs(sqlmock.AnyArg(), "aws", "queued", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	queued, err := store.CreateQueuedScan(context.Background(), "aws", now)
+	if err != nil {
+		t.Fatalf("create queued scan failed: %v", err)
+	}
+	if queued.Status != "queued" {
+		t.Fatalf("expected queued status, got %q", queued.Status)
+	}
+
+	countRows := sqlmock.NewRows([]string{"count"}).AddRow(1)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM scans WHERE provider = $1 AND status = 'queued'`)).
+		WithArgs("aws").
+		WillReturnRows(countRows)
+
+	count, err := store.CountQueuedScans(context.Background(), "aws")
+	if err != nil {
+		t.Fatalf("count queued scans failed: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected queued count 1, got %d", count)
+	}
+
+	claimRows := sqlmock.NewRows([]string{"id", "provider", "status", "started_at", "finished_at", "asset_count", "finding_count", "coalesce"}).
+		AddRow(queued.ID, "aws", "running", now, nil, 0, 0, "")
+	mock.ExpectQuery("WITH next_scan AS").WithArgs("aws").WillReturnRows(claimRows)
+
+	claimed, err := store.ClaimNextQueuedScan(context.Background(), "aws")
+	if err != nil {
+		t.Fatalf("claim queued scan failed: %v", err)
+	}
+	if claimed.Status != "running" {
+		t.Fatalf("expected running status after claim, got %q", claimed.Status)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreRepoQueueLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	now := time.Now().UTC()
+
+	mock.ExpectExec(regexp.QuoteMeta(`INSERT INTO repo_scans (id, repository, status, started_at, commits_scanned, files_scanned, finding_count, truncated, history_limit, max_findings_limit)
+		 VALUES ($1, $2, $3, $4, 0, 0, 0, false, $5, $6)`)).
+		WithArgs(sqlmock.AnyArg(), "owner/repo", "queued", sqlmock.AnyArg(), 50, 80).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	queued, err := store.CreateQueuedRepoScan(context.Background(), "owner/repo", 50, 80, now)
+	if err != nil {
+		t.Fatalf("create queued repo scan failed: %v", err)
+	}
+	if queued.Status != "queued" {
+		t.Fatalf("expected queued status, got %q", queued.Status)
+	}
+	if queued.HistoryLimit != 50 || queued.MaxFindings != 80 {
+		t.Fatalf("expected queued limits retained, got %+v", queued)
+	}
+
+	queuedCountRows := sqlmock.NewRows([]string{"count"}).AddRow(1)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM repo_scans WHERE status = 'queued'`)).
+		WillReturnRows(queuedCountRows)
+
+	queuedCount, err := store.CountQueuedRepoScans(context.Background())
+	if err != nil {
+		t.Fatalf("count queued repo scans failed: %v", err)
+	}
+	if queuedCount != 1 {
+		t.Fatalf("expected queued count 1, got %d", queuedCount)
+	}
+
+	pendingRows := sqlmock.NewRows([]string{"count"}).AddRow(1)
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\)").
+		WithArgs("owner/repo").
+		WillReturnRows(pendingRows)
+
+	pendingCount, err := store.CountPendingRepoScansByRepository(context.Background(), "owner/repo")
+	if err != nil {
+		t.Fatalf("count pending repo scans failed: %v", err)
+	}
+	if pendingCount != 1 {
+		t.Fatalf("expected pending count 1, got %d", pendingCount)
+	}
+
+	claimRows := sqlmock.NewRows([]string{
+		"id",
+		"repository",
+		"status",
+		"started_at",
+		"finished_at",
+		"commits_scanned",
+		"files_scanned",
+		"finding_count",
+		"truncated",
+		"coalesce",
+		"history_limit",
+		"max_findings_limit",
+	}).AddRow(queued.ID, "owner/repo", "running", now, nil, 0, 0, 0, false, "", 50, 80)
+	mock.ExpectQuery("WITH next_repo_scan AS").WillReturnRows(claimRows)
+
+	claimed, err := store.ClaimNextQueuedRepoScan(context.Background())
+	if err != nil {
+		t.Fatalf("claim queued repo scan failed: %v", err)
+	}
+	if claimed.Status != "running" {
+		t.Fatalf("expected running status, got %q", claimed.Status)
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta(`UPDATE repo_scans
+		 SET status = 'queued',
+		     started_at = NOW(),
+		     finished_at = NULL,
+		     error_message = NULL
+		 WHERE id = $1
+		   AND status = 'running'`)).
+		WithArgs(claimed.ID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := store.RequeueRepoScan(context.Background(), claimed.ID); err != nil {
+		t.Fatalf("requeue repo scan failed: %v", err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

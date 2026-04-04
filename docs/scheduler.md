@@ -9,7 +9,7 @@ Prevent overlapping scans and support periodic scan runs.
 - `internal/scheduler/lock.go`: keyed in-memory lock
 - `internal/scheduler/postgres_lock.go`: distributed advisory lock backend for multi-instance runs
 - `internal/scheduler/runner.go`: periodic loop executor
-- `cmd/worker`: process that runs scheduled scans
+- `cmd/worker`: process that runs scheduled scans and API queue-drain ticks
 
 ## How safety works
 

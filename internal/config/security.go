@@ -16,6 +16,9 @@ const (
 	maxAuditForwardBackoffLimit = 30
 	maxRepoScanHistoryLimitMax  = 20000
 	maxRepoScanFindingsLimitMax = 5000
+	maxScanQueueMaxPending      = 20000
+	maxRepoQueueMaxPending      = 50000
+	maxWorkerQueueBatchSize     = 500
 	minAPIKeyLength             = 24
 )
 
@@ -216,6 +219,34 @@ func ValidateSecurity(cfg Config) error {
 	}
 	if maxFindings > maxFindingsMax {
 		return fmt.Errorf("IDENTRAIL_REPO_SCAN_MAX_FINDINGS must be <= IDENTRAIL_REPO_SCAN_MAX_FINDINGS_MAX")
+	}
+	scanQueueMaxPending := cfg.ScanQueueMaxPending
+	if scanQueueMaxPending <= 0 {
+		scanQueueMaxPending = defaultScanQueueMaxPending
+	}
+	if scanQueueMaxPending <= 0 || scanQueueMaxPending > maxScanQueueMaxPending {
+		return fmt.Errorf("IDENTRAIL_SCAN_QUEUE_MAX_PENDING must be > 0 and <= %d", maxScanQueueMaxPending)
+	}
+	repoQueueMaxPending := cfg.RepoQueueMaxPending
+	if repoQueueMaxPending <= 0 {
+		repoQueueMaxPending = defaultRepoQueueMaxPending
+	}
+	if repoQueueMaxPending <= 0 || repoQueueMaxPending > maxRepoQueueMaxPending {
+		return fmt.Errorf("IDENTRAIL_REPO_SCAN_QUEUE_MAX_PENDING must be > 0 and <= %d", maxRepoQueueMaxPending)
+	}
+	workerAPIJobQueueInterval := cfg.WorkerAPIJobQueueInterval
+	if workerAPIJobQueueInterval <= 0 {
+		workerAPIJobQueueInterval = defaultWorkerAPIJobQueueInterval
+	}
+	if workerAPIJobQueueInterval <= 0 {
+		return fmt.Errorf("IDENTRAIL_WORKER_API_JOB_QUEUE_INTERVAL must be > 0")
+	}
+	workerAPIJobQueueBatchSize := cfg.WorkerAPIJobQueueBatchSize
+	if workerAPIJobQueueBatchSize <= 0 {
+		workerAPIJobQueueBatchSize = defaultWorkerAPIJobQueueBatchSize
+	}
+	if workerAPIJobQueueBatchSize <= 0 || workerAPIJobQueueBatchSize > maxWorkerQueueBatchSize {
+		return fmt.Errorf("IDENTRAIL_WORKER_API_JOB_QUEUE_BATCH_SIZE must be > 0 and <= %d", maxWorkerQueueBatchSize)
 	}
 	if cfg.RepoScanEnabled && len(cfg.RepoScanAllowlist) == 0 {
 		return fmt.Errorf("IDENTRAIL_REPO_SCAN_ALLOWLIST must include at least one target pattern when IDENTRAIL_REPO_SCAN_ENABLED=true")

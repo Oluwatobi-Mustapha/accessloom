@@ -246,6 +246,36 @@ func TestValidateSecurityRejectsInvalidRepoScanBounds(t *testing.T) {
 	}
 }
 
+func TestValidateSecurityRejectsInvalidScanQueuePendingLimit(t *testing.T) {
+	cfg := Config{
+		APIKeyScopes:        map[string][]string{"reader": {"read"}},
+		ScanQueueMaxPending: maxScanQueueMaxPending + 1,
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected scan queue max pending validation error")
+	}
+}
+
+func TestValidateSecurityRejectsInvalidRepoQueuePendingLimit(t *testing.T) {
+	cfg := Config{
+		APIKeyScopes:        map[string][]string{"reader": {"read"}},
+		RepoQueueMaxPending: maxRepoQueueMaxPending + 1,
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected repo queue max pending validation error")
+	}
+}
+
+func TestValidateSecurityRejectsInvalidWorkerAPIQueueBatchSize(t *testing.T) {
+	cfg := Config{
+		APIKeyScopes:               map[string][]string{"reader": {"read"}},
+		WorkerAPIJobQueueBatchSize: maxWorkerQueueBatchSize + 1,
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected worker api queue batch size validation error")
+	}
+}
+
 func TestValidateSecurityWorkerRepoScanRequiresTargets(t *testing.T) {
 	cfg := Config{
 		APIKeys:                []string{"reader"},

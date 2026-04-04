@@ -295,6 +295,15 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 	if postBody2.Scan.ID == "" {
 		t.Fatal("expected second scan id in post response")
 	}
+	for i := 0; i < 2; i++ {
+		processed, err := svc.ProcessNextQueuedScan(context.Background())
+		if err != nil {
+			t.Fatalf("process queued scan: %v", err)
+		}
+		if !processed {
+			t.Fatalf("expected queued scan %d to be processed", i+1)
+		}
+	}
 
 	findingsReq := httptest.NewRequest(http.MethodGet, "/v1/findings", nil)
 	findingsW := httptest.NewRecorder()
@@ -425,6 +434,13 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 	r.ServeHTTP(repoW, repoReq)
 	if repoW.Code != http.StatusAccepted {
 		t.Fatalf("expected repo scan 202, got %d", repoW.Code)
+	}
+	processedRepo, processRepoErr := svc.ProcessNextQueuedRepoScan(context.Background())
+	if processRepoErr != nil {
+		t.Fatalf("process queued repo scan: %v", processRepoErr)
+	}
+	if !processedRepo {
+		t.Fatal("expected queued repo scan to be processed")
 	}
 
 	repoScansReq := httptest.NewRequest(http.MethodGet, "/v1/repo-scans", nil)
@@ -565,7 +581,7 @@ func TestRouterUnavailableWhenServiceMissing(t *testing.T) {
 	}
 }
 
-func TestRouterScanConflictWhenLocked(t *testing.T) {
+func TestRouterScanEnqueueSucceedsWhenExecutionLockIsHeld(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	metrics := telemetry.NewMetrics()
 	store := db.NewMemoryStore()
@@ -584,12 +600,12 @@ func TestRouterScanConflictWhenLocked(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected status 409, got %d", w.Code)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", w.Code)
 	}
 }
 
-func TestRouterRepoScanConflictWhenLocked(t *testing.T) {
+func TestRouterRepoScanEnqueueSucceedsWhenExecutionLockIsHeld(t *testing.T) {
 	logger, _ := zap.NewDevelopment()
 	metrics := telemetry.NewMetrics()
 	store := db.NewMemoryStore()
@@ -609,8 +625,65 @@ func TestRouterRepoScanConflictWhenLocked(t *testing.T) {
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected status 409, got %d", w.Code)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected status 202, got %d", w.Code)
+	}
+}
+
+func TestRouterScanQueueBackpressure(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	metrics := telemetry.NewMetrics()
+	store := db.NewMemoryStore()
+	svc := NewService(store, routerScanner{}, "aws")
+	svc.ScanQueueMaxPending = 1
+	r := NewRouter(logger, metrics, svc, RouterOptions{})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	firstW := httptest.NewRecorder()
+	r.ServeHTTP(firstW, firstReq)
+	if firstW.Code != http.StatusAccepted {
+		t.Fatalf("expected first enqueue 202, got %d", firstW.Code)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	secondW := httptest.NewRecorder()
+	r.ServeHTTP(secondW, secondReq)
+	if secondW.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected queue backpressure 429, got %d", secondW.Code)
+	}
+}
+
+func TestRouterRepoScanQueueBackpressureAndDuplicateGuard(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	metrics := telemetry.NewMetrics()
+	store := db.NewMemoryStore()
+	svc := NewService(store, routerScanner{}, "aws")
+	svc.RepoScanAllowedTargets = []string{"owner/*"}
+	svc.RepoQueueMaxPending = 1
+	r := NewRouter(logger, metrics, svc, RouterOptions{})
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/repo-scans", bytes.NewBufferString(`{"repository":"owner/repo"}`))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstW := httptest.NewRecorder()
+	r.ServeHTTP(firstW, firstReq)
+	if firstW.Code != http.StatusAccepted {
+		t.Fatalf("expected first repo enqueue 202, got %d", firstW.Code)
+	}
+
+	dupReq := httptest.NewRequest(http.MethodPost, "/v1/repo-scans", bytes.NewBufferString(`{"repository":"owner/repo"}`))
+	dupReq.Header.Set("Content-Type", "application/json")
+	dupW := httptest.NewRecorder()
+	r.ServeHTTP(dupW, dupReq)
+	if dupW.Code != http.StatusConflict {
+		t.Fatalf("expected duplicate target conflict 409, got %d", dupW.Code)
+	}
+
+	otherReq := httptest.NewRequest(http.MethodPost, "/v1/repo-scans", bytes.NewBufferString(`{"repository":"owner/another"}`))
+	otherReq.Header.Set("Content-Type", "application/json")
+	otherW := httptest.NewRecorder()
+	r.ServeHTTP(otherW, otherReq)
+	if otherW.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected repo queue backpressure 429, got %d", otherW.Code)
 	}
 }
 

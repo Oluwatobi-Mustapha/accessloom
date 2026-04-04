@@ -43,6 +43,8 @@ func TestBuildScanServiceRepoScanSettings(t *testing.T) {
 		RepoScanHistoryLimitMax: 2500,
 		RepoScanMaxFindingsMax:  900,
 		RepoScanAllowlist:       []string{"trusted/*"},
+		ScanQueueMaxPending:     30,
+		RepoQueueMaxPending:     140,
 	}
 	svc, closeFn, err := BuildScanService(cfg)
 	if err != nil {
@@ -58,6 +60,9 @@ func TestBuildScanServiceRepoScanSettings(t *testing.T) {
 	}
 	if len(svc.RepoScanAllowedTargets) != 1 || svc.RepoScanAllowedTargets[0] != "trusted/*" {
 		t.Fatalf("unexpected repo scan allowlist %+v", svc.RepoScanAllowedTargets)
+	}
+	if svc.ScanQueueMaxPending != 30 || svc.RepoQueueMaxPending != 140 {
+		t.Fatalf("unexpected queue pending limits scan=%d repo=%d", svc.ScanQueueMaxPending, svc.RepoQueueMaxPending)
 	}
 }
 

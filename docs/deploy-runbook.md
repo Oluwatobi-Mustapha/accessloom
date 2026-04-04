@@ -43,6 +43,12 @@ Portable deployment profiles:
   - `IDENTRAIL_WORKER_REPO_SCAN_ENABLED=true`
   - `IDENTRAIL_WORKER_REPO_SCAN_TARGETS` has intended repositories
   - targets are covered by `IDENTRAIL_REPO_SCAN_ALLOWLIST` when allowlist is set
+- Confirm API queue controls:
+  - `IDENTRAIL_SCAN_QUEUE_MAX_PENDING`
+  - `IDENTRAIL_REPO_SCAN_QUEUE_MAX_PENDING`
+  - `IDENTRAIL_WORKER_API_JOB_QUEUE_ENABLED=true`
+  - `IDENTRAIL_WORKER_API_JOB_QUEUE_INTERVAL`
+  - `IDENTRAIL_WORKER_API_JOB_QUEUE_BATCH_SIZE`
 
 ## 2) Deploy Sequence
 
@@ -53,11 +59,12 @@ Portable deployment profiles:
 5. Deploy worker with same DB + provider config.
 6. Trigger one scan (`POST /v1/scans`) with write-authorized key.
 7. Verify:
-   - findings list (`GET /v1/findings`)
-   - findings summary (`GET /v1/findings/summary`)
-   - findings trends (`GET /v1/findings/trends`)
-   - scan diff (`GET /v1/scans/:scan_id/diff`)
-   - scan events (`GET /v1/scans/:scan_id/events`)
+  - scan is accepted as queued (`202`) then completed by worker
+  - findings list (`GET /v1/findings`)
+  - findings summary (`GET /v1/findings/summary`)
+  - findings trends (`GET /v1/findings/trends`)
+  - scan diff (`GET /v1/scans/:scan_id/diff`)
+  - scan events (`GET /v1/scans/:scan_id/events`)
 8. If repo scan is enabled:
    - trigger `POST /v1/repo-scans`
    - verify `GET /v1/repo-scans`

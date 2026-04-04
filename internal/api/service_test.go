@@ -873,6 +873,268 @@ func TestServiceRunRepoScanPersistedScannerError(t *testing.T) {
 	}
 }
 
+func TestServiceEnqueueScanAndProcessQueue(t *testing.T) {
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 20, 8, 0, 0, 0, time.UTC)
+	svc := NewService(store, fakeScanner{result: app.ScanResult{
+		Assets:   2,
+		Findings: []domain.Finding{{ID: "f-1", Type: domain.FindingOwnerless, Severity: domain.SeverityHigh, CreatedAt: now}},
+	}}, "aws")
+	svc.Now = func() time.Time { return now }
+
+	record, err := svc.EnqueueScan(context.Background())
+	if err != nil {
+		t.Fatalf("enqueue scan: %v", err)
+	}
+	if record.Status != "queued" {
+		t.Fatalf("expected queued status, got %q", record.Status)
+	}
+	processed, err := svc.ProcessNextQueuedScan(context.Background())
+	if err != nil {
+		t.Fatalf("process queued scan: %v", err)
+	}
+	if !processed {
+		t.Fatal("expected one queued scan to be processed")
+	}
+	scan, err := store.GetScan(context.Background(), record.ID)
+	if err != nil {
+		t.Fatalf("get scan: %v", err)
+	}
+	if scan.Status != "completed" || scan.FindingCount != 1 {
+		t.Fatalf("unexpected processed scan record: %+v", scan)
+	}
+	processed, err = svc.ProcessNextQueuedScan(context.Background())
+	if err != nil {
+		t.Fatalf("process queued scan again: %v", err)
+	}
+	if processed {
+		t.Fatal("expected no more queued scans")
+	}
+}
+
+func TestServiceEnqueueScanQueueFull(t *testing.T) {
+	svc := NewService(db.NewMemoryStore(), fakeScanner{}, "aws")
+	svc.ScanQueueMaxPending = 1
+	if _, err := svc.EnqueueScan(context.Background()); err != nil {
+		t.Fatalf("enqueue first scan: %v", err)
+	}
+	if _, err := svc.EnqueueScan(context.Background()); !errors.Is(err, ErrScanQueueFull) {
+		t.Fatalf("expected scan queue full error, got %v", err)
+	}
+}
+
+func TestServiceQueuedScanBurstProcessing(t *testing.T) {
+	store := db.NewMemoryStore()
+	now := time.Date(2026, 3, 20, 8, 15, 0, 0, time.UTC)
+	svc := NewService(store, fakeScanner{result: app.ScanResult{
+		Assets:   1,
+		Findings: []domain.Finding{{ID: "f-burst", Type: domain.FindingOwnerless, Severity: domain.SeverityLow, CreatedAt: now}},
+	}}, "aws")
+	svc.Now = func() time.Time { return now }
+	svc.ScanQueueMaxPending = 100
+
+	const queued = 40
+	for i := 0; i < queued; i++ {
+		if _, err := svc.EnqueueScan(context.Background()); err != nil {
+			t.Fatalf("enqueue burst scan %d: %v", i, err)
+		}
+	}
+	processedCount := 0
+	for {
+		processed, err := svc.ProcessNextQueuedScan(context.Background())
+		if err != nil {
+			t.Fatalf("process burst queue: %v", err)
+		}
+		if !processed {
+			break
+		}
+		processedCount++
+	}
+	if processedCount != queued {
+		t.Fatalf("expected %d processed scans, got %d", queued, processedCount)
+	}
+	scans, err := store.ListScans(context.Background(), 1000)
+	if err != nil {
+		t.Fatalf("list scans: %v", err)
+	}
+	if len(scans) != queued {
+		t.Fatalf("expected %d persisted scans, got %d", queued, len(scans))
+	}
+	for _, scan := range scans {
+		if scan.Status != "completed" {
+			t.Fatalf("expected completed scan status, got %q", scan.Status)
+		}
+	}
+}
+
+func TestServiceEnqueueRepoScanAndProcessQueue(t *testing.T) {
+	store := db.NewMemoryStore()
+	svc := NewService(store, fakeScanner{}, "aws")
+	svc.RepoScanAllowedTargets = []string{"owner/*"}
+	svc.RepoQueueMaxPending = 2
+	svc.RepoScannerFactory = func(historyLimit int, maxFindings int) RepoScanExecutor {
+		return &fakeRepoExecutor{
+			result: repoexposure.ScanResult{
+				Repository:     "owner/repo",
+				CommitsScanned: historyLimit,
+				FilesScanned:   6,
+				Findings: []domain.Finding{
+					{ID: "rf-queued", Type: domain.FindingSecretExposure, Severity: domain.SeverityHigh, CreatedAt: time.Now().UTC()},
+				},
+				Truncated: false,
+			},
+		}
+	}
+	record, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{
+		Repository:   "owner/repo",
+		HistoryLimit: 25,
+		MaxFindings:  30,
+	})
+	if err != nil {
+		t.Fatalf("enqueue repo scan: %v", err)
+	}
+	if record.Status != "queued" {
+		t.Fatalf("expected queued repo scan status, got %q", record.Status)
+	}
+	processed, err := svc.ProcessNextQueuedRepoScan(context.Background())
+	if err != nil {
+		t.Fatalf("process queued repo scan: %v", err)
+	}
+	if !processed {
+		t.Fatal("expected queued repo scan to be processed")
+	}
+	stored, err := svc.GetRepoScan(context.Background(), record.ID)
+	if err != nil {
+		t.Fatalf("get repo scan: %v", err)
+	}
+	if stored.Status != "completed" || stored.CommitsScanned != 25 {
+		t.Fatalf("unexpected processed repo scan record: %+v", stored)
+	}
+}
+
+func TestServiceEnqueueRepoScanGuards(t *testing.T) {
+	svc := NewService(db.NewMemoryStore(), fakeScanner{}, "aws")
+	svc.RepoScanAllowedTargets = []string{"owner/*"}
+	svc.RepoQueueMaxPending = 1
+
+	if _, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo"}); err != nil {
+		t.Fatalf("enqueue first repo scan: %v", err)
+	}
+	if _, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo"}); !errors.Is(err, ErrRepoScanInProgress) {
+		t.Fatalf("expected repo in-progress error for duplicate target, got %v", err)
+	}
+	if _, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/another"}); !errors.Is(err, ErrRepoScanQueueFull) {
+		t.Fatalf("expected repo queue full error, got %v", err)
+	}
+}
+
+func TestServiceProcessQueuedRepoScanRequeuesWhenExecutionLockHeld(t *testing.T) {
+	store := db.NewMemoryStore()
+	svc := NewService(store, fakeScanner{}, "aws")
+	svc.RepoScanAllowedTargets = []string{"owner/*"}
+	queuedAt := time.Date(2026, 3, 24, 10, 0, 0, 0, time.UTC)
+	svc.Now = func() time.Time { return queuedAt }
+
+	record, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo"})
+	if err != nil {
+		t.Fatalf("enqueue repo scan: %v", err)
+	}
+	locker := scheduler.NewInMemoryLocker()
+	release, ok := locker.TryAcquire("identrail:repo-scan:owner/repo")
+	if !ok {
+		t.Fatal("expected lock acquire")
+	}
+	defer release()
+	svc.Locker = locker
+
+	processed, err := svc.ProcessNextQueuedRepoScan(context.Background())
+	if err != nil {
+		t.Fatalf("process queued repo scan: %v", err)
+	}
+	if !processed {
+		t.Fatal("expected requeue handling to count as queue progress")
+	}
+	stored, err := svc.GetRepoScan(context.Background(), record.ID)
+	if err != nil {
+		t.Fatalf("get repo scan: %v", err)
+	}
+	if stored.Status != "queued" {
+		t.Fatalf("expected repo scan to be requeued, got status %q", stored.Status)
+	}
+	if !stored.StartedAt.After(queuedAt) {
+		t.Fatalf("expected requeued repo scan to move to the back of the queue")
+	}
+}
+
+func TestServiceProcessQueuedRepoScanContinuesToNextTargetAfterRequeue(t *testing.T) {
+	store := db.NewMemoryStore()
+	svc := NewService(store, fakeScanner{}, "aws")
+	svc.RepoScanAllowedTargets = []string{"owner/*"}
+	now := time.Date(2026, 3, 24, 11, 0, 0, 0, time.UTC)
+	svc.Now = func() time.Time { return now }
+	svc.RepoScannerFactory = func(historyLimit int, maxFindings int) RepoScanExecutor {
+		return &fakeRepoExecutor{
+			result: repoexposure.ScanResult{
+				Repository:     "owner/repo-b",
+				CommitsScanned: historyLimit,
+				FilesScanned:   2,
+				Findings: []domain.Finding{
+					{ID: "rf-next", Type: domain.FindingSecretExposure, Severity: domain.SeverityHigh, CreatedAt: now},
+				},
+			},
+		}
+	}
+
+	repoA, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo-a"})
+	if err != nil {
+		t.Fatalf("enqueue repo-a scan: %v", err)
+	}
+	repoB, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo-b"})
+	if err != nil {
+		t.Fatalf("enqueue repo-b scan: %v", err)
+	}
+
+	locker := scheduler.NewInMemoryLocker()
+	release, ok := locker.TryAcquire("identrail:repo-scan:owner/repo-a")
+	if !ok {
+		t.Fatal("expected lock acquire")
+	}
+	defer release()
+	svc.Locker = locker
+
+	processed, err := svc.ProcessNextQueuedRepoScan(context.Background())
+	if err != nil {
+		t.Fatalf("first queue process failed: %v", err)
+	}
+	if !processed {
+		t.Fatal("expected first queue pass to requeue locked target")
+	}
+
+	processed, err = svc.ProcessNextQueuedRepoScan(context.Background())
+	if err != nil {
+		t.Fatalf("second queue process failed: %v", err)
+	}
+	if !processed {
+		t.Fatal("expected second queue pass to process next target")
+	}
+
+	repoARecord, err := svc.GetRepoScan(context.Background(), repoA.ID)
+	if err != nil {
+		t.Fatalf("get repo-a scan: %v", err)
+	}
+	if repoARecord.Status != "queued" {
+		t.Fatalf("expected repo-a to remain queued while lock is held, got %q", repoARecord.Status)
+	}
+
+	repoBRecord, err := svc.GetRepoScan(context.Background(), repoB.ID)
+	if err != nil {
+		t.Fatalf("get repo-b scan: %v", err)
+	}
+	if repoBRecord.Status != "completed" {
+		t.Fatalf("expected repo-b to complete, got %q", repoBRecord.Status)
+	}
+}
+
 func TestRepoTargetAllowed(t *testing.T) {
 	if repoTargetAllowed("owner/repo", nil) {
 		t.Fatal("expected empty allowlist to deny target")

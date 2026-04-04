@@ -22,6 +22,8 @@ const (
 	defaultRepoScanMaxFindings  = 200
 	defaultRepoScanHistoryMax   = 5000
 	defaultRepoScanFindingsMax  = 1000
+	defaultScanQueueMaxPending  = 25
+	defaultRepoQueueMaxPending  = 100
 	maxSourceErrorsInEvent      = 25
 )
 
@@ -63,6 +65,8 @@ type Service struct {
 	RepoScanMaxHistoryLimit     int
 	RepoScanMaxFindingsLimit    int
 	RepoScanAllowedTargets      []string
+	ScanQueueMaxPending         int
+	RepoQueueMaxPending         int
 	RepoScannerFactory          RepoScannerFactory
 }
 
@@ -135,6 +139,9 @@ type OwnershipFilter struct {
 // ErrScanInProgress is returned when a scan for the same provider is already running.
 var ErrScanInProgress = errors.New("scan already in progress")
 
+// ErrScanQueueFull is returned when queued scan requests exceed configured capacity.
+var ErrScanQueueFull = errors.New("scan queue is full")
+
 // ErrInvalidScanDiffBaseline is returned when previous_scan_id is incompatible.
 var ErrInvalidScanDiffBaseline = errors.New("invalid scan diff baseline")
 
@@ -149,6 +156,9 @@ var ErrInvalidRepoScanRequest = errors.New("invalid repo scan request")
 
 // ErrRepoScanInProgress is returned when the same repository scan target is already running.
 var ErrRepoScanInProgress = errors.New("repo scan already in progress")
+
+// ErrRepoScanQueueFull is returned when queued repo scan requests exceed configured capacity.
+var ErrRepoScanQueueFull = errors.New("repo scan queue is full")
 
 // NewService creates an API service with defaults.
 func NewService(store db.Store, scanner ScannerRunner, provider string) *Service {
@@ -165,6 +175,8 @@ func NewService(store db.Store, scanner ScannerRunner, provider string) *Service
 		RepoScanDefaultMaxFindings:  defaultRepoScanMaxFindings,
 		RepoScanMaxHistoryLimit:     defaultRepoScanHistoryMax,
 		RepoScanMaxFindingsLimit:    defaultRepoScanFindingsMax,
+		ScanQueueMaxPending:         defaultScanQueueMaxPending,
+		RepoQueueMaxPending:         defaultRepoQueueMaxPending,
 		RepoScannerFactory: func(historyLimit int, maxFindings int) RepoScanExecutor {
 			return repoexposure.NewScanner(
 				nil,
@@ -173,6 +185,57 @@ func NewService(store db.Store, scanner ScannerRunner, provider string) *Service
 			)
 		},
 	}
+}
+
+// EnqueueScan stores one queued scan request for asynchronous worker execution.
+func (s *Service) EnqueueScan(ctx context.Context) (db.ScanRecord, error) {
+	maxPending := s.ScanQueueMaxPending
+	if maxPending <= 0 {
+		maxPending = defaultScanQueueMaxPending
+	}
+	queuedCount, err := s.Store.CountQueuedScans(ctx, s.Provider)
+	if err != nil {
+		return db.ScanRecord{}, fmt.Errorf("count queued scans: %w", err)
+	}
+	if queuedCount >= maxPending {
+		return db.ScanRecord{}, ErrScanQueueFull
+	}
+	record, err := s.Store.CreateQueuedScan(ctx, s.Provider, s.Now().UTC())
+	if err != nil {
+		return db.ScanRecord{}, fmt.Errorf("enqueue scan: %w", err)
+	}
+	s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleQueued, map[string]any{"provider": s.Provider})
+	s.appendScanEvent(ctx, record.ID, db.ScanEventLevelInfo, "scan queued for worker execution", map[string]any{
+		"provider":    s.Provider,
+		"queue_depth": queuedCount + 1,
+		"queue_limit": maxPending,
+	})
+	return record, nil
+}
+
+// ProcessNextQueuedScan claims and executes one queued scan. It returns false when no job is available.
+func (s *Service) ProcessNextQueuedScan(ctx context.Context) (bool, error) {
+	if s.Locker != nil {
+		release, ok := s.Locker.TryAcquire(s.lockKey("scan:" + s.Provider))
+		if !ok {
+			return false, nil
+		}
+		defer release()
+	}
+	record, err := s.Store.ClaimNextQueuedScan(ctx, s.Provider)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("claim queued scan: %w", err)
+	}
+	s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleRunning, map[string]any{"provider": record.Provider})
+	s.appendScanEvent(ctx, record.ID, db.ScanEventLevelInfo, "queued scan started", map[string]any{"provider": record.Provider})
+	_, runErr := s.runScanWithRecord(ctx, record)
+	if runErr != nil {
+		return true, runErr
+	}
+	return true, nil
 }
 
 // RunScan executes one scan and persists metadata + findings.
@@ -184,16 +247,17 @@ func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
 		}
 		defer release()
 	}
-
-	started := s.Now().UTC()
-	record, err := s.Store.CreateScan(ctx, s.Provider, started)
+	record, err := s.Store.CreateScan(ctx, s.Provider, s.Now().UTC())
 	if err != nil {
 		return RunScanResult{}, err
 	}
 	s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleQueued, map[string]any{"provider": s.Provider})
 	s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleRunning, map[string]any{"provider": s.Provider})
 	s.appendScanEvent(ctx, record.ID, db.ScanEventLevelInfo, "scan started", map[string]any{"provider": s.Provider})
+	return s.runScanWithRecord(ctx, record)
+}
 
+func (s *Service) runScanWithRecord(ctx context.Context, record db.ScanRecord) (RunScanResult, error) {
 	result, err := s.Scanner.Run(ctx)
 	if err != nil {
 		s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleFailed, map[string]any{"error": err.Error()})
@@ -248,8 +312,12 @@ func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
 		"partial_source_run": len(result.SourceErrors) > 0,
 	})
 	s.appendScanEvent(ctx, record.ID, db.ScanEventLevelInfo, "scan completed", map[string]any{"assets": result.Assets, "findings": len(result.Findings)})
+	provider := strings.TrimSpace(record.Provider)
+	if provider == "" {
+		provider = s.Provider
+	}
 	if s.Alerter != nil {
-		if alertErr := s.Alerter.NotifyScan(ctx, s.Provider, record, result.Findings); alertErr != nil && s.OnAlertError != nil {
+		if alertErr := s.Alerter.NotifyScan(ctx, provider, record, result.Findings); alertErr != nil && s.OnAlertError != nil {
 			s.OnAlertError(alertErr)
 		}
 	}
@@ -276,20 +344,75 @@ func (s *Service) RunRepoScan(ctx context.Context, request RepoScanRequest) (rep
 	return runResult.Result, nil
 }
 
+// EnqueueRepoScan stores one queued repository scan request for asynchronous worker execution.
+func (s *Service) EnqueueRepoScan(ctx context.Context, request RepoScanRequest) (db.RepoScanRecord, error) {
+	target, historyLimit, maxFindings, err := s.validateRepoScanRequest(request)
+	if err != nil {
+		return db.RepoScanRecord{}, err
+	}
+	pendingForTarget, err := s.Store.CountPendingRepoScansByRepository(ctx, target)
+	if err != nil {
+		return db.RepoScanRecord{}, fmt.Errorf("count pending repo scans for target: %w", err)
+	}
+	if pendingForTarget > 0 {
+		return db.RepoScanRecord{}, ErrRepoScanInProgress
+	}
+	maxPending := s.RepoQueueMaxPending
+	if maxPending <= 0 {
+		maxPending = defaultRepoQueueMaxPending
+	}
+	queuedCount, err := s.Store.CountQueuedRepoScans(ctx)
+	if err != nil {
+		return db.RepoScanRecord{}, fmt.Errorf("count queued repo scans: %w", err)
+	}
+	if queuedCount >= maxPending {
+		return db.RepoScanRecord{}, ErrRepoScanQueueFull
+	}
+	record, err := s.Store.CreateQueuedRepoScan(ctx, target, historyLimit, maxFindings, s.Now().UTC())
+	if err != nil {
+		return db.RepoScanRecord{}, fmt.Errorf("enqueue repo scan: %w", err)
+	}
+	return record, nil
+}
+
+// ProcessNextQueuedRepoScan claims and executes one queued repository scan. It returns false when no job is available.
+func (s *Service) ProcessNextQueuedRepoScan(ctx context.Context) (bool, error) {
+	record, err := s.Store.ClaimNextQueuedRepoScan(ctx)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return false, nil
+		}
+		return false, fmt.Errorf("claim queued repo scan: %w", err)
+	}
+	requeue := false
+	if s.Locker != nil {
+		release, ok := s.Locker.TryAcquire(s.lockKey("repo-scan:" + strings.ToLower(record.Repository)))
+		if !ok {
+			requeue = true
+		} else {
+			defer release()
+		}
+	}
+	if requeue {
+		if requeueErr := s.Store.RequeueRepoScan(ctx, record.ID); requeueErr != nil && !errors.Is(requeueErr, db.ErrNotFound) {
+			return false, fmt.Errorf("requeue repo scan: %w", requeueErr)
+		}
+		// A queued item was handled (requeued) even if this target is currently locked.
+		// Returning true lets the worker keep draining other queued targets in the same tick.
+		return true, nil
+	}
+	_, runErr := s.runRepoScanWithRecord(ctx, record, record.HistoryLimit, record.MaxFindings)
+	if runErr != nil {
+		return true, runErr
+	}
+	return true, nil
+}
+
 // RunRepoScanPersisted runs one repository scan and persists repo scan metadata + findings.
 func (s *Service) RunRepoScanPersisted(ctx context.Context, request RepoScanRequest) (RunRepoScanResult, error) {
-	if !s.RepoScanEnabled {
-		return RunRepoScanResult{}, ErrRepoScanDisabled
-	}
-	target := strings.TrimSpace(request.Repository)
-	if target == "" {
-		return RunRepoScanResult{}, ErrInvalidRepoScanRequest
-	}
-	if repoexposure.IsLocalRepositoryTarget(target) {
-		return RunRepoScanResult{}, ErrRepoTargetNotAllowed
-	}
-	if !repoTargetAllowed(target, s.RepoScanAllowedTargets) {
-		return RunRepoScanResult{}, ErrRepoTargetNotAllowed
+	target, historyLimit, maxFindings, err := s.validateRepoScanRequest(request)
+	if err != nil {
+		return RunRepoScanResult{}, err
 	}
 	if s.Locker != nil {
 		release, ok := s.Locker.TryAcquire(s.lockKey("repo-scan:" + strings.ToLower(target)))
@@ -298,24 +421,57 @@ func (s *Service) RunRepoScanPersisted(ctx context.Context, request RepoScanRequ
 		}
 		defer release()
 	}
+	record, err := s.Store.CreateRepoScan(ctx, target, s.Now().UTC())
+	if err != nil {
+		return RunRepoScanResult{}, fmt.Errorf("create repo scan: %w", err)
+	}
+	return s.runRepoScanWithRecord(ctx, record, historyLimit, maxFindings)
+}
+
+func (s *Service) validateRepoScanRequest(request RepoScanRequest) (string, int, int, error) {
+	if !s.RepoScanEnabled {
+		return "", 0, 0, ErrRepoScanDisabled
+	}
+	target := strings.TrimSpace(request.Repository)
+	if target == "" {
+		return "", 0, 0, ErrInvalidRepoScanRequest
+	}
+	if repoexposure.IsLocalRepositoryTarget(target) {
+		return "", 0, 0, ErrRepoTargetNotAllowed
+	}
+	if !repoTargetAllowed(target, s.RepoScanAllowedTargets) {
+		return "", 0, 0, ErrRepoTargetNotAllowed
+	}
 	historyLimit, err := sanitizeRepoScanLimit(request.HistoryLimit, s.RepoScanDefaultHistoryLimit, s.RepoScanMaxHistoryLimit)
 	if err != nil {
-		return RunRepoScanResult{}, ErrInvalidRepoScanRequest
+		return "", 0, 0, ErrInvalidRepoScanRequest
 	}
 	maxFindings, err := sanitizeRepoScanLimit(request.MaxFindings, s.RepoScanDefaultMaxFindings, s.RepoScanMaxFindingsLimit)
 	if err != nil {
+		return "", 0, 0, ErrInvalidRepoScanRequest
+	}
+	return target, historyLimit, maxFindings, nil
+}
+
+func (s *Service) runRepoScanWithRecord(ctx context.Context, record db.RepoScanRecord, historyLimit int, maxFindings int) (RunRepoScanResult, error) {
+	target := strings.TrimSpace(record.Repository)
+	if target == "" {
+		return RunRepoScanResult{}, ErrInvalidRepoScanRequest
+	}
+	normalizedHistory, err := sanitizeRepoScanLimit(historyLimit, s.RepoScanDefaultHistoryLimit, s.RepoScanMaxHistoryLimit)
+	if err != nil {
+		_ = s.Store.CompleteRepoScan(ctx, record.ID, "failed", s.Now().UTC(), 0, 0, 0, false, ErrInvalidRepoScanRequest.Error())
+		return RunRepoScanResult{}, ErrInvalidRepoScanRequest
+	}
+	normalizedMaxFindings, err := sanitizeRepoScanLimit(maxFindings, s.RepoScanDefaultMaxFindings, s.RepoScanMaxFindingsLimit)
+	if err != nil {
+		_ = s.Store.CompleteRepoScan(ctx, record.ID, "failed", s.Now().UTC(), 0, 0, 0, false, ErrInvalidRepoScanRequest.Error())
 		return RunRepoScanResult{}, ErrInvalidRepoScanRequest
 	}
 	if s.RepoScannerFactory == nil {
 		return RunRepoScanResult{}, fmt.Errorf("repo scanner factory is not configured")
 	}
-
-	started := s.Now().UTC()
-	record, err := s.Store.CreateRepoScan(ctx, target, started)
-	if err != nil {
-		return RunRepoScanResult{}, fmt.Errorf("create repo scan: %w", err)
-	}
-	result, err := s.RepoScannerFactory(historyLimit, maxFindings).ScanRepository(ctx, target)
+	result, err := s.RepoScannerFactory(normalizedHistory, normalizedMaxFindings).ScanRepository(ctx, target)
 	if err != nil {
 		_ = s.Store.CompleteRepoScan(ctx, record.ID, "failed", s.Now().UTC(), 0, 0, 0, false, err.Error())
 		return RunRepoScanResult{}, err
@@ -345,6 +501,8 @@ func (s *Service) RunRepoScanPersisted(ctx context.Context, request RepoScanRequ
 	record.FilesScanned = result.FilesScanned
 	record.FindingCount = len(result.Findings)
 	record.Truncated = result.Truncated
+	record.HistoryLimit = normalizedHistory
+	record.MaxFindings = normalizedMaxFindings
 	return RunRepoScanResult{RepoScan: record, Result: result}, nil
 }
 

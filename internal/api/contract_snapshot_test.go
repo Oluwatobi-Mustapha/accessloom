@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,13 @@ func TestAPIV1ContractSnapshots(t *testing.T) {
 	postBody := decodeJSONMap(t, postW.Body.Bytes())
 	scanID := normalizeScanTriggerResponse(postBody)
 	assertContractSnapshot(t, "api_v1_scan_trigger_response", postBody)
+	processed, processErr := svc.ProcessNextQueuedScan(context.Background())
+	if processErr != nil {
+		t.Fatalf("process queued scan: %v", processErr)
+	}
+	if !processed {
+		t.Fatal("expected queued scan to be processed")
+	}
 
 	findingsReq := httptest.NewRequest(http.MethodGet, "/v1/findings?limit=5", nil)
 	findingsW := httptest.NewRecorder()

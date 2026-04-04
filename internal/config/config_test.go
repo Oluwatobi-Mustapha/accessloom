@@ -50,12 +50,17 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_REPO_SCAN_HISTORY_LIMIT_MAX", "")
 	t.Setenv("IDENTRAIL_REPO_SCAN_MAX_FINDINGS_MAX", "")
 	t.Setenv("IDENTRAIL_REPO_SCAN_ALLOWLIST", "")
+	t.Setenv("IDENTRAIL_SCAN_QUEUE_MAX_PENDING", "")
+	t.Setenv("IDENTRAIL_REPO_SCAN_QUEUE_MAX_PENDING", "")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_ENABLED", "")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_RUN_NOW", "")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_INTERVAL", "")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_TARGETS", "")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_HISTORY_LIMIT", "")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_MAX_FINDINGS", "")
+	t.Setenv("IDENTRAIL_WORKER_API_JOB_QUEUE_ENABLED", "")
+	t.Setenv("IDENTRAIL_WORKER_API_JOB_QUEUE_INTERVAL", "")
+	t.Setenv("IDENTRAIL_WORKER_API_JOB_QUEUE_BATCH_SIZE", "")
 	t.Setenv("IDENTRAIL_LOCK_BACKEND", "")
 	t.Setenv("IDENTRAIL_LOCK_NAMESPACE", "")
 
@@ -186,6 +191,12 @@ func TestLoadDefaults(t *testing.T) {
 	if len(cfg.RepoScanAllowlist) != 0 {
 		t.Fatalf("expected empty repo scan allowlist by default, got %+v", cfg.RepoScanAllowlist)
 	}
+	if cfg.ScanQueueMaxPending != defaultScanQueueMaxPending {
+		t.Fatalf("expected default scan queue max pending %d, got %d", defaultScanQueueMaxPending, cfg.ScanQueueMaxPending)
+	}
+	if cfg.RepoQueueMaxPending != defaultRepoQueueMaxPending {
+		t.Fatalf("expected default repo queue max pending %d, got %d", defaultRepoQueueMaxPending, cfg.RepoQueueMaxPending)
+	}
 	if cfg.WorkerRepoScanEnabled {
 		t.Fatal("expected worker repo scan disabled by default")
 	}
@@ -203,6 +214,15 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.WorkerRepoScanFindings != 0 {
 		t.Fatalf("expected default worker repo scan findings override 0, got %d", cfg.WorkerRepoScanFindings)
+	}
+	if !cfg.WorkerAPIJobQueueEnabled {
+		t.Fatal("expected worker api job queue enabled by default")
+	}
+	if cfg.WorkerAPIJobQueueInterval != defaultWorkerAPIJobQueueInterval {
+		t.Fatalf("expected default worker api job queue interval %v, got %v", defaultWorkerAPIJobQueueInterval, cfg.WorkerAPIJobQueueInterval)
+	}
+	if cfg.WorkerAPIJobQueueBatchSize != defaultWorkerAPIJobQueueBatchSize {
+		t.Fatalf("expected default worker api job queue batch size %d, got %d", defaultWorkerAPIJobQueueBatchSize, cfg.WorkerAPIJobQueueBatchSize)
 	}
 	if cfg.LockBackend != defaultLockBackend {
 		t.Fatalf("expected default lock backend %q, got %q", defaultLockBackend, cfg.LockBackend)
@@ -265,12 +285,17 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_REPO_SCAN_HISTORY_LIMIT_MAX", "9000")
 	t.Setenv("IDENTRAIL_REPO_SCAN_MAX_FINDINGS_MAX", "1400")
 	t.Setenv("IDENTRAIL_REPO_SCAN_ALLOWLIST", "trusted/*,owner/repo")
+	t.Setenv("IDENTRAIL_SCAN_QUEUE_MAX_PENDING", "40")
+	t.Setenv("IDENTRAIL_REPO_SCAN_QUEUE_MAX_PENDING", "160")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_ENABLED", "true")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_RUN_NOW", "true")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_INTERVAL", "45m")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_TARGETS", "owner/repo,trusted/infra")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_HISTORY_LIMIT", "700")
 	t.Setenv("IDENTRAIL_WORKER_REPO_SCAN_MAX_FINDINGS", "80")
+	t.Setenv("IDENTRAIL_WORKER_API_JOB_QUEUE_ENABLED", "false")
+	t.Setenv("IDENTRAIL_WORKER_API_JOB_QUEUE_INTERVAL", "5s")
+	t.Setenv("IDENTRAIL_WORKER_API_JOB_QUEUE_BATCH_SIZE", "12")
 	t.Setenv("IDENTRAIL_LOCK_BACKEND", "postgres")
 	t.Setenv("IDENTRAIL_LOCK_NAMESPACE", "prod-identrail")
 	t.Setenv("IDENTRAIL_OIDC_ISSUER_URL", "https://iam.example.com/realms/identrail")
@@ -404,6 +429,12 @@ func TestLoadFromEnv(t *testing.T) {
 	if len(cfg.RepoScanAllowlist) != 2 || cfg.RepoScanAllowlist[0] != "trusted/*" || cfg.RepoScanAllowlist[1] != "owner/repo" {
 		t.Fatalf("unexpected repo scan allowlist: %+v", cfg.RepoScanAllowlist)
 	}
+	if cfg.ScanQueueMaxPending != 40 {
+		t.Fatalf("unexpected scan queue max pending: %d", cfg.ScanQueueMaxPending)
+	}
+	if cfg.RepoQueueMaxPending != 160 {
+		t.Fatalf("unexpected repo queue max pending: %d", cfg.RepoQueueMaxPending)
+	}
 	if !cfg.WorkerRepoScanEnabled {
 		t.Fatal("expected worker repo scan enabled")
 	}
@@ -421,6 +452,15 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.WorkerRepoScanFindings != 80 {
 		t.Fatalf("unexpected worker repo scan findings override: %d", cfg.WorkerRepoScanFindings)
+	}
+	if cfg.WorkerAPIJobQueueEnabled {
+		t.Fatal("expected worker api job queue disabled")
+	}
+	if cfg.WorkerAPIJobQueueInterval != 5*time.Second {
+		t.Fatalf("unexpected worker api job queue interval: %v", cfg.WorkerAPIJobQueueInterval)
+	}
+	if cfg.WorkerAPIJobQueueBatchSize != 12 {
+		t.Fatalf("unexpected worker api job queue batch size: %d", cfg.WorkerAPIJobQueueBatchSize)
 	}
 	if cfg.LockBackend != "postgres" {
 		t.Fatalf("unexpected lock backend: %q", cfg.LockBackend)

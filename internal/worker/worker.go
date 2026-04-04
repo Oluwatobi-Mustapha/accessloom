@@ -17,6 +17,7 @@ import (
 const (
 	defaultWorkerTriggerMaxAttempts = 3
 	defaultWorkerRetryBackoff       = 2 * time.Second
+	defaultWorkerQueueMaxAttempts   = 1
 )
 
 // Run starts the scheduled worker loop and exits on signal or context cancellation.
@@ -93,6 +94,33 @@ func Run(ctx context.Context, cfg config.Config, signals <-chan os.Signal) error
 		}
 		return nil
 	}
+	queueBatchSize := cfg.WorkerAPIJobQueueBatchSize
+	if queueBatchSize <= 0 {
+		queueBatchSize = 1
+	}
+	apiQueueTrigger := func(runCtx context.Context) error {
+		for i := 0; i < queueBatchSize; i++ {
+			processed, processErr := svc.ProcessNextQueuedScan(runCtx)
+			if processErr != nil {
+				logger.Error("queued scan processing failed", telemetry.ZapError(processErr))
+				continue
+			}
+			if !processed {
+				break
+			}
+		}
+		for i := 0; i < queueBatchSize; i++ {
+			processed, processErr := svc.ProcessNextQueuedRepoScan(runCtx)
+			if processErr != nil {
+				logger.Error("queued repo scan processing failed", telemetry.ZapError(processErr))
+				continue
+			}
+			if !processed {
+				break
+			}
+		}
+		return nil
+	}
 
 	type scheduledRunner struct {
 		name   string
@@ -126,6 +154,22 @@ func Run(ctx context.Context, cfg config.Config, signals <-chan os.Signal) error
 				RetryBackoff: defaultWorkerRetryBackoff,
 				OnDeadLetter: func(_ context.Context, err error) {
 					logger.Error("repo trigger exhausted retries; dead-letter event emitted", telemetry.ZapError(err))
+				},
+			},
+		})
+	}
+	if cfg.WorkerAPIJobQueueEnabled {
+		runners = append(runners, scheduledRunner{
+			name:   "api-queue",
+			runNow: false,
+			runner: scheduler.Runner{
+				Interval:     cfg.WorkerAPIJobQueueInterval,
+				Key:          "api-job-queue",
+				Trigger:      apiQueueTrigger,
+				MaxAttempts:  defaultWorkerQueueMaxAttempts,
+				RetryBackoff: defaultWorkerRetryBackoff,
+				OnDeadLetter: func(_ context.Context, err error) {
+					logger.Error("api job queue trigger exhausted retries; dead-letter event emitted", telemetry.ZapError(err))
 				},
 			},
 		})

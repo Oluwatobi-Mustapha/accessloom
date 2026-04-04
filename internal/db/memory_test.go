@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -284,5 +285,86 @@ func TestMemoryStoreRepoScanErrors(t *testing.T) {
 	}
 	if _, err := store.ListRepoFindings(context.Background(), RepoFindingFilter{RepoScanID: "missing"}, 10); err == nil {
 		t.Fatal("expected missing repo scan error for findings list")
+	}
+}
+
+func TestMemoryStoreScanQueueLifecycle(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 3, 21, 9, 0, 0, 0, time.UTC)
+	queued, err := store.CreateQueuedScan(context.Background(), "aws", now)
+	if err != nil {
+		t.Fatalf("create queued scan: %v", err)
+	}
+	if queued.Status != "queued" {
+		t.Fatalf("expected queued status, got %q", queued.Status)
+	}
+	count, err := store.CountQueuedScans(context.Background(), "aws")
+	if err != nil {
+		t.Fatalf("count queued scans: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected queued count 1, got %d", count)
+	}
+	claimed, err := store.ClaimNextQueuedScan(context.Background(), "aws")
+	if err != nil {
+		t.Fatalf("claim queued scan: %v", err)
+	}
+	if claimed.ID != queued.ID || claimed.Status != "running" {
+		t.Fatalf("unexpected claimed scan %+v", claimed)
+	}
+	if _, err := store.ClaimNextQueuedScan(context.Background(), "aws"); err == nil {
+		t.Fatal("expected no queued scan remaining")
+	}
+}
+
+func TestMemoryStoreRepoQueueLifecycle(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 3, 21, 9, 5, 0, 0, time.UTC)
+	queued, err := store.CreateQueuedRepoScan(context.Background(), "owner/repo", 50, 80, now)
+	if err != nil {
+		t.Fatalf("create queued repo scan: %v", err)
+	}
+	if queued.Status != "queued" {
+		t.Fatalf("expected queued status, got %q", queued.Status)
+	}
+	if queued.HistoryLimit != 50 || queued.MaxFindings != 80 {
+		t.Fatalf("expected queued limits retained, got %+v", queued)
+	}
+	queuedCount, err := store.CountQueuedRepoScans(context.Background())
+	if err != nil {
+		t.Fatalf("count queued repo scans: %v", err)
+	}
+	if queuedCount != 1 {
+		t.Fatalf("expected queued repo count 1, got %d", queuedCount)
+	}
+	pendingCount, err := store.CountPendingRepoScansByRepository(context.Background(), "owner/repo")
+	if err != nil {
+		t.Fatalf("count pending repo scans: %v", err)
+	}
+	if pendingCount != 1 {
+		t.Fatalf("expected pending repo count 1, got %d", pendingCount)
+	}
+	if err := store.RequeueRepoScan(context.Background(), queued.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected requeue to reject non-running record, got %v", err)
+	}
+	claimed, err := store.ClaimNextQueuedRepoScan(context.Background())
+	if err != nil {
+		t.Fatalf("claim queued repo scan: %v", err)
+	}
+	if claimed.ID != queued.ID || claimed.Status != "running" {
+		t.Fatalf("unexpected claimed repo scan %+v", claimed)
+	}
+	if err := store.RequeueRepoScan(context.Background(), claimed.ID); err != nil {
+		t.Fatalf("requeue repo scan: %v", err)
+	}
+	requeued, err := store.GetRepoScan(context.Background(), claimed.ID)
+	if err != nil {
+		t.Fatalf("get requeued repo scan: %v", err)
+	}
+	if requeued.Status != "queued" {
+		t.Fatalf("expected requeued status, got %q", requeued.Status)
+	}
+	if !requeued.StartedAt.After(claimed.StartedAt) {
+		t.Fatal("expected requeued repo scan to receive a fresh queue timestamp")
 	}
 }
