@@ -1,9 +1,14 @@
 <p align="center">
-  <img src="docs/assets/identrail-wordmark.svg" width="920" alt="Identrail" />
+  <strong>I</strong>&nbsp;&nbsp;·&nbsp;&nbsp;<strong>D</strong>&nbsp;&nbsp;·&nbsp;&nbsp;<strong>E</strong>&nbsp;&nbsp;·&nbsp;&nbsp;<strong>N</strong>&nbsp;&nbsp;·&nbsp;&nbsp;<strong>T</strong>&nbsp;&nbsp;·&nbsp;&nbsp;<strong>R</strong>&nbsp;&nbsp;·&nbsp;&nbsp;<strong>A</strong>&nbsp;&nbsp;·&nbsp;&nbsp;<strong>I</strong>&nbsp;&nbsp;·&nbsp;&nbsp;<strong>L</strong>
 </p>
 
 <p align="center">
-  <strong>Machine Identity Security for Cloud and Kubernetes</strong>
+  <strong>IDENTRAIL</strong>
+</p>
+
+<p align="center">
+  <strong>Machine Identity Security for Cloud and Kubernetes</strong><br/>
+  <sub>Identity telemetry with security-grade trail intelligence</sub>
 </p>
 
 <p align="center">
