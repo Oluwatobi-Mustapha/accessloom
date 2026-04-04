@@ -1,0 +1,22 @@
+{
+  "version": "2026-04-04",
+  "confidence": {
+    "p0_min": 0.95,
+    "p1_min": 0.90,
+    "p2_min": 0.82,
+    "p3_min": 0.75
+  },
+  "abstain_below": 0.80,
+  "require_evidence": true,
+  "required_fields": [
+    "id",
+    "severity",
+    "confidence",
+    "rule_id",
+    "summary",
+    "rationale",
+    "file",
+    "line",
+    "recommendation"
+  ]
+}

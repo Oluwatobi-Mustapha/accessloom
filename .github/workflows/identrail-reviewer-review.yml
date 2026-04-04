@@ -65,17 +65,39 @@ jobs:
       - name: Run identrail-reviewer (PR)
         run: |
           set -euo pipefail
-          go run ./cmd/identrail-reviewer review-pr \
-            --repo-root . \
-            --event-path "$GITHUB_EVENT_PATH" \
-            --changed-files .tmp/changed-files.json \
-            --output .tmp/review.json
+          mkdir -p .tmp
+          for attempt in 1 2 3; do
+            if go run ./cmd/identrail-reviewer review-pr \
+              --repo-root . \
+              --event-path "$GITHUB_EVENT_PATH" \
+              --changed-files .tmp/changed-files.json \
+              --policy .github/identrail-reviewer/policy.v1.json \
+              --audit-log .tmp/audit.jsonl \
+              --output .tmp/review.json; then
+              break
+            fi
+
+            if [ "${attempt}" -eq 3 ]; then
+              echo "identrail-reviewer failed after 3 attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 2))
+          done
+
+      - name: Generate review checksums
+        run: |
+          set -euo pipefail
+          sha256sum .tmp/review.json .tmp/audit.jsonl > .tmp/review.sha256
 
       - name: Upload review artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: identrail-reviewer-pr-${{ github.event.pull_request.number }}
-          path: .tmp/review.json
+          path: |
+            .tmp/review.json
+            .tmp/audit.jsonl
+            .tmp/review.sha256
           if-no-files-found: error
 
       - name: Upsert PR review comment
@@ -111,15 +133,36 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .tmp
-          go run ./cmd/identrail-reviewer review-issue \
-            --event-path "$GITHUB_EVENT_PATH" \
-            --output .tmp/review.json
+          for attempt in 1 2 3; do
+            if go run ./cmd/identrail-reviewer review-issue \
+              --event-path "$GITHUB_EVENT_PATH" \
+              --policy .github/identrail-reviewer/policy.v1.json \
+              --audit-log .tmp/audit.jsonl \
+              --output .tmp/review.json; then
+              break
+            fi
+
+            if [ "${attempt}" -eq 3 ]; then
+              echo "identrail-reviewer failed after 3 attempts" >&2
+              exit 1
+            fi
+            sleep $((attempt * 2))
+          done
+
+      - name: Generate issue review checksums
+        run: |
+          set -euo pipefail
+          sha256sum .tmp/review.json .tmp/audit.jsonl > .tmp/review.sha256
 
       - name: Upload issue review artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: identrail-reviewer-issue-${{ github.event.issue.number }}
-          path: .tmp/review.json
+          path: |
+            .tmp/review.json
+            .tmp/audit.jsonl
+            .tmp/review.sha256
           if-no-files-found: error
 
       - name: Upsert issue review comment
