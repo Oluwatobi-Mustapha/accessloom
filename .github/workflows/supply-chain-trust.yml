@@ -1,0 +1,179 @@
+name: Supply Chain Trust
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to process (for example v1.2.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+  packages: read
+
+jobs:
+  prepare:
+    name: Resolve Tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+
+    steps:
+      - name: Resolve release tag
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+            tag="${{ github.event.release.tag_name }}"
+          else
+            tag="${{ inputs.tag }}"
+          fi
+
+          if ! [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-].+)?$ ]]; then
+            echo "Invalid release tag: ${tag}" >&2
+            exit 1
+          fi
+
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+
+  trust-artifacts:
+    name: Generate SBOM, Attest Provenance, Sign Artifacts
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build reproducible binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.prepare.outputs.tag }}"
+          mkdir -p dist
+
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "dist/identrail-cli-${tag}-linux-amd64" ./cmd/cli
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "dist/identrail-server-${tag}-linux-amd64" ./cmd/server
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" -o "dist/identrail-worker-${tag}-linux-amd64" ./cmd/worker
+
+          (
+            cd dist
+            shasum -a 256 identrail-* > checksums.txt
+          )
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@v0
+
+      - name: Generate binary SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+          syft dir:dist -o cyclonedx-json=dist/identrail-binaries.sbom.cdx.json
+
+      - name: Login to GHCR (for image SBOM/signing)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image SBOMs when release images exist
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          tag="${{ needs.prepare.outputs.tag }}"
+
+          for name in api worker web; do
+            ref="ghcr.io/${owner}/identrail-${name}:${tag}"
+            if docker buildx imagetools inspect "${ref}" >/dev/null 2>&1; then
+              syft "${ref}" -o cyclonedx-json="dist/identrail-${name}-${tag}.image.sbom.cdx.json"
+            else
+              echo "Image not found yet, skipping SBOM: ${ref}"
+            fi
+          done
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign checksum manifest (keyless)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --output-signature dist/checksums.txt.sig \
+            --output-certificate dist/checksums.txt.pem \
+            dist/checksums.txt
+
+      - name: Sign release images (keyless) when available
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          tag="${{ needs.prepare.outputs.tag }}"
+
+          for name in api worker web; do
+            ref="ghcr.io/${owner}/identrail-${name}:${tag}"
+            if docker buildx imagetools inspect "${ref}" >/dev/null 2>&1; then
+              cosign sign --yes "${ref}"
+            else
+              echo "Image not found yet, skipping signing: ${ref}"
+            fi
+          done
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/identrail-cli-*
+            dist/identrail-server-*
+            dist/identrail-worker-*
+            dist/checksums.txt
+
+      - name: Upload trust artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: supply-chain-trust-artifacts
+          path: |
+            dist/*.sbom.cdx.json
+            dist/checksums.txt
+            dist/checksums.txt.sig
+            dist/checksums.txt.pem
+          if-no-files-found: error
+
+      - name: Attach trust artifacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.prepare.outputs.tag }}"
+
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            gh release upload "${tag}" \
+              dist/*.sbom.cdx.json \
+              dist/checksums.txt \
+              dist/checksums.txt.sig \
+              dist/checksums.txt.pem \
+              --clobber
+          else
+            echo "Release ${tag} not found. Skipping asset upload."
+          fi
