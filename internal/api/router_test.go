@@ -1016,6 +1016,13 @@ func TestRouterFindingTriageWorkflowEndpoints(t *testing.T) {
 	if triggerBody.Scan.ID == "" {
 		t.Fatal("expected scan id in trigger response")
 	}
+	processed, err := svc.ProcessNextQueuedScan(context.Background())
+	if err != nil {
+		t.Fatalf("process queued scan: %v", err)
+	}
+	if !processed {
+		t.Fatal("expected one queued scan to be processed")
+	}
 
 	triagePayload := bytes.NewBufferString(`{"status":"ack","assignee":"platform","comment":"acknowledged for follow-up"}`)
 	triageDeniedReq := httptest.NewRequest(http.MethodPatch, "/v1/findings/f1/triage?scan_id="+triggerBody.Scan.ID, bytes.NewBuffer(triagePayload.Bytes()))
