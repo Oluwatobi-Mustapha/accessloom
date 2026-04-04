@@ -931,3 +931,18 @@ func TestPostgresStoreBeginTxRequiresScopeWhenRLSEnabled(t *testing.T) {
 		t.Fatalf("unmet expectations: %v", err)
 	}
 }
+
+func TestCheckedSliceCapacity(t *testing.T) {
+	got, err := checkedSliceCapacity(4, 3)
+	if err != nil {
+		t.Fatalf("checked slice capacity: %v", err)
+	}
+	if got != 7 {
+		t.Fatalf("expected capacity 7, got %d", got)
+	}
+
+	maxInt := int(^uint(0) >> 1)
+	if _, err := checkedSliceCapacity(maxInt, 1); !errors.Is(err, errQueryArgCapacityOverflow) {
+		t.Fatalf("expected overflow error, got %v", err)
+	}
+}

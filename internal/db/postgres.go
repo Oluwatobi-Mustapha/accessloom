@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -41,6 +42,19 @@ func (e errScanner) Scan(_ ...any) error {
 }
 
 var placeholderPattern = regexp.MustCompile(`\$(\d+)`)
+
+var errQueryArgCapacityOverflow = errors.New("query argument capacity overflow")
+
+func checkedSliceCapacity(base int, extra int) (int, error) {
+	if base < 0 || extra < 0 {
+		return 0, fmt.Errorf("invalid slice capacity inputs")
+	}
+	maxInt := int(^uint(0) >> 1)
+	if base > maxInt-extra {
+		return 0, errQueryArgCapacityOverflow
+	}
+	return base + extra, nil
+}
 
 // NewPostgresStore opens a PostgreSQL connection and validates connectivity.
 func NewPostgresStore(databaseURL string) (*PostgresStore, error) {
@@ -133,7 +147,12 @@ func (p *PostgresStore) injectScopeCTE(ctx context.Context, query string, args [
 		query = "WITH " + scopeCTE + " " + query
 	}
 
-	scopedArgs := make([]any, 0, len(args)+3)
+	capacity, err := checkedSliceCapacity(len(args), 3)
+	if err != nil {
+		return "", nil, err
+	}
+
+	scopedArgs := make([]any, 0, capacity)
 	scopedArgs = append(scopedArgs, args...)
 	scopedArgs = append(scopedArgs, scope.TenantID, scope.WorkspaceID, "on")
 	return query, scopedArgs, nil
