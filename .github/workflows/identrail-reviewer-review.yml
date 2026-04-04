@@ -55,7 +55,12 @@ jobs:
                 per_page: perPage,
                 page
               });
-              files.push(...resp.data.map((f) => ({ filename: f.filename, status: f.status })));
+              files.push(...resp.data.map((f) => ({
+                filename: f.filename,
+                status: f.status,
+                patch: f.patch || '',
+                previous_filename: f.previous_filename || ''
+              })));
               if (resp.data.length < perPage) break;
               page += 1;
             }
@@ -72,6 +77,7 @@ jobs:
               --event-path "$GITHUB_EVENT_PATH" \
               --changed-files .tmp/changed-files.json \
               --policy .github/identrail-reviewer/policy.v1.json \
+              --baseline .github/identrail-reviewer/baseline.v1.json \
               --audit-log .tmp/audit.jsonl \
               --output .tmp/review.json; then
               break
@@ -122,6 +128,19 @@ jobs:
               issueNumber: context.payload.pull_request.number,
               maxFindings: 20,
               gatePath: '.tmp/enforcement.json'
+            });
+
+      - name: Upsert inline PR review comments
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { upsertInlineReviewComments } = require('./.github/scripts/identrail-reviewer/upsert-review-comment');
+            await upsertInlineReviewComments({
+              github,
+              context,
+              reviewPath: '.tmp/review.json',
+              changedFilesPath: '.tmp/changed-files.json',
+              maxComments: 10
             });
 
       - name: Enforce rollout gate

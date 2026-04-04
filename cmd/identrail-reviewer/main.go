@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/identrailreviewer/audit"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/identrailreviewer/baseline"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/identrailreviewer/enforcement"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/identrailreviewer/model"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/identrailreviewer/policy"
@@ -37,6 +38,7 @@ func reviewPR(args []string) {
 	eventPath := fs.String("event-path", "", "GitHub event payload path")
 	changedFilesPath := fs.String("changed-files", "", "changed files JSON path")
 	policyPath := fs.String("policy", "", "review policy JSON path")
+	baselinePath := fs.String("baseline", "", "baseline JSON path for new-findings-only filtering")
 	auditPath := fs.String("audit-log", "", "audit JSONL output path")
 	outputPath := fs.String("output", "", "output path for review result")
 	_ = fs.Parse(args)
@@ -87,6 +89,12 @@ func reviewPR(args []string) {
 		fatal("failed to load policy: " + err.Error())
 	}
 	result = policy.Apply(cfg, result)
+
+	baselineCfg, err := baseline.Load(*baselinePath)
+	if err != nil {
+		fatal("failed to load baseline: " + err.Error())
+	}
+	result = baseline.Apply(baselineCfg, result)
 
 	if err := audit.Append(*auditPath, result); err != nil {
 		fatal("failed to write audit log: " + err.Error())

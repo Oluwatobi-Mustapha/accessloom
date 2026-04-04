@@ -49,6 +49,58 @@ func TestReviewPRWritesOutput(t *testing.T) {
 	}
 }
 
+func TestReviewPRAppliesBaselineFiltering(t *testing.T) {
+	root := t.TempDir()
+	eventPath := filepath.Join(root, "event.json")
+	changedPath := filepath.Join(root, "changed.json")
+	baselinePath := filepath.Join(root, "baseline.json")
+	outputPath := filepath.Join(root, "review.json")
+
+	event := model.PullRequestEvent{
+		PullRequest: model.PullRequest{
+			Number: 101,
+			Title:  "missing sections",
+			Body:   "## Summary\nonly one section provided\n",
+		},
+	}
+	if err := writeJSONFile(eventPath, event); err != nil {
+		t.Fatalf("write event json: %v", err)
+	}
+	if err := writeJSONFile(changedPath, []model.ChangedFile{}); err != nil {
+		t.Fatalf("write changed files json: %v", err)
+	}
+	baseline := map[string]any{
+		"version":           "test-v1",
+		"mode":              "new-findings-only",
+		"known_finding_ids": []string{"IR-PR-004-why"},
+	}
+	if err := writeJSONFile(baselinePath, baseline); err != nil {
+		t.Fatalf("write baseline json: %v", err)
+	}
+
+	reviewPR([]string{
+		"--repo-root", root,
+		"--event-path", eventPath,
+		"--changed-files", changedPath,
+		"--baseline", baselinePath,
+		"--output", outputPath,
+	})
+
+	var got model.ReviewResult
+	if err := readJSONFile(outputPath, &got); err != nil {
+		t.Fatalf("read output: %v", err)
+	}
+	if got.Metadata["baseline_mode"] != "new-findings-only" {
+		t.Fatalf("expected baseline mode metadata, got %q", got.Metadata["baseline_mode"])
+	}
+	if got.Metadata["baseline_suppressed_findings"] != "1" {
+		t.Fatalf("expected one baseline-suppressed finding, got %q", got.Metadata["baseline_suppressed_findings"])
+	}
+	if len(got.Findings) != 6 {
+		t.Fatalf("expected 6 findings after one suppression, got %d", len(got.Findings))
+	}
+}
+
 func TestReviewIssueWritesOutput(t *testing.T) {
 	root := t.TempDir()
 	eventPath := filepath.Join(root, "event.json")

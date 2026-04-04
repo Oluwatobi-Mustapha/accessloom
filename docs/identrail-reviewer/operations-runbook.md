@@ -18,3 +18,11 @@
 - Policy and rollout changes must be reviewed via pull request.
 - Every rollout phase change should include a rationale in PR description.
 - Weekly report artifacts should be inspected for trend breaks.
+- Baseline updates (`.github/identrail-reviewer/baseline.v1.json`) should include explicit rationale for each newly ignored finding ID.
+
+## Baseline workflow
+
+1. Capture reviewer artifacts from recent successful runs.
+2. Add only explicitly accepted legacy findings to `known_finding_ids`.
+3. Re-run reviewer checks and confirm no unexpected new suppressions.
+4. Keep baseline review-owned and update it as debt is paid down.
