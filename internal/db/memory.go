@@ -79,7 +79,7 @@ func (m *MemoryStore) ClaimNextQueuedScan(_ context.Context, provider string) (S
 		if record.Status != "queued" {
 			continue
 		}
-		if normalizedProvider != "" && !strings.EqualFold(strings.TrimSpace(record.Provider), normalizedProvider) {
+		if normalizedProvider != "" && strings.TrimSpace(record.Provider) != normalizedProvider {
 			continue
 		}
 		if !found || record.StartedAt.Before(bestRecord.StartedAt) {
@@ -108,7 +108,7 @@ func (m *MemoryStore) CountQueuedScans(_ context.Context, provider string) (int,
 		if record.Status != "queued" {
 			continue
 		}
-		if normalizedProvider != "" && !strings.EqualFold(strings.TrimSpace(record.Provider), normalizedProvider) {
+		if normalizedProvider != "" && strings.TrimSpace(record.Provider) != normalizedProvider {
 			continue
 		}
 		count++
@@ -464,7 +464,7 @@ func (m *MemoryStore) CountPendingRepoScansByRepository(_ context.Context, repos
 	}
 	count := 0
 	for _, record := range m.repoScans {
-		if !strings.EqualFold(strings.TrimSpace(record.Repository), normalizedRepository) {
+		if strings.TrimSpace(record.Repository) != normalizedRepository {
 			continue
 		}
 		if record.Status == "queued" || record.Status == "running" {

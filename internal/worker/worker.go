@@ -20,6 +20,8 @@ const (
 	defaultWorkerQueueMaxAttempts   = 1
 )
 
+type queueProcessFunc func(context.Context) (bool, error)
+
 // Run starts the scheduled worker loop and exits on signal or context cancellation.
 func Run(ctx context.Context, cfg config.Config, signals <-chan os.Signal) error {
 	logger, err := telemetry.NewLogger(cfg.LogLevel)
@@ -99,27 +101,18 @@ func Run(ctx context.Context, cfg config.Config, signals <-chan os.Signal) error
 		queueBatchSize = 1
 	}
 	apiQueueTrigger := func(runCtx context.Context) error {
-		for i := 0; i < queueBatchSize; i++ {
-			processed, processErr := svc.ProcessNextQueuedScan(runCtx)
-			if processErr != nil {
-				logger.Error("queued scan processing failed", telemetry.ZapError(processErr))
-				continue
-			}
-			if !processed {
-				break
-			}
-		}
-		for i := 0; i < queueBatchSize; i++ {
-			processed, processErr := svc.ProcessNextQueuedRepoScan(runCtx)
-			if processErr != nil {
-				logger.Error("queued repo scan processing failed", telemetry.ZapError(processErr))
-				continue
-			}
-			if !processed {
-				break
-			}
-		}
-		return nil
+		return processAPIQueueBatch(
+			runCtx,
+			queueBatchSize,
+			svc.ProcessNextQueuedScan,
+			svc.ProcessNextQueuedRepoScan,
+			func(err error) {
+				logger.Error("queued scan processing failed", telemetry.ZapError(err))
+			},
+			func(err error) {
+				logger.Error("queued repo scan processing failed", telemetry.ZapError(err))
+			},
+		)
 	}
 
 	type scheduledRunner struct {
@@ -210,4 +203,56 @@ func Run(ctx context.Context, cfg config.Config, signals <-chan os.Signal) error
 	case runErr := <-errCh:
 		return runErr
 	}
+}
+
+func processAPIQueueBatch(
+	ctx context.Context,
+	batchSize int,
+	processScan queueProcessFunc,
+	processRepoScan queueProcessFunc,
+	onScanError func(error),
+	onRepoError func(error),
+) error {
+	if batchSize <= 0 {
+		batchSize = 1
+	}
+	failures := 0
+	var firstErr error
+
+	for i := 0; i < batchSize; i++ {
+		processed, err := processScan(ctx)
+		if err != nil {
+			failures++
+			if firstErr == nil {
+				firstErr = err
+			}
+			if onScanError != nil {
+				onScanError(err)
+			}
+			continue
+		}
+		if !processed {
+			break
+		}
+	}
+	for i := 0; i < batchSize; i++ {
+		processed, err := processRepoScan(ctx)
+		if err != nil {
+			failures++
+			if firstErr == nil {
+				firstErr = err
+			}
+			if onRepoError != nil {
+				onRepoError(err)
+			}
+			continue
+		}
+		if !processed {
+			break
+		}
+	}
+	if failures > 0 {
+		return fmt.Errorf("api queue batch failed for %d job(s): %w", failures, firstErr)
+	}
+	return nil
 }

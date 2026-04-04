@@ -368,3 +368,48 @@ func TestMemoryStoreRepoQueueLifecycle(t *testing.T) {
 		t.Fatal("expected requeued repo scan to receive a fresh queue timestamp")
 	}
 }
+
+func TestMemoryStoreScanQueueProviderMatchingIsCaseSensitive(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 3, 21, 9, 15, 0, 0, time.UTC)
+	if _, err := store.CreateQueuedScan(context.Background(), "AWS", now); err != nil {
+		t.Fatalf("create queued scan: %v", err)
+	}
+
+	count, err := store.CountQueuedScans(context.Background(), "aws")
+	if err != nil {
+		t.Fatalf("count queued scans: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 queued scans for mismatched provider case, got %d", count)
+	}
+	if _, err := store.ClaimNextQueuedScan(context.Background(), "aws"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected no claim for mismatched provider case, got %v", err)
+	}
+	if _, err := store.ClaimNextQueuedScan(context.Background(), "AWS"); err != nil {
+		t.Fatalf("expected claim for exact provider case, got %v", err)
+	}
+}
+
+func TestMemoryStorePendingRepoCountMatchingIsCaseSensitive(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 3, 21, 9, 25, 0, 0, time.UTC)
+	if _, err := store.CreateQueuedRepoScan(context.Background(), "Owner/Repo", 10, 20, now); err != nil {
+		t.Fatalf("create queued repo scan: %v", err)
+	}
+
+	count, err := store.CountPendingRepoScansByRepository(context.Background(), "owner/repo")
+	if err != nil {
+		t.Fatalf("count pending repo scans: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected 0 pending repo scans for mismatched repository case, got %d", count)
+	}
+	count, err = store.CountPendingRepoScansByRepository(context.Background(), "Owner/Repo")
+	if err != nil {
+		t.Fatalf("count pending repo scans exact case: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected 1 pending repo scan for exact repository case, got %d", count)
+	}
+}

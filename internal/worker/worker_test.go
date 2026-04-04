@@ -2,7 +2,9 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -147,5 +149,41 @@ func TestRunFailsWhenWorkerRepoStartupScanTargetIsInvalid(t *testing.T) {
 	sigCh := make(chan os.Signal, 1)
 	if err := Run(ctx, cfg, sigCh); err == nil {
 		t.Fatal("expected worker repo startup scan error")
+	}
+}
+
+func TestProcessAPIQueueBatchReturnsErrorWhenProcessingFails(t *testing.T) {
+	scanErrors := 0
+	repoErrors := 0
+	err := processAPIQueueBatch(
+		context.Background(),
+		1,
+		func(context.Context) (bool, error) { return false, errors.New("scan failure") },
+		func(context.Context) (bool, error) { return false, errors.New("repo failure") },
+		func(error) { scanErrors++ },
+		func(error) { repoErrors++ },
+	)
+	if err == nil {
+		t.Fatal("expected queue batch error")
+	}
+	if !strings.Contains(err.Error(), "api queue batch failed for 2 job(s)") {
+		t.Fatalf("unexpected queue batch error: %v", err)
+	}
+	if scanErrors != 1 || repoErrors != 1 {
+		t.Fatalf("expected one callback per processing error, got scan=%d repo=%d", scanErrors, repoErrors)
+	}
+}
+
+func TestProcessAPIQueueBatchReturnsNilWhenNoFailures(t *testing.T) {
+	err := processAPIQueueBatch(
+		context.Background(),
+		2,
+		func(context.Context) (bool, error) { return false, nil },
+		func(context.Context) (bool, error) { return false, nil },
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
 	}
 }
