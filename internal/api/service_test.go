@@ -1023,6 +1023,9 @@ func TestServiceEnqueueRepoScanGuards(t *testing.T) {
 	if _, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo"}); !errors.Is(err, ErrRepoScanInProgress) {
 		t.Fatalf("expected repo in-progress error for duplicate target, got %v", err)
 	}
+	if _, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "Owner/Repo"}); !errors.Is(err, ErrRepoScanInProgress) {
+		t.Fatalf("expected repo in-progress error for case-variant duplicate target, got %v", err)
+	}
 	if _, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/another"}); !errors.Is(err, ErrRepoScanQueueFull) {
 		t.Fatalf("expected repo queue full error, got %v", err)
 	}

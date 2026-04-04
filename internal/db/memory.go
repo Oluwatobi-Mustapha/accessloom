@@ -464,7 +464,7 @@ func (m *MemoryStore) CountPendingRepoScansByRepository(_ context.Context, repos
 	}
 	count := 0
 	for _, record := range m.repoScans {
-		if strings.TrimSpace(record.Repository) != normalizedRepository {
+		if !strings.EqualFold(strings.TrimSpace(record.Repository), normalizedRepository) {
 			continue
 		}
 		if record.Status == "queued" || record.Status == "running" {

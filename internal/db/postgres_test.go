@@ -480,13 +480,13 @@ func TestPostgresStoreRepoQueueLifecycle(t *testing.T) {
 
 	pendingRows := sqlmock.NewRows([]string{"count"}).AddRow(1)
 	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*)
-		 FROM repo_scans
-		 WHERE repository = $1
-		   AND status IN ('queued', 'running')`)).
-		WithArgs("owner/repo").
+			 FROM repo_scans
+			 WHERE LOWER(repository) = LOWER($1)
+			   AND status IN ('queued', 'running')`)).
+		WithArgs("OWNER/REPO").
 		WillReturnRows(pendingRows)
 
-	pendingCount, err := store.CountPendingRepoScansByRepository(context.Background(), "owner/repo")
+	pendingCount, err := store.CountPendingRepoScansByRepository(context.Background(), "OWNER/REPO")
 	if err != nil {
 		t.Fatalf("count pending repo scans failed: %v", err)
 	}

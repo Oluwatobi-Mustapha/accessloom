@@ -505,7 +505,7 @@ func (p *PostgresStore) CountPendingRepoScansByRepository(ctx context.Context, r
 		ctx,
 		`SELECT COUNT(*)
 		 FROM repo_scans
-		 WHERE repository = $1
+		 WHERE LOWER(repository) = LOWER($1)
 		   AND status IN ('queued', 'running')`,
 		strings.TrimSpace(repository),
 	).Scan(&count); err != nil {
