@@ -10,7 +10,16 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - dependencies
-      - go
+      - deps/go
+    groups:
+      go-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      go-version-updates:
+        applies-to: version-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: npm
     directory: "/web"
@@ -22,7 +31,16 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - dependencies
-      - web
+      - deps/npm
+    groups:
+      npm-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      npm-version-updates:
+        applies-to: version-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: github-actions
     directory: "/"
@@ -34,4 +52,13 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - dependencies
-      - ci
+      - deps/github-actions
+    groups:
+      gha-security-updates:
+        applies-to: security-updates
+        patterns:
+          - "*"
+      gha-version-updates:
+        applies-to: version-updates
+        patterns:
+          - "*"
