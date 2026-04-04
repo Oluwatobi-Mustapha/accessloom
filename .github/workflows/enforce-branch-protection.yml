@@ -1,0 +1,63 @@
+name: Enforce Branch Protection
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run mode"
+        type: choice
+        required: true
+        default: dry-run
+        options:
+          - dry-run
+          - apply
+
+permissions:
+  contents: read
+
+jobs:
+  enforce:
+    name: Enforce main branch protection
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate config JSON
+        run: jq empty .github/branch-protection/main.json
+
+      - name: Print protection plan (dry-run)
+        if: inputs.mode == 'dry-run'
+        run: |
+          echo "Branch protection payload for main:"
+          cat .github/branch-protection/main.json
+
+      - name: Apply protection via GitHub API
+        if: inputs.mode == 'apply'
+        uses: actions/github-script@v7
+        env:
+          REPO_ADMIN_TOKEN: ${{ secrets.REPO_ADMIN_TOKEN }}
+        with:
+          script: |
+            const fs = require('fs');
+            const token = process.env.REPO_ADMIN_TOKEN;
+            if (!token) {
+              core.setFailed('Missing REPO_ADMIN_TOKEN secret (repo admin scope required).');
+              return;
+            }
+
+            const payload = JSON.parse(
+              fs.readFileSync('.github/branch-protection/main.json', 'utf8')
+            );
+
+            const octokit = github.getOctokit(token);
+            await octokit.rest.repos.updateBranchProtection({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+              ...payload,
+            });
+
+            core.info('Branch protection updated for main.');
