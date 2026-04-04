@@ -551,3 +551,83 @@ func TestMemoryStoreRequiresScopeContext(t *testing.T) {
 		t.Fatalf("expected ErrScopeRequired, got %v", err)
 	}
 }
+
+func TestMemoryStoreRBACRoleBindingAndPermissionResolution(t *testing.T) {
+	store := NewMemoryStore()
+	defaultCtx := defaultScopeContext()
+	otherCtx := WithScope(defaultScopeContext(), Scope{TenantID: "tenant-b", WorkspaceID: "workspace-b"})
+
+	viewerRole, err := store.UpsertRBACRole(defaultCtx, RBACRole{
+		Name:        "viewer",
+		Description: "read-only",
+		Permissions: []string{"findings.read", "scans.read"},
+	})
+	if err != nil {
+		t.Fatalf("upsert rbac role: %v", err)
+	}
+	if viewerRole.ID == "" {
+		t.Fatal("expected role id")
+	}
+
+	if _, err := store.UpsertRBACBinding(defaultCtx, RBACBinding{
+		SubjectType: RBACSubjectTypeOIDCSubject,
+		SubjectID:   "user-1",
+		RoleID:      viewerRole.ID,
+	}); err != nil {
+		t.Fatalf("upsert rbac binding: %v", err)
+	}
+
+	permissions, err := store.ListRBACPermissionsForSubject(defaultCtx, RBACSubjectTypeOIDCSubject, "user-1", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("list rbac permissions: %v", err)
+	}
+	if len(permissions) != 2 {
+		t.Fatalf("expected two permissions, got %+v", permissions)
+	}
+
+	otherPermissions, err := store.ListRBACPermissionsForSubject(otherCtx, RBACSubjectTypeOIDCSubject, "user-1", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("list cross-scope permissions: %v", err)
+	}
+	if len(otherPermissions) != 0 {
+		t.Fatalf("expected no cross-scope permissions, got %+v", otherPermissions)
+	}
+
+	roles, err := store.ListRBACRoles(defaultCtx)
+	if err != nil {
+		t.Fatalf("list rbac roles: %v", err)
+	}
+	if len(roles) != 1 || roles[0].Name != "viewer" {
+		t.Fatalf("unexpected rbac roles: %+v", roles)
+	}
+
+	bindings, err := store.ListRBACBindings(defaultCtx)
+	if err != nil {
+		t.Fatalf("list rbac bindings: %v", err)
+	}
+	if len(bindings) != 1 {
+		t.Fatalf("expected one binding, got %+v", bindings)
+	}
+
+	if err := store.DeleteRBACBinding(defaultCtx, bindings[0].ID); err != nil {
+		t.Fatalf("delete binding: %v", err)
+	}
+	if err := store.DeleteRBACRole(defaultCtx, viewerRole.ID); err != nil {
+		t.Fatalf("delete role: %v", err)
+	}
+}
+
+func TestMemoryStoreRBACRejectsBuiltInRoleDelete(t *testing.T) {
+	store := NewMemoryStore()
+	role, err := store.UpsertRBACRole(defaultScopeContext(), RBACRole{
+		Name:        "admin",
+		IsBuiltIn:   true,
+		Permissions: []string{"rbac.manage"},
+	})
+	if err != nil {
+		t.Fatalf("upsert role: %v", err)
+	}
+	if err := store.DeleteRBACRole(defaultScopeContext(), role.ID); err == nil {
+		t.Fatal("expected built-in role delete to fail")
+	}
+}

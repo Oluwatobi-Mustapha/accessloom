@@ -998,3 +998,284 @@ func TestErrorsIsNoRows(t *testing.T) {
 		t.Fatal("expected false for non-no-rows error")
 	}
 }
+
+func TestPostgresStoreRBACRoleBindingAndPermissionResolution(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO rbac_roles (id, tenant_id, workspace_id, name, description, is_builtin, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 ON CONFLICT (tenant_id, workspace_id, name)
+		 DO UPDATE SET
+		   description = EXCLUDED.description,
+		   is_builtin = rbac_roles.is_builtin OR EXCLUDED.is_builtin,
+		   updated_at = EXCLUDED.updated_at
+		 RETURNING id, tenant_id, workspace_id, name, description, is_builtin, created_at, updated_at`)).
+		WithArgs(sqlmock.AnyArg(), "default", "default", "viewer", "read-only", false, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "workspace_id", "name", "description", "is_builtin", "created_at", "updated_at"}).
+			AddRow("role-1", "default", "default", "viewer", "read-only", false, time.Now().UTC(), time.Now().UTC()))
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM rbac_role_permissions WHERE role_id = $1`)).
+		WithArgs("role-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO rbac_role_permissions").
+		WithArgs("role-1", "findings.read", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	role, err := store.UpsertRBACRole(defaultScopeContext(), RBACRole{
+		Name:        "viewer",
+		Description: "read-only",
+		Permissions: []string{"findings.read"},
+	})
+	if err != nil {
+		t.Fatalf("upsert rbac role: %v", err)
+	}
+	if role.ID != "role-1" {
+		t.Fatalf("unexpected role id: %q", role.ID)
+	}
+
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT 1
+		 FROM rbac_roles
+		 WHERE id = $1
+		   AND tenant_id = $2
+		   AND workspace_id = $3`)).
+		WithArgs("role-1", "default", "default").
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(1))
+	mock.ExpectQuery("INSERT INTO rbac_bindings").
+		WithArgs(sqlmock.AnyArg(), "default", "default", "oidc_subject", "user-1", "role-1", sqlmock.AnyArg(), nil).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "tenant_id", "workspace_id", "subject_type", "subject_id", "role_id", "created_at", "expires_at"}).
+			AddRow("binding-1", "default", "default", "oidc_subject", "user-1", "role-1", time.Now().UTC(), nil))
+
+	binding, err := store.UpsertRBACBinding(defaultScopeContext(), RBACBinding{
+		SubjectType: RBACSubjectTypeOIDCSubject,
+		SubjectID:   "user-1",
+		RoleID:      "role-1",
+	})
+	if err != nil {
+		t.Fatalf("upsert rbac binding: %v", err)
+	}
+	if binding.ID != "binding-1" {
+		t.Fatalf("unexpected binding id: %q", binding.ID)
+	}
+
+	mock.ExpectQuery("SELECT DISTINCT rp.permission").
+		WithArgs("default", "default", "oidc_subject", "user-1", sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{"permission"}).AddRow("findings.read"))
+	permissions, err := store.ListRBACPermissionsForSubject(defaultScopeContext(), RBACSubjectTypeOIDCSubject, "user-1", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("list rbac permissions: %v", err)
+	}
+	if len(permissions) != 1 || permissions[0] != "findings.read" {
+		t.Fatalf("unexpected permissions: %+v", permissions)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreListAndDeleteRBACRoles(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	ctx := defaultScopeContext()
+	now := time.Now().UTC()
+
+	rows := sqlmock.NewRows([]string{"id", "tenant_id", "workspace_id", "name", "description", "is_builtin", "created_at", "updated_at", "permission"}).
+		AddRow("role-1", "default", "default", "viewer", "read", true, now, now, "scans.read").
+		AddRow("role-1", "default", "default", "viewer", "read", true, now, now, "findings.read").
+		AddRow("role-2", "default", "default", "custom", "custom role", false, now, now, "scans.run")
+	mock.ExpectQuery("SELECT r.id, r.tenant_id, r.workspace_id, r.name").
+		WithArgs("default", "default").
+		WillReturnRows(rows)
+
+	roles, err := store.ListRBACRoles(ctx)
+	if err != nil {
+		t.Fatalf("list rbac roles: %v", err)
+	}
+	if len(roles) != 2 {
+		t.Fatalf("expected 2 roles, got %+v", roles)
+	}
+	if len(roles[0].Permissions) != 2 || roles[0].Permissions[0] != "findings.read" || roles[0].Permissions[1] != "scans.read" {
+		t.Fatalf("expected sorted deduped role permissions, got %+v", roles[0].Permissions)
+	}
+
+	mock.ExpectQuery("SELECT is_builtin").
+		WithArgs("role-2", "default", "default").
+		WillReturnRows(sqlmock.NewRows([]string{"is_builtin"}).AddRow(false))
+	mock.ExpectExec("DELETE FROM rbac_roles").
+		WithArgs("role-2", "default", "default").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.DeleteRBACRole(ctx, "role-2"); err != nil {
+		t.Fatalf("delete custom role: %v", err)
+	}
+
+	mock.ExpectQuery("SELECT is_builtin").
+		WithArgs("role-1", "default", "default").
+		WillReturnRows(sqlmock.NewRows([]string{"is_builtin"}).AddRow(true))
+	if err := store.DeleteRBACRole(ctx, "role-1"); err == nil {
+		t.Fatal("expected built-in role deletion to fail")
+	}
+
+	mock.ExpectQuery("SELECT is_builtin").
+		WithArgs("missing", "default", "default").
+		WillReturnError(sql.ErrNoRows)
+	if err := store.DeleteRBACRole(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing role, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreListAndDeleteRBACBindings(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	ctx := defaultScopeContext()
+	now := time.Now().UTC()
+	expires := now.Add(24 * time.Hour)
+
+	rows := sqlmock.NewRows([]string{"id", "tenant_id", "workspace_id", "subject_type", "subject_id", "role_id", "created_at", "expires_at"}).
+		AddRow("binding-1", "default", "default", "oidc_subject", "user-1", "role-1", now, nil).
+		AddRow("binding-2", "default", "default", "api_key", "fp-1", "role-2", now, expires)
+	mock.ExpectQuery("SELECT id, tenant_id, workspace_id, subject_type, subject_id, role_id, created_at, expires_at").
+		WithArgs("default", "default").
+		WillReturnRows(rows)
+
+	bindings, err := store.ListRBACBindings(ctx)
+	if err != nil {
+		t.Fatalf("list rbac bindings: %v", err)
+	}
+	if len(bindings) != 2 {
+		t.Fatalf("expected 2 bindings, got %+v", bindings)
+	}
+	if bindings[1].ExpiresAt == nil || !bindings[1].ExpiresAt.Equal(expires) {
+		t.Fatalf("expected second binding expiry to be set, got %+v", bindings[1].ExpiresAt)
+	}
+
+	mock.ExpectExec("DELETE FROM rbac_bindings").
+		WithArgs("binding-1", "default", "default").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := store.DeleteRBACBinding(ctx, "binding-1"); err != nil {
+		t.Fatalf("delete binding: %v", err)
+	}
+
+	if err := store.DeleteRBACBinding(ctx, " "); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for blank binding id, got %v", err)
+	}
+
+	mock.ExpectExec("DELETE FROM rbac_bindings").
+		WithArgs("missing", "default", "default").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	if err := store.DeleteRBACBinding(ctx, "missing"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for missing binding, got %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreListRBACBindingsErrors(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	ctx := defaultScopeContext()
+	now := time.Now().UTC()
+
+	rowsErr := sqlmock.NewRows([]string{"id", "tenant_id", "workspace_id", "subject_type", "subject_id", "role_id", "created_at", "expires_at"}).
+		AddRow("binding-2", "default", "default", "oidc_subject", "user-2", "role-2", now, nil).
+		RowError(0, errors.New("scan row failed"))
+	mock.ExpectQuery("SELECT id, tenant_id, workspace_id, subject_type, subject_id, role_id, created_at, expires_at").
+		WithArgs("default", "default").
+		WillReturnRows(rowsErr)
+
+	if _, err := store.ListRBACBindings(ctx); err == nil {
+		t.Fatal("expected list bindings rows error")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreDeleteRBACRoleBlankID(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	if err := store.DeleteRBACRole(defaultScopeContext(), "  "); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for blank role id, got %v", err)
+	}
+}
+
+func TestPostgresHelpersNullableAndClose(t *testing.T) {
+	if got := nullableString("value"); got == nil {
+		t.Fatalf("expected non-nil nullable string for non-empty value")
+	} else if value, ok := got.(string); !ok || value != "value" {
+		t.Fatalf("unexpected nullable string value: %#v", got)
+	}
+	if got := nullableString(""); got != nil {
+		t.Fatalf("expected invalid nullable string for empty value: %+v", got)
+	}
+
+	now := time.Date(2026, 4, 4, 12, 0, 0, 0, time.UTC)
+	if got := nullableTime(now); got == nil {
+		t.Fatalf("expected non-nil nullable time for non-zero value")
+	} else if value, ok := got.(time.Time); !ok || !value.Equal(now) {
+		t.Fatalf("unexpected nullable time value: %#v", got)
+	}
+	if got := nullableTime(time.Time{}); got != nil {
+		t.Fatalf("expected invalid nullable time for zero value: %+v", got)
+	}
+
+	if got := nullableTimePtr(nil); got != nil {
+		t.Fatalf("expected invalid nullable time pointer for nil: %+v", got)
+	}
+	if got := nullableTimePtr(&now); got == nil {
+		t.Fatalf("expected non-nil nullable time pointer for non-nil input")
+	} else if value, ok := got.(time.Time); !ok || !value.Equal(now) {
+		t.Fatalf("unexpected nullable time pointer value: %#v", got)
+	}
+
+	store := &PostgresStore{}
+	if err := store.Close(); err != nil {
+		t.Fatalf("expected nil close error for store without DB, got %v", err)
+	}
+
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	store = NewPostgresStoreWithDB(db)
+	mock.ExpectClose()
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store with db: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}

@@ -31,6 +31,12 @@ type MemoryStore struct {
 	policies      map[string]domain.Policy
 	relationships map[string]domain.Relationship
 	permissions   map[string]providers.PermissionTuple
+
+	rbacRoles       map[string]RBACRole
+	rbacRoleByName  map[string]string
+	rbacRolePerms   map[string][]string
+	rbacBindings    map[string]RBACBinding
+	rbacBindingByID []string
 }
 
 // NewMemoryStore initializes an empty in-memory store.
@@ -51,6 +57,12 @@ func NewMemoryStore() *MemoryStore {
 		policies:      map[string]domain.Policy{},
 		relationships: map[string]domain.Relationship{},
 		permissions:   map[string]providers.PermissionTuple{},
+
+		rbacRoles:       map[string]RBACRole{},
+		rbacRoleByName:  map[string]string{},
+		rbacRolePerms:   map[string][]string{},
+		rbacBindings:    map[string]RBACBinding{},
+		rbacBindingByID: []string{},
 	}
 }
 
@@ -940,6 +952,275 @@ func (m *MemoryStore) ListRepoFindings(ctx context.Context, filter RepoFindingFi
 		result = result[:limit]
 	}
 	return result, nil
+}
+
+// UpsertRBACRole creates or updates one workspace-scoped role.
+func (m *MemoryStore) UpsertRBACRole(ctx context.Context, role RBACRole) (RBACRole, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return RBACRole{}, err
+	}
+
+	name := strings.ToLower(strings.TrimSpace(role.Name))
+	if name == "" {
+		return RBACRole{}, fmt.Errorf("role name is required")
+	}
+	roleKey := rbacRoleNameScopeKey(scope, name)
+	existingID, exists := m.rbacRoleByName[roleKey]
+
+	now := time.Now().UTC()
+	normalized := RBACRole{
+		ID:          strings.TrimSpace(role.ID),
+		TenantID:    scope.Normalize().TenantID,
+		WorkspaceID: scope.Normalize().WorkspaceID,
+		Name:        name,
+		Description: strings.TrimSpace(role.Description),
+		IsBuiltIn:   role.IsBuiltIn,
+		Permissions: normalizeRBACPermissionList(role.Permissions),
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	if exists {
+		existingRole := m.rbacRoles[existingID]
+		normalized.ID = existingRole.ID
+		normalized.CreatedAt = existingRole.CreatedAt
+		normalized.UpdatedAt = now
+		if existingRole.IsBuiltIn {
+			normalized.IsBuiltIn = true
+		}
+	} else if normalized.ID == "" {
+		normalized.ID = uuid.NewString()
+	}
+
+	m.rbacRoles[normalized.ID] = normalized
+	m.rbacRoleByName[roleKey] = normalized.ID
+	m.rbacRolePerms[normalized.ID] = append([]string(nil), normalized.Permissions...)
+	return normalized, nil
+}
+
+// ListRBACRoles returns roles for current tenant/workspace scope.
+func (m *MemoryStore) ListRBACRoles(ctx context.Context) ([]RBACRole, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	normalizedScope := scope.Normalize()
+	roles := []RBACRole{}
+	for _, role := range m.rbacRoles {
+		if !MatchScope(normalizedScope, role.TenantID, role.WorkspaceID) {
+			continue
+		}
+		roleCopy := role
+		roleCopy.Permissions = append([]string(nil), m.rbacRolePerms[role.ID]...)
+		roles = append(roles, roleCopy)
+	}
+	sort.SliceStable(roles, func(i, j int) bool {
+		if roles[i].Name == roles[j].Name {
+			return roles[i].ID < roles[j].ID
+		}
+		return roles[i].Name < roles[j].Name
+	})
+	return roles, nil
+}
+
+// DeleteRBACRole removes one role and any associated bindings.
+func (m *MemoryStore) DeleteRBACRole(ctx context.Context, roleID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+	normalizedRoleID := strings.TrimSpace(roleID)
+	if normalizedRoleID == "" {
+		return ErrNotFound
+	}
+	role, exists := m.rbacRoles[normalizedRoleID]
+	if !exists || !MatchScope(scope, role.TenantID, role.WorkspaceID) {
+		return ErrNotFound
+	}
+	if role.IsBuiltIn {
+		return fmt.Errorf("built-in roles cannot be deleted")
+	}
+	delete(m.rbacRoles, normalizedRoleID)
+	delete(m.rbacRolePerms, normalizedRoleID)
+	delete(m.rbacRoleByName, rbacRoleNameScopeKey(scope, role.Name))
+	for bindingID, binding := range m.rbacBindings {
+		if binding.RoleID == normalizedRoleID && MatchScope(scope, binding.TenantID, binding.WorkspaceID) {
+			delete(m.rbacBindings, bindingID)
+		}
+	}
+	return nil
+}
+
+// UpsertRBACBinding binds one subject to one role inside current scope.
+func (m *MemoryStore) UpsertRBACBinding(ctx context.Context, binding RBACBinding) (RBACBinding, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return RBACBinding{}, err
+	}
+	normalizedScope := scope.Normalize()
+
+	subjectType, err := normalizeRBACSubjectType(binding.SubjectType)
+	if err != nil {
+		return RBACBinding{}, err
+	}
+	subjectID := strings.TrimSpace(binding.SubjectID)
+	if subjectID == "" {
+		return RBACBinding{}, fmt.Errorf("subject id is required")
+	}
+	roleID := strings.TrimSpace(binding.RoleID)
+	if roleID == "" {
+		return RBACBinding{}, fmt.Errorf("role id is required")
+	}
+	role, exists := m.rbacRoles[roleID]
+	if !exists || !MatchScope(normalizedScope, role.TenantID, role.WorkspaceID) {
+		return RBACBinding{}, ErrNotFound
+	}
+
+	for _, existing := range m.rbacBindings {
+		if !MatchScope(normalizedScope, existing.TenantID, existing.WorkspaceID) {
+			continue
+		}
+		if existing.SubjectType == subjectType &&
+			existing.SubjectID == subjectID &&
+			existing.RoleID == roleID {
+			updated := existing
+			if binding.ExpiresAt != nil {
+				expires := binding.ExpiresAt.UTC()
+				updated.ExpiresAt = &expires
+			} else {
+				updated.ExpiresAt = nil
+			}
+			m.rbacBindings[updated.ID] = updated
+			return updated, nil
+		}
+	}
+
+	now := time.Now().UTC()
+	created := RBACBinding{
+		ID:          uuid.NewString(),
+		TenantID:    normalizedScope.TenantID,
+		WorkspaceID: normalizedScope.WorkspaceID,
+		SubjectType: subjectType,
+		SubjectID:   subjectID,
+		RoleID:      roleID,
+		CreatedAt:   now,
+	}
+	if binding.ExpiresAt != nil {
+		expires := binding.ExpiresAt.UTC()
+		created.ExpiresAt = &expires
+	}
+	m.rbacBindings[created.ID] = created
+	m.rbacBindingByID = append(m.rbacBindingByID, created.ID)
+	return created, nil
+}
+
+// ListRBACBindings returns bindings for current tenant/workspace scope.
+func (m *MemoryStore) ListRBACBindings(ctx context.Context) ([]RBACBinding, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	result := []RBACBinding{}
+	for _, bindingID := range m.rbacBindingByID {
+		binding, exists := m.rbacBindings[bindingID]
+		if !exists {
+			continue
+		}
+		if !MatchScope(scope, binding.TenantID, binding.WorkspaceID) {
+			continue
+		}
+		result = append(result, binding)
+	}
+	return result, nil
+}
+
+// DeleteRBACBinding removes one binding by id in current scope.
+func (m *MemoryStore) DeleteRBACBinding(ctx context.Context, bindingID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+	normalizedID := strings.TrimSpace(bindingID)
+	if normalizedID == "" {
+		return ErrNotFound
+	}
+	binding, exists := m.rbacBindings[normalizedID]
+	if !exists || !MatchScope(scope, binding.TenantID, binding.WorkspaceID) {
+		return ErrNotFound
+	}
+	delete(m.rbacBindings, normalizedID)
+	return nil
+}
+
+// ListRBACPermissionsForSubject resolves role permissions for one subject in current scope.
+func (m *MemoryStore) ListRBACPermissionsForSubject(ctx context.Context, subjectType string, subjectID string, asOf time.Time) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	normalizedType, err := normalizeRBACSubjectType(subjectType)
+	if err != nil {
+		return nil, err
+	}
+	normalizedSubjectID := strings.TrimSpace(subjectID)
+	if normalizedSubjectID == "" {
+		return nil, nil
+	}
+
+	now := asOf.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	permissions := map[string]struct{}{}
+	for _, binding := range m.rbacBindings {
+		if !MatchScope(scope, binding.TenantID, binding.WorkspaceID) {
+			continue
+		}
+		if binding.SubjectType != normalizedType || binding.SubjectID != normalizedSubjectID {
+			continue
+		}
+		if binding.ExpiresAt != nil && binding.ExpiresAt.UTC().Before(now) {
+			continue
+		}
+		for _, permission := range m.rbacRolePerms[binding.RoleID] {
+			permissions[permission] = struct{}{}
+		}
+	}
+	result := make([]string, 0, len(permissions))
+	for permission := range permissions {
+		result = append(result, permission)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func rbacRoleNameScopeKey(scope Scope, name string) string {
+	normalized := scope.Normalize()
+	return normalized.TenantID + "|" + normalized.WorkspaceID + "|" + strings.ToLower(strings.TrimSpace(name))
 }
 
 // Close closes store resources.

@@ -106,76 +106,76 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 
 	r.GET("/metrics", gin.WrapH(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
 
+	authorizer := newRBACAuthorizer(svc)
 	v1 := r.Group("/v1")
-	v1.Use(apiKeyAuthMiddleware(opts.APIKeys, opts.APIKeyScopes, opts.OIDCTokenVerifier, opts.OIDCWriteScopes))
+	v1.Use(apiKeyAuthMiddleware(opts.APIKeys, opts.WriteAPIKeys, opts.APIKeyScopes, opts.OIDCTokenVerifier, opts.OIDCWriteScopes))
 	v1.Use(requestScopeMiddleware(opts.DefaultTenantID, opts.DefaultWorkspaceID))
-	v1.Use(requireReadableScopeMiddleware(opts.APIKeyScopes, opts.OIDCTokenVerifier))
 	v1.Use(rateLimitMiddleware(opts.RateLimitRPM, opts.RateLimitBurst))
 	v1.Use(auditLogMiddleware(logger, opts.AuditSink))
 
 	if svc == nil {
-		v1.GET("/findings", func(c *gin.Context) {
+		v1.GET("/findings", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsRead), func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
-		v1.GET("/findings/:finding_id", func(c *gin.Context) {
+		v1.GET("/findings/:finding_id", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsRead), func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan service unavailable"})
 		})
-		v1.GET("/findings/:finding_id/history", func(c *gin.Context) {
+		v1.GET("/findings/:finding_id/history", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsRead), func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
-		v1.GET("/findings/:finding_id/exports", func(c *gin.Context) {
+		v1.GET("/findings/:finding_id/exports", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsRead), func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan service unavailable"})
 		})
-		v1.GET("/findings/trends", func(c *gin.Context) {
+		v1.GET("/findings/trends", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsRead), func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
-		v1.GET("/findings/summary", func(c *gin.Context) {
+		v1.GET("/findings/summary", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsRead), func(c *gin.Context) {
 			c.JSON(http.StatusOK, FindingsSummary{
 				Total:      0,
 				BySeverity: map[string]int{},
 				ByType:     map[string]int{},
 			})
 		})
-		v1.GET("/identities", func(c *gin.Context) {
+		v1.GET("/identities", requireRBACPermissionMiddleware(authorizer, rbacPermissionGraphRead), func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
-		v1.GET("/relationships", func(c *gin.Context) {
+		v1.GET("/relationships", requireRBACPermissionMiddleware(authorizer, rbacPermissionGraphRead), func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
-		v1.GET("/ownership/signals", func(c *gin.Context) {
+		v1.GET("/ownership/signals", requireRBACPermissionMiddleware(authorizer, rbacPermissionGraphRead), func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
-		v1.GET("/scans", func(c *gin.Context) {
+		v1.GET("/scans", requireRBACPermissionMiddleware(authorizer, rbacPermissionScansRead), func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
-		v1.GET("/scans/:scan_id/diff", func(c *gin.Context) {
+		v1.GET("/scans/:scan_id/diff", requireRBACPermissionMiddleware(authorizer, rbacPermissionScansRead), func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan service unavailable"})
 		})
-		v1.GET("/scans/:scan_id/events", func(c *gin.Context) {
+		v1.GET("/scans/:scan_id/events", requireRBACPermissionMiddleware(authorizer, rbacPermissionScansRead), func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
-		v1.GET("/repo-scans", func(c *gin.Context) {
+		v1.GET("/repo-scans", requireRBACPermissionMiddleware(authorizer, rbacPermissionRepoScansRead), func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
-		v1.GET("/repo-scans/:repo_scan_id", func(c *gin.Context) {
+		v1.GET("/repo-scans/:repo_scan_id", requireRBACPermissionMiddleware(authorizer, rbacPermissionRepoScansRead), func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "repo scan service unavailable"})
 		})
-		v1.GET("/repo-findings", func(c *gin.Context) {
+		v1.GET("/repo-findings", requireRBACPermissionMiddleware(authorizer, rbacPermissionRepoScansRead), func(c *gin.Context) {
 			c.JSON(http.StatusOK, gin.H{"items": []any{}})
 		})
-		v1.POST("/scans", func(c *gin.Context) {
+		v1.POST("/scans", requireRBACPermissionMiddleware(authorizer, rbacPermissionScansRun), func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan service unavailable"})
 		})
-		v1.PATCH("/findings/:finding_id/triage", func(c *gin.Context) {
+		v1.PATCH("/findings/:finding_id/triage", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsTriage), func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "scan service unavailable"})
 		})
-		v1.POST("/repo-scans", func(c *gin.Context) {
+		v1.POST("/repo-scans", requireRBACPermissionMiddleware(authorizer, rbacPermissionRepoScansRun), func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "repo scan service unavailable"})
 		})
 		return r
 	}
 
-	v1.GET("/findings", func(c *gin.Context) {
+	v1.GET("/findings", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsRead), func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
 		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "created_at")
@@ -204,7 +204,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, response)
 	})
 
-	v1.GET("/findings/summary", func(c *gin.Context) {
+	v1.GET("/findings/summary", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsRead), func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		summary, err := svc.GetFindingsSummary(c.Request.Context(), limit)
 		if err != nil {
@@ -215,7 +215,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, summary)
 	})
 
-	v1.GET("/findings/:finding_id", func(c *gin.Context) {
+	v1.GET("/findings/:finding_id", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsRead), func(c *gin.Context) {
 		item, err := svc.GetFinding(
 			c.Request.Context(),
 			strings.TrimSpace(c.Param("finding_id")),
@@ -233,7 +233,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, item)
 	})
 
-	v1.GET("/findings/:finding_id/history", func(c *gin.Context) {
+	v1.GET("/findings/:finding_id/history", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsRead), func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultEventsLimit, maxListLimit)
 		items, err := svc.ListFindingTriageHistory(
 			c.Request.Context(),
@@ -253,7 +253,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, gin.H{"items": items})
 	})
 
-	v1.GET("/findings/:finding_id/exports", func(c *gin.Context) {
+	v1.GET("/findings/:finding_id/exports", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsRead), func(c *gin.Context) {
 		exports, err := svc.GetFindingExports(
 			c.Request.Context(),
 			strings.TrimSpace(c.Param("finding_id")),
@@ -271,7 +271,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, exports)
 	})
 
-	v1.GET("/findings/trends", func(c *gin.Context) {
+	v1.GET("/findings/trends", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsRead), func(c *gin.Context) {
 		points := parseLimit(c.Query("points"), 10, 100)
 		items, err := svc.GetFindingsTrendFiltered(
 			c.Request.Context(),
@@ -287,7 +287,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, gin.H{"items": items})
 	})
 
-	v1.PATCH("/findings/:finding_id/triage", requireWriteKeyMiddleware(opts.WriteAPIKeys, opts.APIKeyScopes), func(c *gin.Context) {
+	v1.PATCH("/findings/:finding_id/triage", requireRBACPermissionMiddleware(authorizer, rbacPermissionFindingsTriage), func(c *gin.Context) {
 		var request FindingTriageRequest
 		if err := c.ShouldBindJSON(&request); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
@@ -316,7 +316,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, gin.H{"finding": item})
 	})
 
-	v1.GET("/identities", func(c *gin.Context) {
+	v1.GET("/identities", requireRBACPermissionMiddleware(authorizer, rbacPermissionGraphRead), func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
 		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "name")
@@ -346,7 +346,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, response)
 	})
 
-	v1.GET("/relationships", func(c *gin.Context) {
+	v1.GET("/relationships", requireRBACPermissionMiddleware(authorizer, rbacPermissionGraphRead), func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
 		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "discovered_at")
@@ -376,7 +376,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, response)
 	})
 
-	v1.GET("/ownership/signals", func(c *gin.Context) {
+	v1.GET("/ownership/signals", requireRBACPermissionMiddleware(authorizer, rbacPermissionGraphRead), func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
 		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "confidence")
@@ -403,7 +403,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, response)
 	})
 
-	v1.GET("/scans", func(c *gin.Context) {
+	v1.GET("/scans", requireRBACPermissionMiddleware(authorizer, rbacPermissionScansRead), func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultScansLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
 		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "started_at")
@@ -422,7 +422,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, response)
 	})
 
-	v1.GET("/scans/:scan_id/diff", func(c *gin.Context) {
+	v1.GET("/scans/:scan_id/diff", requireRBACPermissionMiddleware(authorizer, rbacPermissionScansRead), func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		diff, err := svc.GetScanDiffAgainst(
 			c.Request.Context(),
@@ -446,7 +446,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, diff)
 	})
 
-	v1.GET("/scans/:scan_id/events", func(c *gin.Context) {
+	v1.GET("/scans/:scan_id/events", requireRBACPermissionMiddleware(authorizer, rbacPermissionScansRead), func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultEventsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
 		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "created_at")
@@ -474,7 +474,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, response)
 	})
 
-	v1.GET("/repo-scans", func(c *gin.Context) {
+	v1.GET("/repo-scans", requireRBACPermissionMiddleware(authorizer, rbacPermissionRepoScansRead), func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultScansLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
 		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "started_at")
@@ -493,7 +493,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, response)
 	})
 
-	v1.GET("/repo-scans/:repo_scan_id", func(c *gin.Context) {
+	v1.GET("/repo-scans/:repo_scan_id", requireRBACPermissionMiddleware(authorizer, rbacPermissionRepoScansRead), func(c *gin.Context) {
 		repoScanID := strings.TrimSpace(c.Param("repo_scan_id"))
 		if !isValidUUID(repoScanID) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid repo_scan_id"})
@@ -512,7 +512,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, item)
 	})
 
-	v1.GET("/repo-findings", func(c *gin.Context) {
+	v1.GET("/repo-findings", requireRBACPermissionMiddleware(authorizer, rbacPermissionRepoScansRead), func(c *gin.Context) {
 		limit := parseLimit(c.Query("limit"), defaultFindingsLimit, maxListLimit)
 		offset := parseCursor(c.Query("cursor"))
 		sortBy, sortDesc := parseSortParams(c.Query("sort_by"), c.Query("sort_order"), "created_at")
@@ -548,7 +548,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusOK, response)
 	})
 
-	v1.POST("/scans", requireWriteKeyMiddleware(opts.WriteAPIKeys, opts.APIKeyScopes), func(c *gin.Context) {
+	v1.POST("/scans", requireRBACPermissionMiddleware(authorizer, rbacPermissionScansRun), func(c *gin.Context) {
 		start := time.Now()
 		metrics.ScanRunsTotal.Inc()
 		metrics.ScanInFlight.Inc()
@@ -574,7 +574,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		})
 	})
 
-	v1.POST("/repo-scans", requireWriteKeyMiddleware(opts.WriteAPIKeys, opts.APIKeyScopes), func(c *gin.Context) {
+	v1.POST("/repo-scans", requireRBACPermissionMiddleware(authorizer, rbacPermissionRepoScansRun), func(c *gin.Context) {
 		start := time.Now()
 		metrics.RepoScanRunsTotal.Inc()
 		defer func() {
@@ -619,6 +619,101 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		c.JSON(http.StatusAccepted, gin.H{
 			"repo_scan": record,
 		})
+	})
+
+	rbacGroup := v1.Group("/rbac")
+	rbacGroup.Use(requireRBACPermissionMiddleware(authorizer, rbacPermissionRBACManage))
+	rbacGroup.GET("/roles", func(c *gin.Context) {
+		roles, err := svc.ListRBACRoles(c.Request.Context())
+		if err != nil {
+			logger.Error("list rbac roles", telemetry.ZapError(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list rbac roles"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"items": roles})
+	})
+	rbacGroup.PUT("/roles/:name", func(c *gin.Context) {
+		var req struct {
+			Description string   `json:"description"`
+			Permissions []string `json:"permissions"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+		role, err := svc.UpsertRBACRole(c.Request.Context(), db.RBACRole{
+			Name:        strings.TrimSpace(c.Param("name")),
+			Description: req.Description,
+			Permissions: req.Permissions,
+		})
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid rbac role"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"role": role})
+	})
+	rbacGroup.DELETE("/roles/:role_id", func(c *gin.Context) {
+		if err := svc.DeleteRBACRole(c.Request.Context(), c.Param("role_id")); err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "rbac role not found"})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unable to delete rbac role"})
+			return
+		}
+		c.Status(http.StatusNoContent)
+	})
+	rbacGroup.GET("/bindings", func(c *gin.Context) {
+		bindings, err := svc.ListRBACBindings(c.Request.Context())
+		if err != nil {
+			logger.Error("list rbac bindings", telemetry.ZapError(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list rbac bindings"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"items": bindings})
+	})
+	rbacGroup.POST("/bindings", func(c *gin.Context) {
+		var req struct {
+			SubjectType string `json:"subject_type"`
+			SubjectID   string `json:"subject_id"`
+			RoleID      string `json:"role_id"`
+			ExpiresAt   string `json:"expires_at"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+			return
+		}
+		expiresAt, err := parseOptionalRFC3339(req.ExpiresAt)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid expires_at"})
+			return
+		}
+		binding, err := svc.UpsertRBACBinding(c.Request.Context(), db.RBACBinding{
+			SubjectType: req.SubjectType,
+			SubjectID:   req.SubjectID,
+			RoleID:      req.RoleID,
+			ExpiresAt:   expiresAt,
+		})
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "rbac role not found"})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid rbac binding"})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"binding": binding})
+	})
+	rbacGroup.DELETE("/bindings/:binding_id", func(c *gin.Context) {
+		if err := svc.DeleteRBACBinding(c.Request.Context(), c.Param("binding_id")); err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "rbac binding not found"})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unable to delete rbac binding"})
+			return
+		}
+		c.Status(http.StatusNoContent)
 	})
 
 	return r
@@ -1100,7 +1195,13 @@ func securityHeadersMiddleware() gin.HandlerFunc {
 	}
 }
 
-func apiKeyAuthMiddleware(keys []string, scopedKeys map[string][]string, tokenVerifier TokenVerifier, oidcWriteScopes []string) gin.HandlerFunc {
+func apiKeyAuthMiddleware(
+	keys []string,
+	writeKeys []string,
+	scopedKeys map[string][]string,
+	tokenVerifier TokenVerifier,
+	oidcWriteScopes []string,
+) gin.HandlerFunc {
 	oidcWriteScopeSet := newScopeSet(oidcWriteScopes)
 
 	scopedAllowed := map[string]scopeSet{}
@@ -1123,6 +1224,14 @@ func apiKeyAuthMiddleware(keys []string, scopedKeys map[string][]string, tokenVe
 			legacyAllowed = append(legacyAllowed, trimmed)
 		}
 	}
+	legacyWriteAllowed := []string{}
+	for _, key := range writeKeys {
+		trimmed := strings.TrimSpace(key)
+		if trimmed == "" {
+			continue
+		}
+		legacyWriteAllowed = append(legacyWriteAllowed, trimmed)
+	}
 
 	if len(scopedAllowed) == 0 && len(legacyAllowed) == 0 && tokenVerifier == nil {
 		return func(c *gin.Context) { c.Next() }
@@ -1133,11 +1242,16 @@ func apiKeyAuthMiddleware(keys []string, scopedKeys map[string][]string, tokenVe
 			if scopes, ok := scopedKeyLookup(scopedAllowed, candidate); ok {
 				c.Set("auth.api_key", candidate)
 				c.Set("auth.scope_set", scopes)
+				c.Set("auth.principal_type", db.RBACSubjectTypeAPIKey)
+				c.Set("auth.principal_id", fingerprintAPIKey(candidate))
 				c.Next()
 				return
 			}
 			if keyInList(legacyAllowed, candidate) {
 				c.Set("auth.api_key", candidate)
+				c.Set("auth.scope_set", legacyScopeSetForKey(candidate, legacyWriteAllowed))
+				c.Set("auth.principal_type", db.RBACSubjectTypeAPIKey)
+				c.Set("auth.principal_id", fingerprintAPIKey(candidate))
 				c.Next()
 				return
 			}
@@ -1155,6 +1269,8 @@ func apiKeyAuthMiddleware(keys []string, scopedKeys map[string][]string, tokenVe
 				c.Set("auth.tenant_id", token.TenantID)
 				c.Set("auth.workspace_id", token.WorkspaceID)
 				c.Set("auth.scope_set", scopeSetFromOIDCToken(token, oidcWriteScopeSet))
+				c.Set("auth.principal_type", db.RBACSubjectTypeOIDCSubject)
+				c.Set("auth.principal_id", token.Subject)
 				c.Next()
 				return
 			}
@@ -1163,60 +1279,6 @@ func apiKeyAuthMiddleware(keys []string, scopedKeys map[string][]string, tokenVe
 		}
 
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-	}
-}
-
-func requireWriteKeyMiddleware(writeKeys []string, scopedKeys map[string][]string) gin.HandlerFunc {
-	allowed := []string{}
-	for _, key := range writeKeys {
-		trimmed := strings.TrimSpace(key)
-		if trimmed == "" {
-			continue
-		}
-		allowed = append(allowed, trimmed)
-	}
-
-	// When scoped auth exists (scoped API keys or OIDC token scopes), prefer scope-based write checks.
-	// This keeps API keys backward compatible while allowing OAuth/OIDC write scopes.
-	return func(c *gin.Context) {
-		if scopeSetValue, exists := c.Get("auth.scope_set"); exists {
-			scopes, ok := scopeSetValue.(scopeSet)
-			if !ok || !scopes.has(scopeWrite) {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-				return
-			}
-			c.Next()
-			return
-		}
-
-		if len(scopedKeys) > 0 {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-			return
-		}
-
-		if len(allowed) == 0 {
-			// When auth middleware is disabled (test/local stubs), keep route behavior unchanged.
-			// In authenticated API-key mode, empty write-key config must not grant write access.
-			if _, exists := c.Get("auth.api_key"); exists {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-				return
-			}
-			c.Next()
-			return
-		}
-
-		apiKeyValue, exists := c.Get("auth.api_key")
-		if !exists {
-			// If API key auth is disabled, write authorization cannot be enforced.
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-			return
-		}
-		apiKey, _ := apiKeyValue.(string)
-		if !keyInList(allowed, apiKey) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-			return
-		}
-		c.Next()
 	}
 }
 
@@ -1238,41 +1300,21 @@ func scopedKeyLookup(scoped map[string]scopeSet, candidate string) (scopeSet, bo
 	return scopeSet{}, false
 }
 
+func legacyScopeSetForKey(candidate string, writeKeys []string) scopeSet {
+	set := scopeSet{
+		scopeRead: {},
+	}
+	if keyInList(writeKeys, candidate) {
+		set[scopeWrite] = struct{}{}
+	}
+	return set
+}
+
 func secureKeyEquals(expected string, candidate string) bool {
 	if len(expected) != len(candidate) {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(expected), []byte(candidate)) == 1
-}
-
-func requireReadableScopeMiddleware(scopedKeys map[string][]string, tokenVerifier TokenVerifier) gin.HandlerFunc {
-	if len(scopedKeys) == 0 && tokenVerifier == nil {
-		return func(c *gin.Context) { c.Next() }
-	}
-	return func(c *gin.Context) {
-		// Backward compatibility: in legacy API-key mode (no scoped keys), an API key
-		// authenticated request remains read-authorized even when OIDC is also enabled.
-		if len(scopedKeys) == 0 {
-			if _, hasAPIKey := c.Get("auth.api_key"); hasAPIKey {
-				if _, hasScopes := c.Get("auth.scope_set"); !hasScopes {
-					c.Next()
-					return
-				}
-			}
-		}
-
-		scopeSetValue, exists := c.Get("auth.scope_set")
-		if !exists {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-			return
-		}
-		scopes, ok := scopeSetValue.(scopeSet)
-		if !ok || !scopes.has(scopeRead) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-			return
-		}
-		c.Next()
-	}
 }
 
 type ipRateLimiter struct {

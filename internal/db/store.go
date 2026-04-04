@@ -171,5 +171,12 @@ type Store interface {
 	UpsertRepoFindings(ctx context.Context, repoScanID string, findings []domain.Finding) error
 	ListRepoScans(ctx context.Context, limit int) ([]RepoScanRecord, error)
 	ListRepoFindings(ctx context.Context, filter RepoFindingFilter, limit int) ([]domain.Finding, error)
+	UpsertRBACRole(ctx context.Context, role RBACRole) (RBACRole, error)
+	ListRBACRoles(ctx context.Context) ([]RBACRole, error)
+	DeleteRBACRole(ctx context.Context, roleID string) error
+	UpsertRBACBinding(ctx context.Context, binding RBACBinding) (RBACBinding, error)
+	ListRBACBindings(ctx context.Context) ([]RBACBinding, error)
+	DeleteRBACBinding(ctx context.Context, bindingID string) error
+	ListRBACPermissionsForSubject(ctx context.Context, subjectType string, subjectID string, asOf time.Time) ([]string, error)
 	Close() error
 }

@@ -159,3 +159,26 @@ func TestEighthMigrationContainsPostgresRLSGuardrails(t *testing.T) {
 		}
 	}
 }
+
+func TestNinthMigrationContainsRBACCoreTables(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "000009_rbac_core_workspace_scope.up.sql")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	text := string(content)
+	required := []string{
+		"CREATE TABLE IF NOT EXISTS rbac_roles",
+		"CREATE TABLE IF NOT EXISTS rbac_role_permissions",
+		"CREATE TABLE IF NOT EXISTS rbac_bindings",
+		"idx_rbac_roles_scope_name",
+		"idx_rbac_bindings_scope_subject_role",
+		"rbac_roles_scope_isolation",
+		"rbac_bindings_scope_isolation",
+	}
+	for _, item := range required {
+		if !strings.Contains(text, item) {
+			t.Fatalf("expected rbac migration item %q", item)
+		}
+	}
+}

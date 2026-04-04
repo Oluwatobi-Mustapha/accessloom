@@ -1500,6 +1500,356 @@ func (p *PostgresStore) ListRepoFindings(ctx context.Context, filter RepoFinding
 	return result, nil
 }
 
+// UpsertRBACRole creates or updates one scoped RBAC role.
+func (p *PostgresStore) UpsertRBACRole(ctx context.Context, role RBACRole) (RBACRole, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return RBACRole{}, err
+	}
+	name := strings.ToLower(strings.TrimSpace(role.Name))
+	if name == "" {
+		return RBACRole{}, fmt.Errorf("role name is required")
+	}
+	description := strings.TrimSpace(role.Description)
+	permissions := normalizeRBACPermissionList(role.Permissions)
+	now := time.Now().UTC()
+
+	tx, err := p.beginTx(ctx)
+	if err != nil {
+		return RBACRole{}, fmt.Errorf("begin rbac role transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row := tx.QueryRowContext(
+		ctx,
+		`INSERT INTO rbac_roles (id, tenant_id, workspace_id, name, description, is_builtin, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 ON CONFLICT (tenant_id, workspace_id, name)
+		 DO UPDATE SET
+		   description = EXCLUDED.description,
+		   is_builtin = rbac_roles.is_builtin OR EXCLUDED.is_builtin,
+		   updated_at = EXCLUDED.updated_at
+		 RETURNING id, tenant_id, workspace_id, name, description, is_builtin, created_at, updated_at`,
+		uuid.NewString(),
+		scope.TenantID,
+		scope.WorkspaceID,
+		name,
+		description,
+		role.IsBuiltIn,
+		now,
+		now,
+	)
+
+	updatedRole, scanErr := scanRBACRole(row)
+	if scanErr != nil {
+		return RBACRole{}, fmt.Errorf("upsert rbac role: %w", scanErr)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM rbac_role_permissions WHERE role_id = $1`, updatedRole.ID); err != nil {
+		return RBACRole{}, fmt.Errorf("reset rbac role permissions: %w", err)
+	}
+	for _, permission := range permissions {
+		if _, err := tx.ExecContext(
+			ctx,
+			`INSERT INTO rbac_role_permissions (role_id, permission, created_at) VALUES ($1, $2, $3)
+			 ON CONFLICT (role_id, permission) DO NOTHING`,
+			updatedRole.ID,
+			permission,
+			now,
+		); err != nil {
+			return RBACRole{}, fmt.Errorf("insert rbac role permission: %w", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return RBACRole{}, fmt.Errorf("commit rbac role transaction: %w", err)
+	}
+	updatedRole.Permissions = permissions
+	return updatedRole, nil
+}
+
+// ListRBACRoles returns scoped RBAC roles and permissions.
+func (p *PostgresStore) ListRBACRoles(ctx context.Context) ([]RBACRole, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := p.queryContext(
+		ctx,
+		`SELECT r.id, r.tenant_id, r.workspace_id, r.name, COALESCE(r.description, ''), r.is_builtin, r.created_at, r.updated_at, rp.permission
+		 FROM rbac_roles r
+		 LEFT JOIN rbac_role_permissions rp ON rp.role_id = r.id
+		 WHERE r.tenant_id = $1
+		   AND r.workspace_id = $2
+		 ORDER BY r.name ASC, rp.permission ASC`,
+		scope.TenantID,
+		scope.WorkspaceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list rbac roles: %w", err)
+	}
+	defer rows.Close()
+
+	byID := map[string]RBACRole{}
+	order := []string{}
+	for rows.Next() {
+		var rowRole RBACRole
+		var permission sql.NullString
+		if err := rows.Scan(
+			&rowRole.ID,
+			&rowRole.TenantID,
+			&rowRole.WorkspaceID,
+			&rowRole.Name,
+			&rowRole.Description,
+			&rowRole.IsBuiltIn,
+			&rowRole.CreatedAt,
+			&rowRole.UpdatedAt,
+			&permission,
+		); err != nil {
+			return nil, fmt.Errorf("scan rbac role row: %w", err)
+		}
+		existing, exists := byID[rowRole.ID]
+		if !exists {
+			rowRole.Permissions = []string{}
+			byID[rowRole.ID] = rowRole
+			order = append(order, rowRole.ID)
+			existing = rowRole
+		}
+		if permission.Valid {
+			existing.Permissions = append(existing.Permissions, permission.String)
+			byID[rowRole.ID] = existing
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rbac role rows: %w", err)
+	}
+	result := make([]RBACRole, 0, len(order))
+	for _, roleID := range order {
+		role := byID[roleID]
+		role.Permissions = normalizeRBACPermissionList(role.Permissions)
+		result = append(result, role)
+	}
+	return result, nil
+}
+
+// DeleteRBACRole deletes one scoped RBAC role (custom roles only).
+func (p *PostgresStore) DeleteRBACRole(ctx context.Context, roleID string) error {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+	normalizedRoleID := strings.TrimSpace(roleID)
+	if normalizedRoleID == "" {
+		return ErrNotFound
+	}
+	var builtIn bool
+	if err := p.queryRowContext(
+		ctx,
+		`SELECT is_builtin
+		 FROM rbac_roles
+		 WHERE id = $1
+		   AND tenant_id = $2
+		   AND workspace_id = $3`,
+		normalizedRoleID,
+		scope.TenantID,
+		scope.WorkspaceID,
+	).Scan(&builtIn); err != nil {
+		if errorsIsNoRows(err) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("lookup rbac role: %w", err)
+	}
+	if builtIn {
+		return fmt.Errorf("built-in roles cannot be deleted")
+	}
+	result, err := p.execContext(
+		ctx,
+		`DELETE FROM rbac_roles
+		 WHERE id = $1
+		   AND tenant_id = $2
+		   AND workspace_id = $3`,
+		normalizedRoleID,
+		scope.TenantID,
+		scope.WorkspaceID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete rbac role: %w", err)
+	}
+	return ensureRowsAffected(result)
+}
+
+// UpsertRBACBinding creates or updates one scoped subject-role binding.
+func (p *PostgresStore) UpsertRBACBinding(ctx context.Context, binding RBACBinding) (RBACBinding, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return RBACBinding{}, err
+	}
+	subjectType, err := normalizeRBACSubjectType(binding.SubjectType)
+	if err != nil {
+		return RBACBinding{}, err
+	}
+	subjectID := strings.TrimSpace(binding.SubjectID)
+	if subjectID == "" {
+		return RBACBinding{}, fmt.Errorf("subject id is required")
+	}
+	roleID := strings.TrimSpace(binding.RoleID)
+	if roleID == "" {
+		return RBACBinding{}, fmt.Errorf("role id is required")
+	}
+	if err := p.queryRowContext(
+		ctx,
+		`SELECT 1
+		 FROM rbac_roles
+		 WHERE id = $1
+		   AND tenant_id = $2
+		   AND workspace_id = $3`,
+		roleID,
+		scope.TenantID,
+		scope.WorkspaceID,
+	).Scan(new(int)); err != nil {
+		if errorsIsNoRows(err) {
+			return RBACBinding{}, ErrNotFound
+		}
+		return RBACBinding{}, fmt.Errorf("lookup rbac role for binding: %w", err)
+	}
+
+	now := time.Now().UTC()
+	row := p.queryRowContext(
+		ctx,
+		`INSERT INTO rbac_bindings (id, tenant_id, workspace_id, subject_type, subject_id, role_id, created_at, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 ON CONFLICT (tenant_id, workspace_id, subject_type, subject_id, role_id)
+		 DO UPDATE SET
+		   expires_at = EXCLUDED.expires_at
+		 RETURNING id, tenant_id, workspace_id, subject_type, subject_id, role_id, created_at, expires_at`,
+		uuid.NewString(),
+		scope.TenantID,
+		scope.WorkspaceID,
+		subjectType,
+		subjectID,
+		roleID,
+		now,
+		nullableTimePtr(binding.ExpiresAt),
+	)
+	created, scanErr := scanRBACBinding(row)
+	if scanErr != nil {
+		return RBACBinding{}, fmt.Errorf("upsert rbac binding: %w", scanErr)
+	}
+	return created, nil
+}
+
+// ListRBACBindings returns scoped subject-role bindings.
+func (p *PostgresStore) ListRBACBindings(ctx context.Context) ([]RBACBinding, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := p.queryContext(
+		ctx,
+		`SELECT id, tenant_id, workspace_id, subject_type, subject_id, role_id, created_at, expires_at
+		 FROM rbac_bindings
+		 WHERE tenant_id = $1
+		   AND workspace_id = $2
+		 ORDER BY created_at DESC, id ASC`,
+		scope.TenantID,
+		scope.WorkspaceID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list rbac bindings: %w", err)
+	}
+	defer rows.Close()
+
+	result := []RBACBinding{}
+	for rows.Next() {
+		binding, scanErr := scanRBACBinding(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("scan rbac binding row: %w", scanErr)
+		}
+		result = append(result, binding)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rbac binding rows: %w", err)
+	}
+	return result, nil
+}
+
+// DeleteRBACBinding removes one scoped binding.
+func (p *PostgresStore) DeleteRBACBinding(ctx context.Context, bindingID string) error {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+	normalizedID := strings.TrimSpace(bindingID)
+	if normalizedID == "" {
+		return ErrNotFound
+	}
+	result, err := p.execContext(
+		ctx,
+		`DELETE FROM rbac_bindings
+		 WHERE id = $1
+		   AND tenant_id = $2
+		   AND workspace_id = $3`,
+		normalizedID,
+		scope.TenantID,
+		scope.WorkspaceID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete rbac binding: %w", err)
+	}
+	return ensureRowsAffected(result)
+}
+
+// ListRBACPermissionsForSubject resolves role-derived permissions for one scoped subject.
+func (p *PostgresStore) ListRBACPermissionsForSubject(ctx context.Context, subjectType string, subjectID string, asOf time.Time) ([]string, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	normalizedType, err := normalizeRBACSubjectType(subjectType)
+	if err != nil {
+		return nil, err
+	}
+	normalizedSubjectID := strings.TrimSpace(subjectID)
+	if normalizedSubjectID == "" {
+		return []string{}, nil
+	}
+	at := asOf.UTC()
+	if at.IsZero() {
+		at = time.Now().UTC()
+	}
+	rows, err := p.queryContext(
+		ctx,
+		`SELECT DISTINCT rp.permission
+		 FROM rbac_bindings b
+		 JOIN rbac_role_permissions rp ON rp.role_id = b.role_id
+		 WHERE b.tenant_id = $1
+		   AND b.workspace_id = $2
+		   AND b.subject_type = $3
+		   AND b.subject_id = $4
+		   AND (b.expires_at IS NULL OR b.expires_at >= $5)
+		 ORDER BY rp.permission ASC`,
+		scope.TenantID,
+		scope.WorkspaceID,
+		normalizedType,
+		normalizedSubjectID,
+		at,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list rbac permissions: %w", err)
+	}
+	defer rows.Close()
+	result := []string{}
+	for rows.Next() {
+		var permission string
+		if err := rows.Scan(&permission); err != nil {
+			return nil, fmt.Errorf("scan rbac permission row: %w", err)
+		}
+		result = append(result, permission)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rbac permission rows: %w", err)
+	}
+	return result, nil
+}
+
 // Close closes database resources.
 func (p *PostgresStore) Close() error {
 	if p.db == nil {
@@ -1520,6 +1870,56 @@ func nullableTime(value time.Time) any {
 		return nil
 	}
 	return value.UTC()
+}
+
+func nullableTimePtr(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return nullableTime(value.UTC())
+}
+
+func scanRBACRole(scanner scanner) (RBACRole, error) {
+	var role RBACRole
+	if err := scanner.Scan(
+		&role.ID,
+		&role.TenantID,
+		&role.WorkspaceID,
+		&role.Name,
+		&role.Description,
+		&role.IsBuiltIn,
+		&role.CreatedAt,
+		&role.UpdatedAt,
+	); err != nil {
+		return RBACRole{}, err
+	}
+	role.CreatedAt = role.CreatedAt.UTC()
+	role.UpdatedAt = role.UpdatedAt.UTC()
+	role.Permissions = normalizeRBACPermissionList(role.Permissions)
+	return role, nil
+}
+
+func scanRBACBinding(scanner scanner) (RBACBinding, error) {
+	var binding RBACBinding
+	var expiresAt sql.NullTime
+	if err := scanner.Scan(
+		&binding.ID,
+		&binding.TenantID,
+		&binding.WorkspaceID,
+		&binding.SubjectType,
+		&binding.SubjectID,
+		&binding.RoleID,
+		&binding.CreatedAt,
+		&expiresAt,
+	); err != nil {
+		return RBACBinding{}, err
+	}
+	binding.CreatedAt = binding.CreatedAt.UTC()
+	if expiresAt.Valid {
+		value := expiresAt.Time.UTC()
+		binding.ExpiresAt = &value
+	}
+	return binding, nil
 }
 
 func upsertRawAssets(ctx context.Context, tx *sql.Tx, scanID string, assets []providers.RawAsset) error {

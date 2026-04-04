@@ -1231,6 +1231,22 @@ func TestRouterOIDCWriteScopeAuthorization(t *testing.T) {
 	metrics := telemetry.NewMetrics()
 	store := db.NewMemoryStore()
 	svc := NewService(store, routerScanner{}, "aws")
+	writerScopeCtx := db.WithScope(context.Background(), db.Scope{TenantID: "tenant-1", WorkspaceID: "workspace-1"})
+	writerRole, err := svc.UpsertRBACRole(writerScopeCtx, db.RBACRole{
+		Name:        "writer",
+		Description: "writer role",
+		Permissions: []string{rbacPermissionScansRun, rbacPermissionScansRead},
+	})
+	if err != nil {
+		t.Fatalf("create writer role: %v", err)
+	}
+	if _, err := svc.UpsertRBACBinding(writerScopeCtx, db.RBACBinding{
+		SubjectType: db.RBACSubjectTypeOIDCSubject,
+		SubjectID:   "user-write",
+		RoleID:      writerRole.ID,
+	}); err != nil {
+		t.Fatalf("bind writer role: %v", err)
+	}
 	r := NewRouter(logger, metrics, svc, RouterOptions{
 		OIDCTokenVerifier: fakeTokenVerifier{
 			tokens: map[string]VerifiedToken{
@@ -1291,6 +1307,98 @@ func TestRouterHybridOIDCAndLegacyAPIKeyReadCompatibility(t *testing.T) {
 	r.ServeHTTP(readW, readReq)
 	if readW.Code != http.StatusOK {
 		t.Fatalf("expected legacy api key read to pass in hybrid mode, got %d", readW.Code)
+	}
+}
+
+func TestRouterRBACLeastPrivilegeByWorkspace(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	metrics := telemetry.NewMetrics()
+	store := db.NewMemoryStore()
+	svc := NewService(store, routerScanner{}, "aws")
+
+	scopeA := db.WithScope(context.Background(), db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"})
+	roleA, err := svc.UpsertRBACRole(scopeA, db.RBACRole{
+		Name:        "workspace-a-viewer",
+		Description: "workspace A viewer",
+		Permissions: []string{rbacPermissionFindingsRead},
+	})
+	if err != nil {
+		t.Fatalf("create workspace role: %v", err)
+	}
+	if _, err := svc.UpsertRBACBinding(scopeA, db.RBACBinding{
+		SubjectType: db.RBACSubjectTypeOIDCSubject,
+		SubjectID:   "user-1",
+		RoleID:      roleA.ID,
+	}); err != nil {
+		t.Fatalf("bind workspace role: %v", err)
+	}
+
+	r := NewRouter(logger, metrics, svc, RouterOptions{
+		OIDCTokenVerifier: fakeTokenVerifier{
+			tokens: map[string]VerifiedToken{
+				"token-workspace-a": {
+					Subject:     "user-1",
+					TenantID:    "tenant-a",
+					WorkspaceID: "workspace-a",
+					Scopes:      []string{"identrail.read"},
+				},
+				"token-workspace-b": {
+					Subject:     "user-1",
+					TenantID:    "tenant-a",
+					WorkspaceID: "workspace-b",
+					Scopes:      []string{"identrail.read"},
+				},
+			},
+		},
+	})
+
+	allowedReq := httptest.NewRequest(http.MethodGet, "/v1/findings", nil)
+	allowedReq.Header.Set("Authorization", "Bearer token-workspace-a")
+	allowedW := httptest.NewRecorder()
+	r.ServeHTTP(allowedW, allowedReq)
+	if allowedW.Code != http.StatusOK {
+		t.Fatalf("expected workspace-a request to pass, got %d", allowedW.Code)
+	}
+
+	deniedReq := httptest.NewRequest(http.MethodGet, "/v1/findings", nil)
+	deniedReq.Header.Set("Authorization", "Bearer token-workspace-b")
+	deniedW := httptest.NewRecorder()
+	r.ServeHTTP(deniedW, deniedReq)
+	if deniedW.Code != http.StatusForbidden {
+		t.Fatalf("expected workspace-b request to be forbidden, got %d", deniedW.Code)
+	}
+}
+
+func TestRouterRBACManageEndpointsWithAdminScopedAPIKey(t *testing.T) {
+	logger := zap.NewNop()
+	metrics := telemetry.NewMetrics()
+	store := db.NewMemoryStore()
+	svc := NewService(store, routerScanner{}, "aws")
+	r := NewRouter(logger, metrics, svc, RouterOptions{
+		APIKeyScopes: map[string][]string{
+			"admin-key": {"admin"},
+		},
+	})
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/rbac/roles", nil)
+	listReq.Header.Set("X-API-Key", "admin-key")
+	listW := httptest.NewRecorder()
+	r.ServeHTTP(listW, listReq)
+	if listW.Code != http.StatusOK {
+		t.Fatalf("expected list roles to pass for admin key, got %d", listW.Code)
+	}
+
+	putReq := httptest.NewRequest(
+		http.MethodPut,
+		"/v1/rbac/roles/custom-viewer",
+		bytes.NewBufferString(`{"description":"custom","permissions":["findings.read"]}`),
+	)
+	putReq.Header.Set("Content-Type", "application/json")
+	putReq.Header.Set("X-API-Key", "admin-key")
+	putW := httptest.NewRecorder()
+	r.ServeHTTP(putW, putReq)
+	if putW.Code != http.StatusOK {
+		t.Fatalf("expected role upsert to pass for admin key, got %d", putW.Code)
 	}
 }
 
