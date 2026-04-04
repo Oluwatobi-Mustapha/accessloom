@@ -221,7 +221,7 @@ func ValidateSecurity(cfg Config) error {
 		return fmt.Errorf("IDENTRAIL_REPO_SCAN_MAX_FINDINGS must be <= IDENTRAIL_REPO_SCAN_MAX_FINDINGS_MAX")
 	}
 	scanQueueMaxPending := cfg.ScanQueueMaxPending
-	if scanQueueMaxPending <= 0 {
+	if scanQueueMaxPending == 0 {
 		scanQueueMaxPending = defaultScanQueueMaxPending
 	}
 	if scanQueueMaxPending <= 0 || scanQueueMaxPending > maxScanQueueMaxPending {
