@@ -82,69 +82,16 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const fs = require('fs');
-            const result = JSON.parse(fs.readFileSync('.tmp/review.json', 'utf8'));
-            const marker = '<!-- identrail-reviewer:pr -->';
-            const issue_number = context.payload.pull_request.number;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-
-            const findings = result.findings || [];
-            const abstentions = result.abstentions || [];
-            const maxFindings = 20;
-            const clipped = findings.slice(0, maxFindings);
-
-            let body = `${marker}\n## identrail-reviewer\n`;
-            body += `Status: **${result.status}**\n\n`;
-            body += `${result.summary}\n\n`;
-
-            if (clipped.length > 0) {
-              body += `### Findings\n`;
-              for (const finding of clipped) {
-                body += `- [${finding.severity}] ${finding.summary} (${finding.file}:${finding.line})\n`;
-                body += `  - Rule: \`${finding.rule_id}\` | Confidence: ${finding.confidence}\n`;
-                body += `  - Recommendation: ${finding.recommendation}\n`;
-              }
-            } else {
-              body += `### Findings\n- No deterministic findings.\n`;
-            }
-
-            if (findings.length > maxFindings) {
-              body += `\nAdditional findings omitted: ${findings.length - maxFindings}.\n`;
-            }
-
-            if (abstentions.length > 0) {
-              body += `\n### Abstentions\n`;
-              for (const note of abstentions) {
-                body += `- ${note}\n`;
-              }
-            }
-
-            body += `\n_Reviewer version: ${result.version}_\n`;
-
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number,
-              per_page: 100
+            const { upsertReviewComment } = require('./.github/scripts/identrail-reviewer/upsert-review-comment');
+            await upsertReviewComment({
+              github,
+              context,
+              reviewPath: '.tmp/review.json',
+              marker: '<!-- identrail-reviewer:pr -->',
+              heading: '## identrail-reviewer',
+              issueNumber: context.payload.pull_request.number,
+              maxFindings: 20
             });
-
-            const existing = comments.find((c) => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: existing.id,
-                body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number,
-                body
-              });
-            }
 
   issue-review:
     if: github.event_name == 'issues'
@@ -179,59 +126,12 @@ jobs:
         uses: actions/github-script@v8
         with:
           script: |
-            const fs = require('fs');
-            const result = JSON.parse(fs.readFileSync('.tmp/review.json', 'utf8'));
-            const marker = '<!-- identrail-reviewer:issue -->';
-            const issue_number = context.payload.issue.number;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-
-            const findings = result.findings || [];
-            const abstentions = result.abstentions || [];
-
-            let body = `${marker}\n## identrail-reviewer issue triage\n`;
-            body += `Status: **${result.status}**\n\n`;
-            body += `${result.summary}\n\n`;
-
-            if (findings.length > 0) {
-              body += `### Findings\n`;
-              for (const finding of findings) {
-                body += `- [${finding.severity}] ${finding.summary} (${finding.file}:${finding.line})\n`;
-                body += `  - Rule: \`${finding.rule_id}\` | Confidence: ${finding.confidence}\n`;
-                body += `  - Recommendation: ${finding.recommendation}\n`;
-              }
-            } else {
-              body += `### Findings\n- No deterministic findings.\n`;
-            }
-
-            if (abstentions.length > 0) {
-              body += `\n### Abstentions\n`;
-              for (const note of abstentions) {
-                body += `- ${note}\n`;
-              }
-            }
-
-            body += `\n_Reviewer version: ${result.version}_\n`;
-
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number,
-              per_page: 100
+            const { upsertReviewComment } = require('./.github/scripts/identrail-reviewer/upsert-review-comment');
+            await upsertReviewComment({
+              github,
+              context,
+              reviewPath: '.tmp/review.json',
+              marker: '<!-- identrail-reviewer:issue -->',
+              heading: '## identrail-reviewer issue triage',
+              issueNumber: context.payload.issue.number
             });
-            const existing = comments.find((c) => c.body && c.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: existing.id,
-                body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number,
-                body
-              });
-            }

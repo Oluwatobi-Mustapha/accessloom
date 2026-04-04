@@ -47,6 +47,9 @@ func reviewPR(args []string) {
 	if err := json.Unmarshal(eventBytes, &event); err != nil {
 		fatal("failed to parse PR event payload: " + err.Error())
 	}
+	if event.PullRequest.Number == 0 {
+		fatal(errors.New("event payload does not contain pull request context").Error())
+	}
 
 	changedBytes, err := os.ReadFile(*changedFilesPath)
 	if err != nil {
