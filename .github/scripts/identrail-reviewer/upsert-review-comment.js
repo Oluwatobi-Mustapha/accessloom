@@ -105,7 +105,6 @@ function parseTouchedLines(patch) {
       continue;
     }
     if (line.startsWith("+") && !line.startsWith("+++")) {
-      touched.add(nextRightLine);
       nextRightLine += 1;
       continue;
     }
