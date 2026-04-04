@@ -128,6 +128,12 @@ func BuildScanService(cfg config.Config) (*api.Service, func() error, error) {
 		svc.RepoScanMaxFindingsLimit = cfg.RepoScanMaxFindingsMax
 	}
 	svc.RepoScanAllowedTargets = append([]string(nil), cfg.RepoScanAllowlist...)
+	if cfg.ScanQueueMaxPending > 0 {
+		svc.ScanQueueMaxPending = cfg.ScanQueueMaxPending
+	}
+	if cfg.RepoQueueMaxPending > 0 {
+		svc.RepoQueueMaxPending = cfg.RepoQueueMaxPending
+	}
 	if cfg.AlertWebhookURL != "" {
 		alerter, alertErr := api.NewWebhookAlerter(
 			cfg.AlertWebhookURL,

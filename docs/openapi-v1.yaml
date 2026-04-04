@@ -178,7 +178,7 @@ paths:
       operationId: runScan
       responses:
         "202":
-          description: Scan started
+          description: Scan enqueued
           content:
             application/json:
               schema:
@@ -186,14 +186,8 @@ paths:
                 properties:
                   scan:
                     $ref: "#/components/schemas/ScanRecord"
-                  assets:
-                    type: integer
-                  finding_count:
-                    type: integer
-                  partial_source_run:
-                    type: boolean
-        "409":
-          description: Scan already running for provider
+        "429":
+          description: Scan queue is full
   /v1/scans/{scan_id}/diff:
     get:
       tags: [Scans]
@@ -352,7 +346,7 @@ paths:
               $ref: "#/components/schemas/RepoScanRequest"
       responses:
         "202":
-          description: Repo scan started
+          description: Repo scan enqueued
           content:
             application/json:
               schema:
@@ -360,9 +354,16 @@ paths:
                 properties:
                   repo_scan:
                     $ref: "#/components/schemas/RepoScanRecord"
-                  result:
-                    type: object
-                    additionalProperties: true
+        "400":
+          description: Invalid repository scan request
+        "403":
+          description: Repo target not allowed
+        "409":
+          description: Repo scan already in progress for target
+        "429":
+          description: Repo scan queue is full
+        "503":
+          description: Repo scan is disabled
   /v1/repo-scans/{repo_scan_id}:
     get:
       tags: [RepositoryExposure]

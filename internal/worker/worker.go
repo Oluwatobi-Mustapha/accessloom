@@ -17,7 +17,10 @@ import (
 const (
 	defaultWorkerTriggerMaxAttempts = 3
 	defaultWorkerRetryBackoff       = 2 * time.Second
+	defaultWorkerQueueMaxAttempts   = 1
 )
+
+type queueProcessFunc func(context.Context) (bool, error)
 
 // Run starts the scheduled worker loop and exits on signal or context cancellation.
 func Run(ctx context.Context, cfg config.Config, signals <-chan os.Signal) error {
@@ -93,6 +96,24 @@ func Run(ctx context.Context, cfg config.Config, signals <-chan os.Signal) error
 		}
 		return nil
 	}
+	queueBatchSize := cfg.WorkerAPIJobQueueBatchSize
+	if queueBatchSize <= 0 {
+		queueBatchSize = 1
+	}
+	apiQueueTrigger := func(runCtx context.Context) error {
+		return processAPIQueueBatch(
+			runCtx,
+			queueBatchSize,
+			svc.ProcessNextQueuedScan,
+			svc.ProcessNextQueuedRepoScan,
+			func(err error) {
+				logger.Error("queued scan processing failed", telemetry.ZapError(err))
+			},
+			func(err error) {
+				logger.Error("queued repo scan processing failed", telemetry.ZapError(err))
+			},
+		)
+	}
 
 	type scheduledRunner struct {
 		name   string
@@ -126,6 +147,22 @@ func Run(ctx context.Context, cfg config.Config, signals <-chan os.Signal) error
 				RetryBackoff: defaultWorkerRetryBackoff,
 				OnDeadLetter: func(_ context.Context, err error) {
 					logger.Error("repo trigger exhausted retries; dead-letter event emitted", telemetry.ZapError(err))
+				},
+			},
+		})
+	}
+	if cfg.WorkerAPIJobQueueEnabled {
+		runners = append(runners, scheduledRunner{
+			name:   "api-queue",
+			runNow: false,
+			runner: scheduler.Runner{
+				Interval:     cfg.WorkerAPIJobQueueInterval,
+				Key:          "api-job-queue",
+				Trigger:      apiQueueTrigger,
+				MaxAttempts:  defaultWorkerQueueMaxAttempts,
+				RetryBackoff: defaultWorkerRetryBackoff,
+				OnDeadLetter: func(_ context.Context, err error) {
+					logger.Error("api job queue trigger exhausted retries; dead-letter event emitted", telemetry.ZapError(err))
 				},
 			},
 		})
@@ -166,4 +203,56 @@ func Run(ctx context.Context, cfg config.Config, signals <-chan os.Signal) error
 	case runErr := <-errCh:
 		return runErr
 	}
+}
+
+func processAPIQueueBatch(
+	ctx context.Context,
+	batchSize int,
+	processScan queueProcessFunc,
+	processRepoScan queueProcessFunc,
+	onScanError func(error),
+	onRepoError func(error),
+) error {
+	if batchSize <= 0 {
+		batchSize = 1
+	}
+	failures := 0
+	var firstErr error
+
+	for i := 0; i < batchSize; i++ {
+		processed, err := processScan(ctx)
+		if err != nil {
+			failures++
+			if firstErr == nil {
+				firstErr = err
+			}
+			if onScanError != nil {
+				onScanError(err)
+			}
+			continue
+		}
+		if !processed {
+			break
+		}
+	}
+	for i := 0; i < batchSize; i++ {
+		processed, err := processRepoScan(ctx)
+		if err != nil {
+			failures++
+			if firstErr == nil {
+				firstErr = err
+			}
+			if onRepoError != nil {
+				onRepoError(err)
+			}
+			continue
+		}
+		if !processed {
+			break
+		}
+	}
+	if failures > 0 {
+		return fmt.Errorf("api queue batch failed for %d job(s): %w", failures, firstErr)
+	}
+	return nil
 }

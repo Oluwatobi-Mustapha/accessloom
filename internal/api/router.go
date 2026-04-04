@@ -28,8 +28,6 @@ const (
 	defaultEventsLimit     = 100
 	maxListLimit           = 500
 	maxCursorFetchLimit    = 5000
-	scanRequestTimeout     = 2 * time.Minute
-	repoScanRequestTimeout = 5 * time.Minute
 	rateLimiterEntryTTL    = 15 * time.Minute
 	rateLimiterMaxEntries  = 10000
 	rateLimiterCleanupTick = 256
@@ -491,31 +489,20 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			metrics.ScanDurationMS.Observe(float64(time.Since(start).Milliseconds()))
 		}()
 
-		requestCtx, cancel := context.WithTimeout(c.Request.Context(), scanRequestTimeout)
-		defer cancel()
-
-		result, err := svc.RunScan(requestCtx)
+		scan, err := svc.EnqueueScan(c.Request.Context())
 		if err != nil {
 			metrics.ScanFailureTotal.Inc()
-			if errors.Is(err, ErrScanInProgress) {
-				c.JSON(http.StatusConflict, gin.H{"error": "scan already in progress"})
+			if errors.Is(err, ErrScanQueueFull) {
+				c.JSON(http.StatusTooManyRequests, gin.H{"error": "scan queue is full"})
 				return
 			}
-			logger.Error("run scan", telemetry.ZapError(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to run scan"})
+			logger.Error("enqueue scan", telemetry.ZapError(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue scan"})
 			return
 		}
 
-		metrics.ScanSuccessTotal.Inc()
-		if result.PartialSourceRun {
-			metrics.ScanPartialTotal.Inc()
-		}
-		metrics.FindingsGenerated.Add(float64(result.FindingCount))
 		c.JSON(http.StatusAccepted, gin.H{
-			"scan":               result.Scan,
-			"assets":             result.Assets,
-			"finding_count":      result.FindingCount,
-			"partial_source_run": result.PartialSourceRun,
+			"scan": scan,
 		})
 	})
 
@@ -533,10 +520,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 			return
 		}
 
-		requestCtx, cancel := context.WithTimeout(c.Request.Context(), repoScanRequestTimeout)
-		defer cancel()
-
-		result, err := svc.RunRepoScanPersisted(requestCtx, request)
+		record, err := svc.EnqueueRepoScan(c.Request.Context(), request)
 		if err != nil {
 			metrics.RepoScanFailureTotal.Inc()
 			if errors.Is(err, ErrInvalidRepoScanRequest) {
@@ -555,14 +539,17 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 				c.JSON(http.StatusServiceUnavailable, gin.H{"error": "repo scan is disabled"})
 				return
 			}
-			logger.Error("run repo scan", telemetry.ZapError(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to run repo scan"})
+			if errors.Is(err, ErrRepoScanQueueFull) {
+				c.JSON(http.StatusTooManyRequests, gin.H{"error": "repo scan queue is full"})
+				return
+			}
+			logger.Error("enqueue repo scan", telemetry.ZapError(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue repo scan"})
 			return
 		}
 
 		c.JSON(http.StatusAccepted, gin.H{
-			"repo_scan": result.RepoScan,
-			"result":    result.Result,
+			"repo_scan": record,
 		})
 	})
 

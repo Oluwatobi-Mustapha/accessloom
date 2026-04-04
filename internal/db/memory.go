@@ -55,15 +55,77 @@ func (m *MemoryStore) CreateScan(_ context.Context, provider string, startedAt t
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.createScanLocked(provider, "running", startedAt), nil
+}
+
+// CreateQueuedScan persists one queued scan request.
+func (m *MemoryStore) CreateQueuedScan(_ context.Context, provider string, queuedAt time.Time) (ScanRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.createScanLocked(provider, "queued", queuedAt), nil
+}
+
+// ClaimNextQueuedScan moves one queued scan to running for execution.
+func (m *MemoryStore) ClaimNextQueuedScan(_ context.Context, provider string) (ScanRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	normalizedProvider := strings.TrimSpace(provider)
+	found := false
+	var bestRecord ScanRecord
+	for _, scanID := range m.scanIDs {
+		record := m.scans[scanID]
+		if record.Status != "queued" {
+			continue
+		}
+		if normalizedProvider != "" && strings.TrimSpace(record.Provider) != normalizedProvider {
+			continue
+		}
+		if !found || record.StartedAt.Before(bestRecord.StartedAt) {
+			bestRecord = record
+			found = true
+		}
+	}
+	if !found {
+		return ScanRecord{}, ErrNotFound
+	}
+	bestRecord.Status = "running"
+	bestRecord.FinishedAt = nil
+	bestRecord.ErrorMessage = ""
+	m.scans[bestRecord.ID] = bestRecord
+	return bestRecord, nil
+}
+
+// CountQueuedScans returns the queued scan count for one provider.
+func (m *MemoryStore) CountQueuedScans(_ context.Context, provider string) (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	normalizedProvider := strings.TrimSpace(provider)
+	count := 0
+	for _, record := range m.scans {
+		if record.Status != "queued" {
+			continue
+		}
+		if normalizedProvider != "" && strings.TrimSpace(record.Provider) != normalizedProvider {
+			continue
+		}
+		count++
+	}
+	return count, nil
+}
+
+func (m *MemoryStore) createScanLocked(provider string, status string, startedAt time.Time) ScanRecord {
 	record := ScanRecord{
 		ID:        uuid.NewString(),
-		Provider:  provider,
-		Status:    "running",
+		Provider:  strings.TrimSpace(provider),
+		Status:    strings.TrimSpace(status),
 		StartedAt: startedAt.UTC(),
 	}
 	m.scans[record.ID] = record
 	m.scanIDs = append(m.scanIDs, record.ID)
-	return record, nil
+	return record
 }
 
 // GetScan returns one persisted scan by id.
@@ -339,15 +401,111 @@ func (m *MemoryStore) CreateRepoScan(_ context.Context, repository string, start
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	return m.createRepoScanLocked(strings.TrimSpace(repository), "running", 0, 0, startedAt), nil
+}
+
+// CreateQueuedRepoScan persists one queued repository exposure scan request.
+func (m *MemoryStore) CreateQueuedRepoScan(_ context.Context, repository string, historyLimit int, maxFindings int, queuedAt time.Time) (RepoScanRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.createRepoScanLocked(strings.TrimSpace(repository), "queued", historyLimit, maxFindings, queuedAt), nil
+}
+
+// ClaimNextQueuedRepoScan moves one queued repository scan to running for execution.
+func (m *MemoryStore) ClaimNextQueuedRepoScan(_ context.Context) (RepoScanRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var claimed RepoScanRecord
+	found := false
+	for _, scanID := range m.repoScanIDs {
+		record := m.repoScans[scanID]
+		if record.Status != "queued" {
+			continue
+		}
+		if !found || record.StartedAt.Before(claimed.StartedAt) {
+			claimed = record
+			found = true
+		}
+	}
+	if !found {
+		return RepoScanRecord{}, ErrNotFound
+	}
+	claimed.Status = "running"
+	claimed.FinishedAt = nil
+	claimed.ErrorMessage = ""
+	m.repoScans[claimed.ID] = claimed
+	return claimed, nil
+}
+
+// CountQueuedRepoScans returns queued repository scan count.
+func (m *MemoryStore) CountQueuedRepoScans(_ context.Context) (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	count := 0
+	for _, record := range m.repoScans {
+		if record.Status == "queued" {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// CountPendingRepoScansByRepository returns queued/running scan count for one repository.
+func (m *MemoryStore) CountPendingRepoScansByRepository(_ context.Context, repository string) (int, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	normalizedRepository := strings.TrimSpace(repository)
+	if normalizedRepository == "" {
+		return 0, nil
+	}
+	count := 0
+	for _, record := range m.repoScans {
+		if !strings.EqualFold(strings.TrimSpace(record.Repository), normalizedRepository) {
+			continue
+		}
+		if record.Status == "queued" || record.Status == "running" {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// RequeueRepoScan moves a running repository scan back to queued state.
+func (m *MemoryStore) RequeueRepoScan(_ context.Context, repoScanID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	record, exists := m.repoScans[repoScanID]
+	if !exists {
+		return ErrNotFound
+	}
+	if record.Status != "running" {
+		return ErrNotFound
+	}
+	record.Status = "queued"
+	record.StartedAt = time.Now().UTC()
+	record.FinishedAt = nil
+	record.ErrorMessage = ""
+	m.repoScans[repoScanID] = record
+	return nil
+}
+
+func (m *MemoryStore) createRepoScanLocked(repository string, status string, historyLimit int, maxFindings int, startedAt time.Time) RepoScanRecord {
 	record := RepoScanRecord{
-		ID:         uuid.NewString(),
-		Repository: strings.TrimSpace(repository),
-		Status:     "running",
-		StartedAt:  startedAt.UTC(),
+		ID:           uuid.NewString(),
+		Repository:   strings.TrimSpace(repository),
+		Status:       strings.TrimSpace(status),
+		StartedAt:    startedAt.UTC(),
+		HistoryLimit: historyLimit,
+		MaxFindings:  maxFindings,
 	}
 	m.repoScans[record.ID] = record
 	m.repoScanIDs = append(m.repoScanIDs, record.ID)
-	return record, nil
+	return record
 }
 
 // GetRepoScan returns one persisted repo scan by id.

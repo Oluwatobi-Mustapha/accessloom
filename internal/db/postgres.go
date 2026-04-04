@@ -54,25 +54,70 @@ func (p *PostgresStore) DB() *sql.DB {
 
 // CreateScan inserts a new scan row.
 func (p *PostgresStore) CreateScan(ctx context.Context, provider string, startedAt time.Time) (ScanRecord, error) {
-	record := ScanRecord{
-		ID:        uuid.NewString(),
-		Provider:  provider,
-		Status:    "running",
-		StartedAt: startedAt.UTC(),
-	}
+	return p.createScanWithStatus(ctx, provider, "running", startedAt)
+}
 
-	_, err := p.db.ExecContext(
+// CreateQueuedScan inserts a queued scan request row.
+func (p *PostgresStore) CreateQueuedScan(ctx context.Context, provider string, queuedAt time.Time) (ScanRecord, error) {
+	return p.createScanWithStatus(ctx, provider, "queued", queuedAt)
+}
+
+// ClaimNextQueuedScan atomically claims one queued scan for execution.
+func (p *PostgresStore) ClaimNextQueuedScan(ctx context.Context, provider string) (ScanRecord, error) {
+	row := p.db.QueryRowContext(
 		ctx,
-		`INSERT INTO scans (id, provider, status, started_at, asset_count, finding_count) VALUES ($1, $2, $3, $4, 0, 0)`,
-		record.ID,
-		record.Provider,
-		record.Status,
-		record.StartedAt,
+		`WITH next_scan AS (
+			SELECT id
+			FROM scans
+			WHERE provider = $1 AND status = 'queued'
+			ORDER BY started_at ASC
+			FOR UPDATE SKIP LOCKED
+			LIMIT 1
+		)
+		UPDATE scans AS s
+		SET status = 'running',
+		    finished_at = NULL,
+		    error_message = NULL
+		FROM next_scan
+		WHERE s.id = next_scan.id
+		RETURNING s.id, s.provider, s.status, s.started_at, s.finished_at, s.asset_count, s.finding_count, COALESCE(s.error_message, '')`,
+		strings.TrimSpace(provider),
 	)
-	if err != nil {
-		return ScanRecord{}, fmt.Errorf("insert scan: %w", err)
+	var record ScanRecord
+	var finishedAt sql.NullTime
+	if err := row.Scan(
+		&record.ID,
+		&record.Provider,
+		&record.Status,
+		&record.StartedAt,
+		&finishedAt,
+		&record.AssetCount,
+		&record.FindingCount,
+		&record.ErrorMessage,
+	); err != nil {
+		if err == sql.ErrNoRows {
+			return ScanRecord{}, ErrNotFound
+		}
+		return ScanRecord{}, fmt.Errorf("claim queued scan: %w", err)
+	}
+	if finishedAt.Valid {
+		converted := finishedAt.Time.UTC()
+		record.FinishedAt = &converted
 	}
 	return record, nil
+}
+
+// CountQueuedScans returns queued scan requests count for one provider.
+func (p *PostgresStore) CountQueuedScans(ctx context.Context, provider string) (int, error) {
+	var count int
+	if err := p.db.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*) FROM scans WHERE provider = $1 AND status = 'queued'`,
+		strings.TrimSpace(provider),
+	).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count queued scans: %w", err)
+	}
+	return count, nil
 }
 
 // GetScan returns one scan by id.
@@ -394,20 +439,126 @@ func (p *PostgresStore) ListScanEvents(ctx context.Context, scanID string, limit
 
 // CreateRepoScan inserts a new repository exposure scan row.
 func (p *PostgresStore) CreateRepoScan(ctx context.Context, repository string, startedAt time.Time) (RepoScanRecord, error) {
+	return p.createRepoScanWithStatus(ctx, repository, "running", 0, 0, startedAt)
+}
+
+// CreateQueuedRepoScan inserts one queued repository scan request row.
+func (p *PostgresStore) CreateQueuedRepoScan(ctx context.Context, repository string, historyLimit int, maxFindings int, queuedAt time.Time) (RepoScanRecord, error) {
+	return p.createRepoScanWithStatus(ctx, repository, "queued", historyLimit, maxFindings, queuedAt)
+}
+
+// ClaimNextQueuedRepoScan atomically claims one queued repository scan.
+func (p *PostgresStore) ClaimNextQueuedRepoScan(ctx context.Context) (RepoScanRecord, error) {
+	row := p.db.QueryRowContext(
+		ctx,
+		`WITH next_repo_scan AS (
+			SELECT id
+			FROM repo_scans
+			WHERE status = 'queued'
+			ORDER BY started_at ASC
+			FOR UPDATE SKIP LOCKED
+			LIMIT 1
+		)
+		UPDATE repo_scans AS r
+		SET status = 'running',
+		    finished_at = NULL,
+		    error_message = NULL
+		FROM next_repo_scan
+		WHERE r.id = next_repo_scan.id
+		RETURNING
+			r.id,
+			r.repository,
+			r.status,
+			r.started_at,
+			r.finished_at,
+			r.commits_scanned,
+			r.files_scanned,
+			r.finding_count,
+			r.truncated,
+			COALESCE(r.error_message, ''),
+			r.history_limit,
+			r.max_findings_limit`,
+	)
+	record, err := scanRepoScanRecord(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return RepoScanRecord{}, ErrNotFound
+		}
+		return RepoScanRecord{}, fmt.Errorf("claim queued repo scan: %w", err)
+	}
+	return record, nil
+}
+
+// CountQueuedRepoScans returns queued repository scan requests count.
+func (p *PostgresStore) CountQueuedRepoScans(ctx context.Context) (int, error) {
+	var count int
+	if err := p.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM repo_scans WHERE status = 'queued'`).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count queued repo scans: %w", err)
+	}
+	return count, nil
+}
+
+// CountPendingRepoScansByRepository returns queued+running scan count for one repository.
+func (p *PostgresStore) CountPendingRepoScansByRepository(ctx context.Context, repository string) (int, error) {
+	var count int
+	if err := p.db.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*)
+		 FROM repo_scans
+		 WHERE LOWER(repository) = LOWER($1)
+		   AND status IN ('queued', 'running')`,
+		strings.TrimSpace(repository),
+	).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count pending repo scans: %w", err)
+	}
+	return count, nil
+}
+
+// RequeueRepoScan moves one running repository scan back to queued.
+func (p *PostgresStore) RequeueRepoScan(ctx context.Context, repoScanID string) error {
+	result, err := p.db.ExecContext(
+		ctx,
+		`UPDATE repo_scans
+		 SET status = 'queued',
+		     started_at = NOW(),
+		     finished_at = NULL,
+		     error_message = NULL
+		 WHERE id = $1
+		   AND status = 'running'`,
+		repoScanID,
+	)
+	if err != nil {
+		return fmt.Errorf("requeue repo scan: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("requeue repo scan rows affected: %w", err)
+	}
+	if affected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (p *PostgresStore) createRepoScanWithStatus(ctx context.Context, repository string, status string, historyLimit int, maxFindings int, startedAt time.Time) (RepoScanRecord, error) {
 	record := RepoScanRecord{
-		ID:         uuid.NewString(),
-		Repository: strings.TrimSpace(repository),
-		Status:     "running",
-		StartedAt:  startedAt.UTC(),
+		ID:           uuid.NewString(),
+		Repository:   strings.TrimSpace(repository),
+		Status:       strings.TrimSpace(status),
+		StartedAt:    startedAt.UTC(),
+		HistoryLimit: historyLimit,
+		MaxFindings:  maxFindings,
 	}
 	_, err := p.db.ExecContext(
 		ctx,
-		`INSERT INTO repo_scans (id, repository, status, started_at, commits_scanned, files_scanned, finding_count, truncated)
-		 VALUES ($1, $2, $3, $4, 0, 0, 0, false)`,
+		`INSERT INTO repo_scans (id, repository, status, started_at, commits_scanned, files_scanned, finding_count, truncated, history_limit, max_findings_limit)
+		 VALUES ($1, $2, $3, $4, 0, 0, 0, false, $5, $6)`,
 		record.ID,
 		record.Repository,
 		record.Status,
 		record.StartedAt,
+		record.HistoryLimit,
+		record.MaxFindings,
 	)
 	if err != nil {
 		return RepoScanRecord{}, fmt.Errorf("insert repo scan: %w", err)
@@ -775,6 +926,58 @@ func repoScanRecordFromRow(row sqlcdb.RepoScanRow) RepoScanRecord {
 		Truncated:      row.Truncated,
 		ErrorMessage:   row.ErrorMessage,
 	}
+}
+
+func (p *PostgresStore) createScanWithStatus(ctx context.Context, provider string, status string, startedAt time.Time) (ScanRecord, error) {
+	record := ScanRecord{
+		ID:        uuid.NewString(),
+		Provider:  strings.TrimSpace(provider),
+		Status:    strings.TrimSpace(status),
+		StartedAt: startedAt.UTC(),
+	}
+	_, err := p.db.ExecContext(
+		ctx,
+		`INSERT INTO scans (id, provider, status, started_at, asset_count, finding_count) VALUES ($1, $2, $3, $4, 0, 0)`,
+		record.ID,
+		record.Provider,
+		record.Status,
+		record.StartedAt,
+	)
+	if err != nil {
+		return ScanRecord{}, fmt.Errorf("insert scan: %w", err)
+	}
+	return record, nil
+}
+
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanRepoScanRecord(scanner scanner) (RepoScanRecord, error) {
+	var record RepoScanRecord
+	var finishedAt sql.NullTime
+	if err := scanner.Scan(
+		&record.ID,
+		&record.Repository,
+		&record.Status,
+		&record.StartedAt,
+		&finishedAt,
+		&record.CommitsScanned,
+		&record.FilesScanned,
+		&record.FindingCount,
+		&record.Truncated,
+		&record.ErrorMessage,
+		&record.HistoryLimit,
+		&record.MaxFindings,
+	); err != nil {
+		return RepoScanRecord{}, err
+	}
+	record.StartedAt = record.StartedAt.UTC()
+	if finishedAt.Valid {
+		converted := finishedAt.Time.UTC()
+		record.FinishedAt = &converted
+	}
+	return record, nil
 }
 
 func findingsFromRows(rows []sqlcdb.FindingRow) ([]domain.Finding, error) {
