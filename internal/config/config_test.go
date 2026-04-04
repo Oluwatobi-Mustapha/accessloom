@@ -63,6 +63,8 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_WORKER_API_JOB_QUEUE_BATCH_SIZE", "")
 	t.Setenv("IDENTRAIL_LOCK_BACKEND", "")
 	t.Setenv("IDENTRAIL_LOCK_NAMESPACE", "")
+	t.Setenv("IDENTRAIL_DEFAULT_TENANT_ID", "")
+	t.Setenv("IDENTRAIL_DEFAULT_WORKSPACE_ID", "")
 
 	cfg := Load()
 	if cfg.HTTPAddr != defaultHTTPAddr {
@@ -230,6 +232,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.LockNamespace != defaultLockNamespace {
 		t.Fatalf("expected default lock namespace %q, got %q", defaultLockNamespace, cfg.LockNamespace)
 	}
+	if cfg.DefaultTenantID != defaultTenantID {
+		t.Fatalf("expected default tenant id %q, got %q", defaultTenantID, cfg.DefaultTenantID)
+	}
+	if cfg.DefaultWorkspaceID != defaultWorkspaceID {
+		t.Fatalf("expected default workspace id %q, got %q", defaultWorkspaceID, cfg.DefaultWorkspaceID)
+	}
 	if cfg.OIDCIssuerURL != "" {
 		t.Fatalf("expected empty oidc issuer by default, got %q", cfg.OIDCIssuerURL)
 	}
@@ -298,6 +306,8 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_WORKER_API_JOB_QUEUE_BATCH_SIZE", "12")
 	t.Setenv("IDENTRAIL_LOCK_BACKEND", "postgres")
 	t.Setenv("IDENTRAIL_LOCK_NAMESPACE", "prod-identrail")
+	t.Setenv("IDENTRAIL_DEFAULT_TENANT_ID", "tenant-prod")
+	t.Setenv("IDENTRAIL_DEFAULT_WORKSPACE_ID", "workspace-blue")
 	t.Setenv("IDENTRAIL_OIDC_ISSUER_URL", "https://iam.example.com/realms/identrail")
 	t.Setenv("IDENTRAIL_OIDC_AUDIENCE", "identrail-api")
 	t.Setenv("IDENTRAIL_OIDC_WRITE_SCOPES", "identrail.write,identrail.admin")
@@ -467,6 +477,12 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.LockNamespace != "prod-identrail" {
 		t.Fatalf("unexpected lock namespace: %q", cfg.LockNamespace)
+	}
+	if cfg.DefaultTenantID != "tenant-prod" {
+		t.Fatalf("unexpected default tenant id: %q", cfg.DefaultTenantID)
+	}
+	if cfg.DefaultWorkspaceID != "workspace-blue" {
+		t.Fatalf("unexpected default workspace id: %q", cfg.DefaultWorkspaceID)
 	}
 	if cfg.OIDCIssuerURL != "https://iam.example.com/realms/identrail" {
 		t.Fatalf("unexpected oidc issuer url: %q", cfg.OIDCIssuerURL)

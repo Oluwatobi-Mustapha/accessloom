@@ -34,6 +34,8 @@ const (
 	defaultWorkerAPIJobQueueBatchSize  = 5
 	defaultLockBackend                 = "auto"
 	defaultLockNamespace               = "identrail"
+	defaultTenantID                    = "default"
+	defaultWorkspaceID                 = "default"
 	defaultOIDCWriteScopes             = "identrail.write,identrail.admin,write,admin"
 )
 
@@ -96,6 +98,8 @@ type Config struct {
 	WorkerAPIJobQueueBatchSize int
 	LockBackend                string
 	LockNamespace              string
+	DefaultTenantID            string
+	DefaultWorkspaceID         string
 	OIDCIssuerURL              string
 	OIDCAudience               string
 	OIDCWriteScopes            []string
@@ -160,6 +164,8 @@ func Load() Config {
 		WorkerAPIJobQueueBatchSize: parseInt(getEnv("IDENTRAIL_WORKER_API_JOB_QUEUE_BATCH_SIZE", "5"), defaultWorkerAPIJobQueueBatchSize),
 		LockBackend:                strings.ToLower(getEnv("IDENTRAIL_LOCK_BACKEND", defaultLockBackend)),
 		LockNamespace:              getEnv("IDENTRAIL_LOCK_NAMESPACE", defaultLockNamespace),
+		DefaultTenantID:            getEnv("IDENTRAIL_DEFAULT_TENANT_ID", defaultTenantID),
+		DefaultWorkspaceID:         getEnv("IDENTRAIL_DEFAULT_WORKSPACE_ID", defaultWorkspaceID),
 		OIDCIssuerURL:              getEnv("IDENTRAIL_OIDC_ISSUER_URL", ""),
 		OIDCAudience:               getEnv("IDENTRAIL_OIDC_AUDIENCE", ""),
 		OIDCWriteScopes:            parseCommaSeparated(getEnv("IDENTRAIL_OIDC_WRITE_SCOPES", defaultOIDCWriteScopes)),

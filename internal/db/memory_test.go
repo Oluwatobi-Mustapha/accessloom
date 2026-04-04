@@ -384,3 +384,59 @@ func TestMemoryStorePendingRepoCountMatchingIsCaseInsensitive(t *testing.T) {
 		t.Fatalf("expected 1 pending repo scan for case-insensitive repository match, got %d", count)
 	}
 }
+
+func TestMemoryStoreScopeIsolation(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 3, 22, 10, 0, 0, 0, time.UTC)
+
+	defaultCtx := context.Background()
+	otherCtx := WithScope(context.Background(), Scope{TenantID: "tenant-b", WorkspaceID: "workspace-b"})
+
+	defaultScan, err := store.CreateScan(defaultCtx, "aws", now)
+	if err != nil {
+		t.Fatalf("create default scan: %v", err)
+	}
+	otherScan, err := store.CreateScan(otherCtx, "aws", now.Add(1*time.Minute))
+	if err != nil {
+		t.Fatalf("create other scan: %v", err)
+	}
+
+	if _, err := store.GetScan(defaultCtx, otherScan.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected cross-scope get scan to fail with not found, got %v", err)
+	}
+	if _, err := store.GetScan(otherCtx, defaultScan.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected cross-scope get scan to fail with not found, got %v", err)
+	}
+
+	defaultScans, err := store.ListScans(defaultCtx, 10)
+	if err != nil {
+		t.Fatalf("list default scans: %v", err)
+	}
+	if len(defaultScans) != 1 || defaultScans[0].ID != defaultScan.ID {
+		t.Fatalf("unexpected default scope scans: %+v", defaultScans)
+	}
+
+	otherScans, err := store.ListScans(otherCtx, 10)
+	if err != nil {
+		t.Fatalf("list other scans: %v", err)
+	}
+	if len(otherScans) != 1 || otherScans[0].ID != otherScan.ID {
+		t.Fatalf("unexpected other scope scans: %+v", otherScans)
+	}
+
+	defaultRepo, err := store.CreateQueuedRepoScan(defaultCtx, "owner/repo", 10, 10, now)
+	if err != nil {
+		t.Fatalf("create default repo scan: %v", err)
+	}
+	otherRepo, err := store.CreateQueuedRepoScan(otherCtx, "owner/repo", 10, 10, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("create other repo scan: %v", err)
+	}
+
+	if _, err := store.GetRepoScan(defaultCtx, otherRepo.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected cross-scope get repo scan to fail with not found, got %v", err)
+	}
+	if _, err := store.GetRepoScan(otherCtx, defaultRepo.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected cross-scope get repo scan to fail with not found, got %v", err)
+	}
+}

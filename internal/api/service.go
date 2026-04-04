@@ -53,6 +53,7 @@ type Service struct {
 	Store         db.Store
 	Scanner       ScannerRunner
 	Provider      string
+	DefaultScope  db.Scope
 	Now           func() time.Time
 	Locker        scheduler.Locker
 	LockNamespace string
@@ -166,6 +167,7 @@ func NewService(store db.Store, scanner ScannerRunner, provider string) *Service
 		Store:                       store,
 		Scanner:                     scanner,
 		Provider:                    provider,
+		DefaultScope:                db.Scope{}.Normalize(),
 		Now:                         time.Now,
 		Locker:                      scheduler.NewInMemoryLocker(),
 		LockNamespace:               "identrail",
@@ -189,6 +191,7 @@ func NewService(store db.Store, scanner ScannerRunner, provider string) *Service
 
 // EnqueueScan stores one queued scan request for asynchronous worker execution.
 func (s *Service) EnqueueScan(ctx context.Context) (db.ScanRecord, error) {
+	ctx = s.scopeContext(ctx)
 	maxPending := s.ScanQueueMaxPending
 	if maxPending <= 0 {
 		maxPending = defaultScanQueueMaxPending
@@ -215,6 +218,7 @@ func (s *Service) EnqueueScan(ctx context.Context) (db.ScanRecord, error) {
 
 // ProcessNextQueuedScan claims and executes one queued scan. It returns false when no job is available.
 func (s *Service) ProcessNextQueuedScan(ctx context.Context) (bool, error) {
+	ctx = s.scopeContext(ctx)
 	if s.Locker != nil {
 		release, ok := s.Locker.TryAcquire(s.lockKey("scan:" + s.Provider))
 		if !ok {
@@ -240,6 +244,7 @@ func (s *Service) ProcessNextQueuedScan(ctx context.Context) (bool, error) {
 
 // RunScan executes one scan and persists metadata + findings.
 func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
+	ctx = s.scopeContext(ctx)
 	if s.Locker != nil {
 		release, ok := s.Locker.TryAcquire(s.lockKey("scan:" + s.Provider))
 		if !ok {
@@ -258,6 +263,7 @@ func (s *Service) RunScan(ctx context.Context) (RunScanResult, error) {
 }
 
 func (s *Service) runScanWithRecord(ctx context.Context, record db.ScanRecord) (RunScanResult, error) {
+	ctx = s.scopeContext(ctx)
 	result, err := s.Scanner.Run(ctx)
 	if err != nil {
 		s.appendScanLifecycleEvent(ctx, record.ID, scanLifecycleFailed, map[string]any{"error": err.Error()})
@@ -332,6 +338,7 @@ func (s *Service) runScanWithRecord(ctx context.Context, record db.ScanRecord) (
 
 // ListFindings returns persisted findings.
 func (s *Service) ListFindings(ctx context.Context, limit int) ([]domain.Finding, error) {
+	ctx = s.scopeContext(ctx)
 	return s.Store.ListFindings(ctx, limit)
 }
 
@@ -346,6 +353,7 @@ func (s *Service) RunRepoScan(ctx context.Context, request RepoScanRequest) (rep
 
 // EnqueueRepoScan stores one queued repository scan request for asynchronous worker execution.
 func (s *Service) EnqueueRepoScan(ctx context.Context, request RepoScanRequest) (db.RepoScanRecord, error) {
+	ctx = s.scopeContext(ctx)
 	target, historyLimit, maxFindings, err := s.validateRepoScanRequest(request)
 	if err != nil {
 		return db.RepoScanRecord{}, err
@@ -377,6 +385,7 @@ func (s *Service) EnqueueRepoScan(ctx context.Context, request RepoScanRequest) 
 
 // ProcessNextQueuedRepoScan claims and executes one queued repository scan. It returns false when no job is available.
 func (s *Service) ProcessNextQueuedRepoScan(ctx context.Context) (bool, error) {
+	ctx = s.scopeContext(ctx)
 	record, err := s.Store.ClaimNextQueuedRepoScan(ctx)
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
@@ -410,6 +419,7 @@ func (s *Service) ProcessNextQueuedRepoScan(ctx context.Context) (bool, error) {
 
 // RunRepoScanPersisted runs one repository scan and persists repo scan metadata + findings.
 func (s *Service) RunRepoScanPersisted(ctx context.Context, request RepoScanRequest) (RunRepoScanResult, error) {
+	ctx = s.scopeContext(ctx)
 	target, historyLimit, maxFindings, err := s.validateRepoScanRequest(request)
 	if err != nil {
 		return RunRepoScanResult{}, err
@@ -454,6 +464,7 @@ func (s *Service) validateRepoScanRequest(request RepoScanRequest) (string, int,
 }
 
 func (s *Service) runRepoScanWithRecord(ctx context.Context, record db.RepoScanRecord, historyLimit int, maxFindings int) (RunRepoScanResult, error) {
+	ctx = s.scopeContext(ctx)
 	target := strings.TrimSpace(record.Repository)
 	if target == "" {
 		return RunRepoScanResult{}, ErrInvalidRepoScanRequest
@@ -508,11 +519,13 @@ func (s *Service) runRepoScanWithRecord(ctx context.Context, record db.RepoScanR
 
 // ListRepoScans returns persisted repository scans.
 func (s *Service) ListRepoScans(ctx context.Context, limit int) ([]db.RepoScanRecord, error) {
+	ctx = s.scopeContext(ctx)
 	return s.Store.ListRepoScans(ctx, limit)
 }
 
 // GetRepoScan returns one repository scan by id.
 func (s *Service) GetRepoScan(ctx context.Context, repoScanID string) (db.RepoScanRecord, error) {
+	ctx = s.scopeContext(ctx)
 	id := strings.TrimSpace(repoScanID)
 	if id == "" {
 		return db.RepoScanRecord{}, db.ErrNotFound
@@ -522,6 +535,7 @@ func (s *Service) GetRepoScan(ctx context.Context, repoScanID string) (db.RepoSc
 
 // ListRepoFindings returns repository findings using optional filters.
 func (s *Service) ListRepoFindings(ctx context.Context, limit int, filter db.RepoFindingFilter) ([]domain.Finding, error) {
+	ctx = s.scopeContext(ctx)
 	findings, err := s.Store.ListRepoFindings(ctx, filter, limit)
 	if err != nil {
 		return nil, err
@@ -531,6 +545,7 @@ func (s *Service) ListRepoFindings(ctx context.Context, limit int, filter db.Rep
 
 // ListFindingsFiltered returns findings with optional scan/type/severity filters.
 func (s *Service) ListFindingsFiltered(ctx context.Context, limit int, filter FindingsFilter) ([]domain.Finding, error) {
+	ctx = s.scopeContext(ctx)
 	if strings.TrimSpace(filter.ScanID) == "" && strings.TrimSpace(filter.Severity) == "" && strings.TrimSpace(filter.Type) == "" {
 		items, err := s.Store.ListFindings(ctx, limit)
 		if err != nil {
@@ -608,11 +623,13 @@ func (s *Service) GetFindingExports(ctx context.Context, findingID string, scanI
 
 // ListScans returns persisted scans.
 func (s *Service) ListScans(ctx context.Context, limit int) ([]db.ScanRecord, error) {
+	ctx = s.scopeContext(ctx)
 	return s.Store.ListScans(ctx, limit)
 }
 
 // GetFindingsSummary returns grouped counts by severity and type.
 func (s *Service) GetFindingsSummary(ctx context.Context, limit int) (FindingsSummary, error) {
+	ctx = s.scopeContext(ctx)
 	items, err := s.Store.ListFindings(ctx, limit)
 	if err != nil {
 		return FindingsSummary{}, err
@@ -636,6 +653,7 @@ func (s *Service) ListScanEvents(ctx context.Context, scanID string, limit int) 
 
 // ListScanEventsFiltered returns recent scan events with optional level filtering.
 func (s *Service) ListScanEventsFiltered(ctx context.Context, scanID string, level string, limit int) ([]db.ScanEvent, error) {
+	ctx = s.scopeContext(ctx)
 	events, err := s.Store.ListScanEvents(ctx, scanID, limit)
 	if err != nil {
 		return nil, err
@@ -656,6 +674,7 @@ func (s *Service) ListScanEventsFiltered(ctx context.Context, scanID string, lev
 
 // ListIdentities returns identities for given filters, defaulting scan_id to latest scan.
 func (s *Service) ListIdentities(ctx context.Context, scanID string, provider string, identityType string, namePrefix string, limit int) ([]domain.Identity, error) {
+	ctx = s.scopeContext(ctx)
 	normalizedScanID := scanID
 	if normalizedScanID == "" {
 		latest, err := s.latestScanID(ctx)
@@ -674,6 +693,7 @@ func (s *Service) ListIdentities(ctx context.Context, scanID string, provider st
 
 // ListRelationships returns relationships for given filters, defaulting scan_id to latest scan.
 func (s *Service) ListRelationships(ctx context.Context, scanID string, relationshipType string, fromNodeID string, toNodeID string, limit int) ([]domain.Relationship, error) {
+	ctx = s.scopeContext(ctx)
 	normalizedScanID := scanID
 	if normalizedScanID == "" {
 		latest, err := s.latestScanID(ctx)
@@ -697,6 +717,7 @@ func (s *Service) GetFindingsTrend(ctx context.Context, points int) ([]TrendPoin
 
 // GetFindingsTrendFiltered returns findings trend with optional severity/type filters.
 func (s *Service) GetFindingsTrendFiltered(ctx context.Context, points int, severity string, findingType string) ([]TrendPoint, error) {
+	ctx = s.scopeContext(ctx)
 	if points <= 0 {
 		points = 10
 	}
@@ -739,6 +760,7 @@ func (s *Service) GetFindingsTrendFiltered(ctx context.Context, points int, seve
 
 // ListOwnershipSignals returns inferred ownership hints for identities in one scan.
 func (s *Service) ListOwnershipSignals(ctx context.Context, limit int, filter OwnershipFilter) ([]domain.OwnershipSignal, error) {
+	ctx = s.scopeContext(ctx)
 	normalizedScanID := strings.TrimSpace(filter.ScanID)
 	if normalizedScanID == "" {
 		latest, err := s.latestScanID(ctx)
@@ -785,6 +807,7 @@ func (s *Service) GetScanDiff(ctx context.Context, scanID string, limit int) (Sc
 
 // GetScanDiffAgainst compares findings between one scan and an optional baseline scan.
 func (s *Service) GetScanDiffAgainst(ctx context.Context, scanID string, previousScanID string, limit int) (ScanDiff, error) {
+	ctx = s.scopeContext(ctx)
 	currentScan, err := s.Store.GetScan(ctx, scanID)
 	if err != nil {
 		return ScanDiff{}, err
@@ -871,6 +894,7 @@ func (s *Service) GetScanDiffAgainst(ctx context.Context, scanID string, previou
 }
 
 func (s *Service) appendScanEvent(ctx context.Context, scanID string, level string, message string, metadata map[string]any) {
+	ctx = s.scopeContext(ctx)
 	_ = s.Store.AppendScanEvent(ctx, scanID, level, message, metadata)
 }
 
@@ -898,6 +922,7 @@ func (d *ScanDiff) applyLimit(limit int) {
 }
 
 func (s *Service) latestScanID(ctx context.Context) (string, error) {
+	ctx = s.scopeContext(ctx)
 	scans, err := s.Store.ListScans(ctx, 1)
 	if err != nil {
 		return "", err
@@ -1037,4 +1062,8 @@ func (s *Service) lockKey(key string) string {
 		return namespace
 	}
 	return namespace + ":" + normalizedKey
+}
+
+func (s *Service) scopeContext(ctx context.Context) context.Context {
+	return db.WithDefaultScope(ctx, s.DefaultScope)
 }

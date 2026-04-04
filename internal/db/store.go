@@ -22,6 +22,8 @@ const (
 // ScanRecord tracks persisted scan execution metadata.
 type ScanRecord struct {
 	ID           string     `json:"id"`
+	TenantID     string     `json:"-"`
+	WorkspaceID  string     `json:"-"`
 	Provider     string     `json:"provider"`
 	Status       string     `json:"status"`
 	StartedAt    time.Time  `json:"started_at"`
@@ -34,6 +36,8 @@ type ScanRecord struct {
 // RepoScanRecord tracks persisted repository exposure scan metadata.
 type RepoScanRecord struct {
 	ID             string     `json:"id"`
+	TenantID       string     `json:"-"`
+	WorkspaceID    string     `json:"-"`
 	Repository     string     `json:"repository"`
 	Status         string     `json:"status"`
 	StartedAt      time.Time  `json:"started_at"`

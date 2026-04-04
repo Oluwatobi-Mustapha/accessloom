@@ -31,12 +31,14 @@ const (
 	rateLimiterEntryTTL    = 15 * time.Minute
 	rateLimiterMaxEntries  = 10000
 	rateLimiterCleanupTick = 256
-	corsAllowMethods       = "GET,POST,OPTIONS"
-	corsAllowHeaders       = "Authorization,Content-Type,X-API-Key"
+	corsAllowMethods       = "GET,POST,PATCH,OPTIONS"
+	corsAllowHeaders       = "Authorization,Content-Type,X-API-Key,X-Identrail-Tenant-ID,X-Identrail-Workspace-ID"
 	corsMaxAgeSeconds      = "600"
 	scopeRead              = "read"
 	scopeWrite             = "write"
 	scopeAdmin             = "admin"
+	scopeHeaderTenantID    = "X-Identrail-Tenant-ID"
+	scopeHeaderWorkspaceID = "X-Identrail-Workspace-ID"
 )
 
 // RouterOptions controls API middleware behavior.
@@ -51,6 +53,8 @@ type RouterOptions struct {
 	AuditSink          AuditSink
 	TrustedProxies     []string
 	CORSAllowedOrigins []string
+	DefaultTenantID    string
+	DefaultWorkspaceID string
 }
 
 // VerifiedToken contains normalized claims extracted from a validated OIDC token.
@@ -97,6 +101,7 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	r.GET("/metrics", gin.WrapH(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
 
 	v1 := r.Group("/v1")
+	v1.Use(requestScopeMiddleware(opts.DefaultTenantID, opts.DefaultWorkspaceID))
 	v1.Use(apiKeyAuthMiddleware(opts.APIKeys, opts.APIKeyScopes, opts.OIDCTokenVerifier, opts.OIDCWriteScopes))
 	v1.Use(requireReadableScopeMiddleware(opts.APIKeyScopes, opts.OIDCTokenVerifier))
 	v1.Use(rateLimitMiddleware(opts.RateLimitRPM, opts.RateLimitBurst))
@@ -916,6 +921,29 @@ func pageWithCursor[T any](items []T, offset int, limit int) ([]T, string) {
 		next = strconv.Itoa(end)
 	}
 	return items[offset:end], next
+}
+
+func requestScopeMiddleware(defaultTenantID string, defaultWorkspaceID string) gin.HandlerFunc {
+	defaultScope := db.Scope{
+		TenantID:    defaultTenantID,
+		WorkspaceID: defaultWorkspaceID,
+	}.Normalize()
+	return func(c *gin.Context) {
+		tenantID := strings.TrimSpace(c.GetHeader(scopeHeaderTenantID))
+		if tenantID == "" {
+			tenantID = defaultScope.TenantID
+		}
+		workspaceID := strings.TrimSpace(c.GetHeader(scopeHeaderWorkspaceID))
+		if workspaceID == "" {
+			workspaceID = defaultScope.WorkspaceID
+		}
+		scopedCtx := db.WithScope(c.Request.Context(), db.Scope{
+			TenantID:    tenantID,
+			WorkspaceID: workspaceID,
+		})
+		c.Request = c.Request.WithContext(scopedCtx)
+		c.Next()
+	}
 }
 
 func corsMiddleware(allowedOrigins []string) gin.HandlerFunc {

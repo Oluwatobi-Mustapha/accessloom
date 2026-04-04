@@ -152,6 +152,28 @@ func TestValidateSecurityRejectsInvalidScopedKeyScope(t *testing.T) {
 	}
 }
 
+func TestValidateSecurityRejectsInvalidDefaultTenantID(t *testing.T) {
+	cfg := Config{
+		APIKeys:         []string{"reader", "writer"},
+		WriteAPIKeys:    []string{"writer"},
+		DefaultTenantID: "bad tenant id",
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected invalid tenant id error")
+	}
+}
+
+func TestValidateSecurityRejectsInvalidDefaultWorkspaceID(t *testing.T) {
+	cfg := Config{
+		APIKeys:            []string{"reader", "writer"},
+		WriteAPIKeys:       []string{"writer"},
+		DefaultWorkspaceID: "bad workspace id",
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected invalid workspace id error")
+	}
+}
+
 func TestValidateSecurityRejectsScopedKeyWithoutValidScope(t *testing.T) {
 	cfg := Config{
 		APIKeyScopes: map[string][]string{"key1": {""}},

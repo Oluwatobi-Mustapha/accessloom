@@ -77,3 +77,23 @@ func TestFourthMigrationContainsPerformanceIndexes(t *testing.T) {
 		}
 	}
 }
+
+func TestSixthMigrationContainsTenantWorkspaceScope(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "000006_tenant_workspace_scope.up.sql")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	text := string(content)
+	required := []string{
+		"ADD COLUMN IF NOT EXISTS tenant_id",
+		"ADD COLUMN IF NOT EXISTS workspace_id",
+		"idx_scans_scope_started_at",
+		"idx_repo_scans_scope_started_at",
+	}
+	for _, item := range required {
+		if !strings.Contains(text, item) {
+			t.Fatalf("expected tenant/workspace scope migration item %q", item)
+		}
+	}
+}

@@ -114,6 +114,8 @@ func NewBootstrap(ctx context.Context, cfg config.Config) (Bootstrap, error) {
 		AuditSink:          auditSink,
 		TrustedProxies:     cfg.TrustedProxies,
 		CORSAllowedOrigins: cfg.CORSAllowedOrigins,
+		DefaultTenantID:    cfg.DefaultTenantID,
+		DefaultWorkspaceID: cfg.DefaultWorkspaceID,
 	})
 	return Bootstrap{
 		Logger:        logger,

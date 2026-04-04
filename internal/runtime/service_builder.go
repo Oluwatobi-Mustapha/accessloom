@@ -97,6 +97,10 @@ func BuildScanService(cfg config.Config) (*api.Service, func() error, error) {
 	}
 
 	svc := api.NewService(store, scanner, cfg.Provider)
+	svc.DefaultScope = db.Scope{
+		TenantID:    cfg.DefaultTenantID,
+		WorkspaceID: cfg.DefaultWorkspaceID,
+	}.Normalize()
 	svc.LockNamespace = strings.TrimSpace(cfg.LockNamespace)
 	lockBackend := strings.ToLower(strings.TrimSpace(cfg.LockBackend))
 	switch lockBackend {

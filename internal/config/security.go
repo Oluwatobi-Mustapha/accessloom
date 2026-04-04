@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -20,6 +21,7 @@ const (
 	maxRepoQueueMaxPending      = 50000
 	maxWorkerQueueBatchSize     = 500
 	minAPIKeyLength             = 24
+	maxScopeIdentifierLength    = 64
 )
 
 var allowedKeyScopes = map[string]struct{}{
@@ -64,6 +66,8 @@ var placeholderAPIKeys = map[string]struct{}{
 	"replace-with-strong-write-key": {},
 }
 
+var scopeIdentifierPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$`)
+
 // ValidateSecurity checks hard-fail security misconfigurations.
 func ValidateSecurity(cfg Config) error {
 	provider := strings.ToLower(strings.TrimSpace(cfg.Provider))
@@ -72,6 +76,20 @@ func ValidateSecurity(cfg Config) error {
 	}
 	if _, ok := allowedProviders[provider]; !ok {
 		return fmt.Errorf("invalid IDENTRAIL_PROVIDER %q: v1 supports aws or kubernetes", cfg.Provider)
+	}
+	defaultTenant := strings.TrimSpace(cfg.DefaultTenantID)
+	if defaultTenant == "" {
+		defaultTenant = defaultTenantID
+	}
+	if err := validateScopeIdentifier("IDENTRAIL_DEFAULT_TENANT_ID", defaultTenant); err != nil {
+		return err
+	}
+	defaultWorkspace := strings.TrimSpace(cfg.DefaultWorkspaceID)
+	if defaultWorkspace == "" {
+		defaultWorkspace = defaultWorkspaceID
+	}
+	if err := validateScopeIdentifier("IDENTRAIL_DEFAULT_WORKSPACE_ID", defaultWorkspace); err != nil {
+		return err
 	}
 
 	oidcIssuer := strings.TrimSpace(cfg.OIDCIssuerURL)
@@ -317,6 +335,20 @@ func ValidateSecurity(cfg Config) error {
 		if _, err := netip.ParseAddr(normalized); err != nil {
 			return fmt.Errorf("invalid IDENTRAIL_TRUSTED_PROXIES entry %q: %w", normalized, err)
 		}
+	}
+	return nil
+}
+
+func validateScopeIdentifier(envName string, value string) error {
+	normalized := strings.TrimSpace(value)
+	if normalized == "" {
+		return fmt.Errorf("%s must be non-empty", envName)
+	}
+	if len(normalized) > maxScopeIdentifierLength {
+		return fmt.Errorf("%s must be <= %d characters", envName, maxScopeIdentifierLength)
+	}
+	if !scopeIdentifierPattern.MatchString(normalized) {
+		return fmt.Errorf("%s must match %s", envName, scopeIdentifierPattern.String())
 	}
 	return nil
 }
