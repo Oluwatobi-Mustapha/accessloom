@@ -1,0 +1,13 @@
+{
+  "version": "2026-04-04",
+  "phase": "advisory",
+  "protected_paths": [
+    ".github/workflows/**",
+    "deploy/**",
+    "cmd/server/**",
+    "internal/service/**",
+    "internal/security/**"
+  ],
+  "block_severities": ["P0", "P1"],
+  "require_no_abstain_on_protected": false
+}

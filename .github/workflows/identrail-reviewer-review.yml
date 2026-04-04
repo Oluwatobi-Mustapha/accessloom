@@ -55,7 +55,12 @@ jobs:
                 per_page: perPage,
                 page
               });
-              files.push(...resp.data.map((f) => ({ filename: f.filename, status: f.status })));
+              files.push(...resp.data.map((f) => ({
+                filename: f.filename,
+                status: f.status,
+                patch: f.patch || '',
+                previous_filename: f.previous_filename || ''
+              })));
               if (resp.data.length < perPage) break;
               page += 1;
             }
@@ -72,6 +77,7 @@ jobs:
               --event-path "$GITHUB_EVENT_PATH" \
               --changed-files .tmp/changed-files.json \
               --policy .github/identrail-reviewer/policy.v1.json \
+              --baseline .github/identrail-reviewer/baseline.v1.json \
               --audit-log .tmp/audit.jsonl \
               --output .tmp/review.json; then
               break
@@ -87,7 +93,14 @@ jobs:
       - name: Generate review checksums
         run: |
           set -euo pipefail
-          sha256sum .tmp/review.json .tmp/audit.jsonl > .tmp/review.sha256
+          go run ./cmd/identrail-reviewer enforce \
+            --review .tmp/review.json \
+            --changed-files .tmp/changed-files.json \
+            --rollout .github/identrail-reviewer/rollout.v1.json \
+            --output .tmp/enforcement.json \
+            --fail-on-block=false
+
+          sha256sum .tmp/review.json .tmp/audit.jsonl .tmp/enforcement.json > .tmp/review.sha256
 
       - name: Upload review artifact
         if: always()
@@ -97,6 +110,7 @@ jobs:
           path: |
             .tmp/review.json
             .tmp/audit.jsonl
+            .tmp/enforcement.json
             .tmp/review.sha256
           if-no-files-found: error
 
@@ -112,9 +126,39 @@ jobs:
               marker: '<!-- identrail-reviewer:pr -->',
               heading: '## identrail-reviewer',
               issueNumber: context.payload.pull_request.number,
-              maxFindings: 20
+              maxFindings: 20,
+              gatePath: '.tmp/enforcement.json'
             });
 
+      - name: Upsert inline PR review comments
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { upsertInlineReviewComments } = require('./.github/scripts/identrail-reviewer/upsert-review-comment');
+            await upsertInlineReviewComments({
+              github,
+              context,
+              reviewPath: '.tmp/review.json',
+              changedFilesPath: '.tmp/changed-files.json',
+              maxComments: 10
+            });
+
+      - name: Enforce rollout gate
+        run: |
+          set -euo pipefail
+          gate_status="$(jq -r '.status' .tmp/enforcement.json)"
+          case "${gate_status}" in
+            pass|warn)
+              ;;
+            block)
+              echo "identrail-reviewer gate blocked this PR." >&2
+              exit 1
+              ;;
+            *)
+              echo "identrail-reviewer gate returned unexpected status: ${gate_status}" >&2
+              exit 1
+              ;;
+          esac
   issue-review:
     if: github.event_name == 'issues'
     runs-on: ubuntu-latest
