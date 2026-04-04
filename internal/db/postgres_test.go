@@ -479,7 +479,10 @@ func TestPostgresStoreRepoQueueLifecycle(t *testing.T) {
 	}
 
 	pendingRows := sqlmock.NewRows([]string{"count"}).AddRow(1)
-	mock.ExpectQuery("SELECT COUNT\\(\\*\\)").
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*)
+		 FROM repo_scans
+		 WHERE repository = $1
+		   AND status IN ('queued', 'running')`)).
 		WithArgs("owner/repo").
 		WillReturnRows(pendingRows)
 
