@@ -1,0 +1,209 @@
+name: Code Scanning Autofix
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply_changes:
+        description: "Apply changes (false = dry run)"
+        type: boolean
+        required: true
+        default: false
+      max_alerts:
+        description: "Maximum alerts to process"
+        type: string
+        required: true
+        default: "3"
+      severities:
+        description: "Comma-separated severities to include"
+        type: string
+        required: true
+        default: "critical,high"
+  schedule:
+    - cron: "23 2 * * 1-5"
+
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: write
+
+concurrency:
+  group: code-scanning-autofix-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  autofix:
+    name: Generate and PR Autofixes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Process open code scanning alerts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const isScheduled = context.eventName === "schedule";
+            const applyInput = core.getInput("apply_changes");
+            const applyChanges = isScheduled || applyInput === "true";
+
+            const maxAlertsInput = core.getInput("max_alerts") || "3";
+            const maxAlerts = Number.parseInt(maxAlertsInput, 10);
+            if (!Number.isFinite(maxAlerts) || maxAlerts <= 0) {
+              core.setFailed(`Invalid max_alerts value: ${maxAlertsInput}`);
+              return;
+            }
+
+            const severitiesInput = core.getInput("severities") || "critical,high";
+            const severities = severitiesInput
+              .split(",")
+              .map((value) => value.trim().toLowerCase())
+              .filter(Boolean);
+
+            const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+            const alertsResp = await github.request("GET /repos/{owner}/{repo}/code-scanning/alerts", {
+              owner,
+              repo,
+              state: "open",
+              tool_name: "CodeQL",
+              per_page: 100,
+            });
+
+            const matchingAlerts = alertsResp.data
+              .filter((alert) => {
+                const sev = (alert.rule?.security_severity_level || alert.rule?.severity || "").toLowerCase();
+                return severities.includes(sev);
+              })
+              .slice(0, maxAlerts);
+
+            if (matchingAlerts.length === 0) {
+              core.notice("No matching open CodeQL alerts found.");
+              return;
+            }
+
+            core.notice(`Found ${matchingAlerts.length} matching alerts. apply_changes=${applyChanges}`);
+
+            for (const alert of matchingAlerts) {
+              const alertNumber = alert.number;
+              const ruleId = alert.rule?.id || alert.rule?.name || "unknown-rule";
+              const severity = (alert.rule?.security_severity_level || alert.rule?.severity || "unknown").toLowerCase();
+              const branchName = `autofix/code-scanning-alert-${alertNumber}`;
+
+              const existingPrs = await github.request("GET /repos/{owner}/{repo}/pulls", {
+                owner,
+                repo,
+                state: "open",
+                head: `${owner}:${branchName}`,
+              });
+
+              if (existingPrs.data.length > 0) {
+                core.info(`Skipping alert #${alertNumber}: PR already exists (${existingPrs.data[0].html_url}).`);
+                continue;
+              }
+
+              if (!applyChanges) {
+                core.notice(`[dry-run] Would process alert #${alertNumber} (${ruleId}, ${severity}).`);
+                continue;
+              }
+
+              try {
+                await github.request("POST /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix", {
+                  owner,
+                  repo,
+                  alert_number: alertNumber,
+                });
+                core.info(`Requested autofix generation for alert #${alertNumber}.`);
+              } catch (error) {
+                if (error.status === 404) {
+                  core.warning(`Skipping alert #${alertNumber}: no suggested fix available.`);
+                  continue;
+                }
+                if (error.status === 409) {
+                  core.info(`Autofix generation already in progress for alert #${alertNumber}.`);
+                } else {
+                  throw error;
+                }
+              }
+
+              let autofixStatus = "pending";
+              for (let attempt = 0; attempt < 12; attempt += 1) {
+                try {
+                  const autofixResp = await github.request(
+                    "GET /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix",
+                    {
+                      owner,
+                      repo,
+                      alert_number: alertNumber,
+                    },
+                  );
+
+                  autofixStatus = (autofixResp.data.status || "success").toLowerCase();
+                  if (autofixStatus === "success") {
+                    break;
+                  }
+                  if (autofixStatus === "failed" || autofixStatus === "error") {
+                    break;
+                  }
+                } catch (error) {
+                  if (error.status === 404) {
+                    autofixStatus = "pending";
+                  } else {
+                    throw error;
+                  }
+                }
+
+                await sleep(10000);
+              }
+
+              if (autofixStatus !== "success") {
+                core.warning(`Autofix did not reach success for alert #${alertNumber} (status=${autofixStatus}).`);
+                continue;
+              }
+
+              let commitSha;
+              try {
+                const commitResp = await github.request(
+                  "POST /repos/{owner}/{repo}/code-scanning/alerts/{alert_number}/autofix/commits",
+                  {
+                    owner,
+                    repo,
+                    alert_number: alertNumber,
+                    target_ref: `refs/heads/${branchName}`,
+                    commit_message: `autofix: resolve code scanning alert #${alertNumber} (${ruleId})`,
+                  },
+                );
+                commitSha = commitResp.data.sha;
+                core.info(`Created autofix commit ${commitSha} on ${branchName}.`);
+              } catch (error) {
+                core.warning(`Unable to create autofix commit for alert #${alertNumber}: ${error.message}`);
+                continue;
+              }
+
+              const title = `autofix(code-scanning): alert #${alertNumber} (${ruleId})`;
+              const body = [
+                "## Automated Code Scanning Autofix",
+                "",
+                `- Alert: #${alertNumber}`,
+                `- Rule: \`${ruleId}\``,
+                `- Severity: \`${severity}\``,
+                `- Source: ${alert.html_url}`,
+                `- Autofix commit: \`${commitSha}\``,
+                "",
+                "This PR was generated automatically by `.github/workflows/code-scanning-autofix.yml`.",
+                "Please review changes carefully before merge.",
+              ].join("\n");
+
+              const createdPr = await github.request("POST /repos/{owner}/{repo}/pulls", {
+                owner,
+                repo,
+                title,
+                head: branchName,
+                base: "main",
+                body,
+                draft: true,
+              });
+
+              core.notice(`Opened PR for alert #${alertNumber}: ${createdPr.data.html_url}`);
+            }
