@@ -1,0 +1,237 @@
+name: identrail-reviewer-review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: identrail-reviewer-review-${{ github.event_name }}-${{ github.event.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  pr-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Collect changed files
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const number = context.payload.pull_request.number;
+            const outDir = path.join(process.cwd(), '.tmp');
+            fs.mkdirSync(outDir, { recursive: true });
+
+            const files = [];
+            let page = 1;
+            const perPage = 100;
+            while (true) {
+              const resp = await github.rest.pulls.listFiles({
+                owner,
+                repo,
+                pull_number: number,
+                per_page: perPage,
+                page
+              });
+              files.push(...resp.data.map((f) => ({ filename: f.filename, status: f.status })));
+              if (resp.data.length < perPage) break;
+              page += 1;
+            }
+
+            fs.writeFileSync(path.join(outDir, 'changed-files.json'), JSON.stringify(files, null, 2));
+
+      - name: Run identrail-reviewer (PR)
+        run: |
+          set -euo pipefail
+          go run ./cmd/identrail-reviewer review-pr \
+            --repo-root . \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --changed-files .tmp/changed-files.json \
+            --output .tmp/review.json
+
+      - name: Upload review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: identrail-reviewer-pr-${{ github.event.pull_request.number }}
+          path: .tmp/review.json
+          if-no-files-found: error
+
+      - name: Upsert PR review comment
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const result = JSON.parse(fs.readFileSync('.tmp/review.json', 'utf8'));
+            const marker = '<!-- identrail-reviewer:pr -->';
+            const issue_number = context.payload.pull_request.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const findings = result.findings || [];
+            const abstentions = result.abstentions || [];
+            const maxFindings = 20;
+            const clipped = findings.slice(0, maxFindings);
+
+            let body = `${marker}\n## identrail-reviewer\n`;
+            body += `Status: **${result.status}**\n\n`;
+            body += `${result.summary}\n\n`;
+
+            if (clipped.length > 0) {
+              body += `### Findings\n`;
+              for (const finding of clipped) {
+                body += `- [${finding.severity}] ${finding.summary} (${finding.file}:${finding.line})\n`;
+                body += `  - Rule: \`${finding.rule_id}\` | Confidence: ${finding.confidence}\n`;
+                body += `  - Recommendation: ${finding.recommendation}\n`;
+              }
+            } else {
+              body += `### Findings\n- No deterministic findings.\n`;
+            }
+
+            if (findings.length > maxFindings) {
+              body += `\nAdditional findings omitted: ${findings.length - maxFindings}.\n`;
+            }
+
+            if (abstentions.length > 0) {
+              body += `\n### Abstentions\n`;
+              for (const note of abstentions) {
+                body += `- ${note}\n`;
+              }
+            }
+
+            body += `\n_Reviewer version: ${result.version}_\n`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100
+            });
+
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body
+              });
+            }
+
+  issue-review:
+    if: github.event_name == 'issues'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run identrail-reviewer (Issue)
+        run: |
+          set -euo pipefail
+          mkdir -p .tmp
+          go run ./cmd/identrail-reviewer review-issue \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --output .tmp/review.json
+
+      - name: Upload issue review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: identrail-reviewer-issue-${{ github.event.issue.number }}
+          path: .tmp/review.json
+          if-no-files-found: error
+
+      - name: Upsert issue review comment
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+            const result = JSON.parse(fs.readFileSync('.tmp/review.json', 'utf8'));
+            const marker = '<!-- identrail-reviewer:issue -->';
+            const issue_number = context.payload.issue.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const findings = result.findings || [];
+            const abstentions = result.abstentions || [];
+
+            let body = `${marker}\n## identrail-reviewer issue triage\n`;
+            body += `Status: **${result.status}**\n\n`;
+            body += `${result.summary}\n\n`;
+
+            if (findings.length > 0) {
+              body += `### Findings\n`;
+              for (const finding of findings) {
+                body += `- [${finding.severity}] ${finding.summary} (${finding.file}:${finding.line})\n`;
+                body += `  - Rule: \`${finding.rule_id}\` | Confidence: ${finding.confidence}\n`;
+                body += `  - Recommendation: ${finding.recommendation}\n`;
+              }
+            } else {
+              body += `### Findings\n- No deterministic findings.\n`;
+            }
+
+            if (abstentions.length > 0) {
+              body += `\n### Abstentions\n`;
+              for (const note of abstentions) {
+                body += `- ${note}\n`;
+              }
+            }
+
+            body += `\n_Reviewer version: ${result.version}_\n`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100
+            });
+            const existing = comments.find((c) => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body
+              });
+            }
