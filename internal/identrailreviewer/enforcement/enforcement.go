@@ -143,7 +143,7 @@ func matchesPathPattern(pattern, file string) bool {
 		prefix := strings.TrimSuffix(pattern, "/**")
 		return strings.HasPrefix(file, prefix+"/") || file == prefix
 	}
-	ok, err := filepath.Match(pattern, file)
+	ok, err := filepath.Match(filepath.FromSlash(pattern), filepath.FromSlash(file))
 	if err != nil {
 		return false
 	}
