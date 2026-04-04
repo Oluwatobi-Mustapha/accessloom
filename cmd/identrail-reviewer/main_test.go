@@ -97,6 +97,105 @@ func TestWriteJSONWritesFile(t *testing.T) {
 	}
 }
 
+func TestEnforceGateWritesWarnDecision(t *testing.T) {
+	root := t.TempDir()
+	reviewPath := filepath.Join(root, "review.json")
+	changedPath := filepath.Join(root, "changed.json")
+	rolloutPath := filepath.Join(root, "rollout.json")
+	outputPath := filepath.Join(root, "enforcement.json")
+
+	review := model.ReviewResult{
+		Findings: []model.Finding{
+			{ID: "F-1", Severity: "P2"},
+		},
+	}
+	changed := []model.ChangedFile{{Filename: "internal/api/router.go"}}
+	rollout := map[string]any{
+		"version":         "test",
+		"phase":           "advisory",
+		"protected_paths": []string{"deploy/**"},
+		"block_severities": []string{
+			"P0",
+			"P1",
+		},
+	}
+	if err := writeJSONFile(reviewPath, review); err != nil {
+		t.Fatalf("write review json: %v", err)
+	}
+	if err := writeJSONFile(changedPath, changed); err != nil {
+		t.Fatalf("write changed files json: %v", err)
+	}
+	if err := writeJSONFile(rolloutPath, rollout); err != nil {
+		t.Fatalf("write rollout json: %v", err)
+	}
+
+	enforceGate([]string{
+		"--review", reviewPath,
+		"--changed-files", changedPath,
+		"--rollout", rolloutPath,
+		"--output", outputPath,
+		"--fail-on-block=false",
+	})
+
+	var got map[string]any
+	if err := readJSONFile(outputPath, &got); err != nil {
+		t.Fatalf("read enforcement output: %v", err)
+	}
+	if got["status"] != "warn" {
+		t.Fatalf("expected status warn, got %v", got["status"])
+	}
+}
+
+func TestEnforceGateWritesBlockDecisionWithoutExitWhenConfigured(t *testing.T) {
+	root := t.TempDir()
+	reviewPath := filepath.Join(root, "review.json")
+	changedPath := filepath.Join(root, "changed.json")
+	rolloutPath := filepath.Join(root, "rollout.json")
+	outputPath := filepath.Join(root, "enforcement.json")
+
+	review := model.ReviewResult{
+		Findings: []model.Finding{
+			{ID: "F-1", Severity: "P1"},
+		},
+	}
+	changed := []model.ChangedFile{{Filename: "deploy/prod/service.yaml"}}
+	rollout := map[string]any{
+		"version":         "test",
+		"phase":           "enforced",
+		"protected_paths": []string{"deploy/**"},
+		"block_severities": []string{
+			"P0",
+			"P1",
+		},
+		"require_no_abstain_on_protected": true,
+	}
+	if err := writeJSONFile(reviewPath, review); err != nil {
+		t.Fatalf("write review json: %v", err)
+	}
+	if err := writeJSONFile(changedPath, changed); err != nil {
+		t.Fatalf("write changed files json: %v", err)
+	}
+	if err := writeJSONFile(rolloutPath, rollout); err != nil {
+		t.Fatalf("write rollout json: %v", err)
+	}
+
+	enforceGate([]string{
+		"--review", reviewPath,
+		"--changed-files", changedPath,
+		"--rollout", rolloutPath,
+		"--output", outputPath,
+		"--fail-on-block=false",
+	})
+
+	var got map[string]any
+	if err := readJSONFile(outputPath, &got); err != nil {
+		t.Fatalf("read enforcement output: %v", err)
+	}
+	if got["status"] != "block" {
+		t.Fatalf("expected status block, got %v", got["status"])
+	}
+}
+
 func writeJSONFile(path string, v any) error {
 	b, err := json.Marshal(v)
 	if err != nil {
