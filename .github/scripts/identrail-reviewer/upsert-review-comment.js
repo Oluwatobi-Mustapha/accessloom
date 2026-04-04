@@ -1,6 +1,14 @@
 "use strict";
 
+const crypto = require("crypto");
 const fs = require("fs");
+
+const INLINE_MARKER_PREFIX = "<!-- identrail-reviewer:inline:";
+const INLINE_MARKER_SUFFIX = " -->";
+
+function normalizePath(value) {
+  return String(value || "").trim().replace(/\\/g, "/").replace(/^\.\/+/, "");
+}
 
 function formatFindings(findings, maxFindings) {
   const limit = Number.isInteger(maxFindings) && maxFindings > 0 ? maxFindings : findings.length;
@@ -79,6 +87,69 @@ function renderBody({ marker, heading, result, gate, maxFindings }) {
   return body;
 }
 
+function parseTouchedLines(patch) {
+  const touched = new Set();
+  if (typeof patch !== "string" || patch.length === 0) {
+    return touched;
+  }
+
+  const lines = patch.split("\n");
+  let nextRightLine = null;
+  for (const line of lines) {
+    if (line.startsWith("@@")) {
+      const match = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+      nextRightLine = match ? Number.parseInt(match[1], 10) : null;
+      continue;
+    }
+    if (nextRightLine === null) {
+      continue;
+    }
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      touched.add(nextRightLine);
+      nextRightLine += 1;
+      continue;
+    }
+    if (line.startsWith("-") && !line.startsWith("---")) {
+      continue;
+    }
+    if (line.startsWith(" ")) {
+      touched.add(nextRightLine);
+      nextRightLine += 1;
+    }
+  }
+  return touched;
+}
+
+function findingInlineFingerprint(finding) {
+  const payload = [
+    String(finding.rule_id || "").trim(),
+    normalizePath(finding.file),
+    String(Number(finding.line) || 0),
+    String(finding.summary || "").trim(),
+  ].join("|");
+  return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 24);
+}
+
+function extractInlineMarker(body) {
+  if (typeof body !== "string" || body.length === 0) {
+    return "";
+  }
+  const regex = /<!--\s*identrail-reviewer:inline:([a-f0-9]{24})\s*-->/i;
+  const match = regex.exec(body);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function inlineCommentBody(finding, markerKey) {
+  const severity = String(finding.severity || "P3").toUpperCase();
+  return [
+    `[${severity}] ${finding.summary}`,
+    `Rule: \`${finding.rule_id}\` | Confidence: ${finding.confidence}`,
+    `Recommendation: ${finding.recommendation}`,
+    "",
+    `${INLINE_MARKER_PREFIX}${markerKey}${INLINE_MARKER_SUFFIX}`,
+  ].join("\n");
+}
+
 async function upsertReviewComment({
   github,
   context,
@@ -130,6 +201,112 @@ async function upsertReviewComment({
   });
 }
 
+async function upsertInlineReviewComments({
+  github,
+  context,
+  reviewPath,
+  changedFilesPath,
+  maxComments,
+}) {
+  const pullRequest = context.payload.pull_request;
+  if (!pullRequest || !pullRequest.number) {
+    return { posted: 0, skipped: 0 };
+  }
+
+  const owner = context.repo.owner;
+  const repo = context.repo.repo;
+  const pullNumber = pullRequest.number;
+  const commitID = pullRequest.head && pullRequest.head.sha ? pullRequest.head.sha : "";
+  if (!commitID) {
+    return { posted: 0, skipped: 0 };
+  }
+
+  const review = JSON.parse(fs.readFileSync(reviewPath, "utf8"));
+  const findings = Array.isArray(review.findings) ? review.findings : [];
+  if (findings.length === 0) {
+    return { posted: 0, skipped: 0 };
+  }
+
+  const changedFiles = JSON.parse(fs.readFileSync(changedFilesPath, "utf8"));
+  const touchedByPath = new Map();
+  for (const file of changedFiles) {
+    const normalized = normalizePath(file.filename);
+    if (!normalized) {
+      continue;
+    }
+    touchedByPath.set(normalized, parseTouchedLines(file.patch));
+  }
+
+  const existingComments = await github.paginate(github.rest.pulls.listReviewComments, {
+    owner,
+    repo,
+    pull_number: pullNumber,
+    per_page: 100,
+  });
+  const existingMarkers = new Set();
+  for (const comment of existingComments) {
+    const marker = extractInlineMarker(comment.body);
+    if (marker) {
+      existingMarkers.add(marker);
+    }
+  }
+
+  const limit = Number.isInteger(maxComments) && maxComments > 0 ? maxComments : 10;
+  let posted = 0;
+  let skipped = 0;
+  const seenCandidates = new Set();
+
+  for (const finding of findings) {
+    if (posted >= limit) {
+      break;
+    }
+    const filePath = normalizePath(finding.file);
+    const line = Number(finding.line);
+    if (!filePath || !Number.isInteger(line) || line <= 0) {
+      skipped += 1;
+      continue;
+    }
+
+    const touched = touchedByPath.get(filePath);
+    if (!touched || !touched.has(line)) {
+      skipped += 1;
+      continue;
+    }
+
+    const markerKey = findingInlineFingerprint(finding);
+    if (seenCandidates.has(markerKey) || existingMarkers.has(markerKey)) {
+      skipped += 1;
+      continue;
+    }
+    seenCandidates.add(markerKey);
+
+    try {
+      await github.rest.pulls.createReviewComment({
+        owner,
+        repo,
+        pull_number: pullNumber,
+        commit_id: commitID,
+        path: filePath,
+        line,
+        side: "RIGHT",
+        body: inlineCommentBody(finding, markerKey),
+      });
+      posted += 1;
+    } catch (error) {
+      const status = error && typeof error.status === "number" ? error.status : 0;
+      if (status === 422) {
+        skipped += 1;
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  return { posted, skipped };
+}
+
 module.exports = {
+  upsertInlineReviewComments,
   upsertReviewComment,
 };
+

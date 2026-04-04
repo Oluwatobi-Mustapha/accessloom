@@ -27,8 +27,10 @@ type ReviewResult struct {
 }
 
 type ChangedFile struct {
-	Filename string `json:"filename"`
-	Status   string `json:"status"`
+	Filename         string `json:"filename"`
+	Status           string `json:"status"`
+	Patch            string `json:"patch,omitempty"`
+	PreviousFilename string `json:"previous_filename,omitempty"`
 }
 
 type PullRequestEvent struct {

@@ -6,6 +6,8 @@ Week 4 introduces phased enforcement and operating procedures for production rol
 
 - Rollout config with phase controls:
   - `.github/identrail-reviewer/rollout.v1.json`
+- Baseline config for new-findings-only mode:
+  - `.github/identrail-reviewer/baseline.v1.json`
 - Enforcement decision engine:
   - `internal/identrailreviewer/enforcement/enforcement.go`
 - Weekly operations report workflow:
@@ -24,3 +26,5 @@ Week 4 introduces phased enforcement and operating procedures for production rol
 - Start in `advisory` and gather accuracy metrics.
 - Move to `enforced` only after precision and false-positive targets are stable.
 - Use `strict` only after sustained quality over multiple release cycles.
+- Maintain the baseline file so review comments focus on new regressions, not accepted legacy debt.
+- Use inline comments for diff-touched findings to shorten remediation cycle time.
