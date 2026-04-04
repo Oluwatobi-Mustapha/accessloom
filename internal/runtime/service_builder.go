@@ -35,6 +35,7 @@ func BuildScanService(cfg config.Config) (*api.Service, func() error, error) {
 				return nil, nil, fmt.Errorf("apply migrations: %w", migrateErr)
 			}
 		}
+		pgStore.SetScopeRLSEnforcement(cfg.PostgresRLSEnforced)
 		store = pgStore
 	}
 

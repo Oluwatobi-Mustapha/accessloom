@@ -31,6 +31,7 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_RATE_LIMIT_BURST", "")
 	t.Setenv("IDENTRAIL_RUN_MIGRATIONS", "")
 	t.Setenv("IDENTRAIL_MIGRATIONS_DIR", "")
+	t.Setenv("IDENTRAIL_POSTGRES_RLS_ENFORCED", "")
 	t.Setenv("IDENTRAIL_AUDIT_LOG_FILE", "")
 	t.Setenv("IDENTRAIL_AUDIT_FORWARD_URL", "")
 	t.Setenv("IDENTRAIL_AUDIT_FORWARD_TIMEOUT", "")
@@ -135,6 +136,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.MigrationsDir != "migrations" {
 		t.Fatalf("unexpected migrations dir: %q", cfg.MigrationsDir)
+	}
+	if cfg.PostgresRLSEnforced {
+		t.Fatal("expected postgres rls enforcement disabled by default")
 	}
 	if cfg.AuditLogFile != "" {
 		t.Fatalf("expected empty audit log file, got %q", cfg.AuditLogFile)
@@ -274,6 +278,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_RATE_LIMIT_BURST", "50")
 	t.Setenv("IDENTRAIL_RUN_MIGRATIONS", "false")
 	t.Setenv("IDENTRAIL_MIGRATIONS_DIR", "db/migrations")
+	t.Setenv("IDENTRAIL_POSTGRES_RLS_ENFORCED", "true")
 	t.Setenv("IDENTRAIL_AUDIT_LOG_FILE", "/tmp/audit.log")
 	t.Setenv("IDENTRAIL_AUDIT_FORWARD_URL", "https://audit.example.com/events")
 	t.Setenv("IDENTRAIL_AUDIT_FORWARD_TIMEOUT", "8s")
@@ -381,6 +386,9 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.MigrationsDir != "db/migrations" {
 		t.Fatalf("unexpected migrations dir: %q", cfg.MigrationsDir)
+	}
+	if !cfg.PostgresRLSEnforced {
+		t.Fatal("expected postgres rls enforcement enabled from env")
 	}
 	if cfg.AuditLogFile != "/tmp/audit.log" {
 		t.Fatalf("unexpected audit log file: %q", cfg.AuditLogFile)

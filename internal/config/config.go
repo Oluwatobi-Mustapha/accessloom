@@ -34,6 +34,7 @@ const (
 	defaultWorkerAPIJobQueueBatchSize  = 5
 	defaultLockBackend                 = "auto"
 	defaultLockNamespace               = "identrail"
+	defaultPostgresRLSEnforced         = false
 	defaultTenantID                    = "default"
 	defaultWorkspaceID                 = "default"
 	defaultOIDCWriteScopes             = "identrail.write,identrail.admin,write,admin"
@@ -66,6 +67,7 @@ type Config struct {
 	RateLimitBurst             int
 	RunMigrations              bool
 	MigrationsDir              string
+	PostgresRLSEnforced        bool
 	AuditLogFile               string
 	AuditForwardURL            string
 	AuditForwardTimeout        time.Duration
@@ -132,6 +134,7 @@ func Load() Config {
 		RateLimitBurst:             parseInt(getEnv("IDENTRAIL_RATE_LIMIT_BURST", "20"), 20),
 		RunMigrations:              parseBool(getEnv("IDENTRAIL_RUN_MIGRATIONS", "true"), true),
 		MigrationsDir:              getEnv("IDENTRAIL_MIGRATIONS_DIR", "migrations"),
+		PostgresRLSEnforced:        parseBool(getEnv("IDENTRAIL_POSTGRES_RLS_ENFORCED", "false"), defaultPostgresRLSEnforced),
 		AuditLogFile:               getEnv("IDENTRAIL_AUDIT_LOG_FILE", ""),
 		AuditForwardURL:            getEnv("IDENTRAIL_AUDIT_FORWARD_URL", ""),
 		AuditForwardTimeout:        parseDuration(getEnv("IDENTRAIL_AUDIT_FORWARD_TIMEOUT", "3s"), 3*time.Second),
