@@ -32,6 +32,34 @@ func TestValidateSecurityRejectsOIDCIssuerWithoutAudience(t *testing.T) {
 	}
 }
 
+func TestValidateSecurityRejectsInvalidOIDCClaimName(t *testing.T) {
+	cfg := Config{
+		OIDCIssuerURL:      "https://iam.example.com/realms/identrail",
+		OIDCAudience:       "identrail-api",
+		OIDCTenantClaim:    "tenant claim",
+		OIDCWorkspaceClaim: "workspace_id",
+		OIDCGroupsClaim:    "groups",
+		OIDCRolesClaim:     "roles",
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected invalid oidc claim name error")
+	}
+}
+
+func TestValidateSecurityAcceptsValidOIDCClaimNames(t *testing.T) {
+	cfg := Config{
+		OIDCIssuerURL:      "https://iam.example.com/realms/identrail",
+		OIDCAudience:       "identrail-api",
+		OIDCTenantClaim:    "tenant_id",
+		OIDCWorkspaceClaim: "workspace_id",
+		OIDCGroupsClaim:    "groups",
+		OIDCRolesClaim:     "roles",
+	}
+	if err := ValidateSecurity(cfg); err != nil {
+		t.Fatalf("expected valid oidc claim names, got %v", err)
+	}
+}
+
 func TestValidateSecurityWriteKeyMustBeInAPIKeys(t *testing.T) {
 	cfg := Config{
 		APIKeys:      []string{"reader"},

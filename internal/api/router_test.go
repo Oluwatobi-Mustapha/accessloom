@@ -18,6 +18,7 @@ import (
 	"github.com/Oluwatobi-Mustapha/identrail/internal/repoexposure"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/scheduler"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/telemetry"
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest/observer"
 )
@@ -1155,11 +1156,19 @@ func TestRouterScopedAuthorizationPrefersScopeMap(t *testing.T) {
 	}
 
 	writeReq := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
-	writeReq.Header.Set("Authorization", "Bearer writer-key")
+	writeReq.Header.Set("X-API-Key", "writer-key")
 	writeW := httptest.NewRecorder()
 	r.ServeHTTP(writeW, writeReq)
 	if writeW.Code != http.StatusAccepted {
 		t.Fatalf("expected write with writer-key to pass, got %d", writeW.Code)
+	}
+
+	bearerFallbackReq := httptest.NewRequest(http.MethodGet, "/v1/scans", nil)
+	bearerFallbackReq.Header.Set("Authorization", "Bearer writer-key")
+	bearerFallbackW := httptest.NewRecorder()
+	r.ServeHTTP(bearerFallbackW, bearerFallbackReq)
+	if bearerFallbackW.Code != http.StatusUnauthorized {
+		t.Fatalf("expected bearer api-key fallback to be rejected, got %d", bearerFallbackW.Code)
 	}
 
 	badScopeReq := httptest.NewRequest(http.MethodGet, "/v1/scans", nil)
@@ -1177,8 +1186,18 @@ func TestRouterOIDCOnlyAuthentication(t *testing.T) {
 	r := NewRouter(logger, metrics, nil, RouterOptions{
 		OIDCTokenVerifier: fakeTokenVerifier{
 			tokens: map[string]VerifiedToken{
-				"good-token":     {Subject: "user-1", Scopes: []string{"read"}},
-				"no-scope-token": {Subject: "user-2", Scopes: nil},
+				"good-token": {
+					Subject:     "user-1",
+					TenantID:    "tenant-1",
+					WorkspaceID: "workspace-1",
+					Scopes:      []string{"read"},
+				},
+				"no-scope-token": {
+					Subject:     "user-2",
+					TenantID:    "tenant-1",
+					WorkspaceID: "workspace-1",
+					Scopes:      nil,
+				},
 			},
 		},
 	})
@@ -1215,8 +1234,18 @@ func TestRouterOIDCWriteScopeAuthorization(t *testing.T) {
 	r := NewRouter(logger, metrics, svc, RouterOptions{
 		OIDCTokenVerifier: fakeTokenVerifier{
 			tokens: map[string]VerifiedToken{
-				"reader-token": {Subject: "user-read", Scopes: []string{"identrail.read"}},
-				"writer-token": {Subject: "user-write", Scopes: []string{"identrail.write"}},
+				"reader-token": {
+					Subject:     "user-read",
+					TenantID:    "tenant-1",
+					WorkspaceID: "workspace-1",
+					Scopes:      []string{"identrail.read"},
+				},
+				"writer-token": {
+					Subject:     "user-write",
+					TenantID:    "tenant-1",
+					WorkspaceID: "workspace-1",
+					Scopes:      []string{"identrail.write"},
+				},
 			},
 		},
 		OIDCWriteScopes: []string{"identrail.write"},
@@ -1246,7 +1275,12 @@ func TestRouterHybridOIDCAndLegacyAPIKeyReadCompatibility(t *testing.T) {
 		APIKeys: []string{"legacy-key"},
 		OIDCTokenVerifier: fakeTokenVerifier{
 			tokens: map[string]VerifiedToken{
-				"reader-token": {Subject: "user-read", Scopes: []string{"identrail.read"}},
+				"reader-token": {
+					Subject:     "user-read",
+					TenantID:    "tenant-1",
+					WorkspaceID: "workspace-1",
+					Scopes:      []string{"identrail.read"},
+				},
 			},
 		},
 	})
@@ -1257,6 +1291,44 @@ func TestRouterHybridOIDCAndLegacyAPIKeyReadCompatibility(t *testing.T) {
 	r.ServeHTTP(readW, readReq)
 	if readW.Code != http.StatusOK {
 		t.Fatalf("expected legacy api key read to pass in hybrid mode, got %d", readW.Code)
+	}
+}
+
+func TestRequestScopeMiddlewarePrefersOIDCTenantWorkspaceClaims(t *testing.T) {
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Set("auth.tenant_id", "tenant-from-token")
+		c.Set("auth.workspace_id", "workspace-from-token")
+		c.Next()
+	})
+	r.Use(requestScopeMiddleware("default-tenant", "default-workspace"))
+	r.GET("/scope", func(c *gin.Context) {
+		scope := db.ScopeFromContext(c.Request.Context())
+		c.JSON(http.StatusOK, map[string]string{
+			"tenant_id":    scope.TenantID,
+			"workspace_id": scope.WorkspaceID,
+		})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/scope", nil)
+	req.Header.Set("X-Identrail-Tenant-ID", "header-tenant")
+	req.Header.Set("X-Identrail-Workspace-ID", "header-workspace")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["tenant_id"] != "tenant-from-token" {
+		t.Fatalf("expected tenant from oidc claim, got %q", body["tenant_id"])
+	}
+	if body["workspace_id"] != "workspace-from-token" {
+		t.Fatalf("expected workspace from oidc claim, got %q", body["workspace_id"])
 	}
 }
 

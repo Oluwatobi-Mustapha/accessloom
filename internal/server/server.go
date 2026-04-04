@@ -91,7 +91,15 @@ func NewBootstrap(ctx context.Context, cfg config.Config) (Bootstrap, error) {
 
 	var tokenVerifier api.TokenVerifier
 	if cfg.OIDCIssuerURL != "" {
-		verifier, verifierErr := api.NewOIDCTokenVerifier(ctx, cfg.OIDCIssuerURL, cfg.OIDCAudience)
+		verifier, verifierErr := api.NewOIDCTokenVerifier(
+			ctx,
+			cfg.OIDCIssuerURL,
+			cfg.OIDCAudience,
+			cfg.OIDCTenantClaim,
+			cfg.OIDCWorkspaceClaim,
+			cfg.OIDCGroupsClaim,
+			cfg.OIDCRolesClaim,
+		)
 		if verifierErr != nil {
 			for _, sink := range auditSinks {
 				_ = sink.Close()

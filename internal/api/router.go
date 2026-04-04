@@ -59,8 +59,14 @@ type RouterOptions struct {
 
 // VerifiedToken contains normalized claims extracted from a validated OIDC token.
 type VerifiedToken struct {
-	Subject string
-	Scopes  []string
+	Subject     string
+	Issuer      string
+	Audiences   []string
+	TenantID    string
+	WorkspaceID string
+	Groups      []string
+	Roles       []string
+	Scopes      []string
 }
 
 // TokenVerifier validates bearer tokens and returns normalized claims.
@@ -101,8 +107,8 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 	r.GET("/metrics", gin.WrapH(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
 
 	v1 := r.Group("/v1")
-	v1.Use(requestScopeMiddleware(opts.DefaultTenantID, opts.DefaultWorkspaceID))
 	v1.Use(apiKeyAuthMiddleware(opts.APIKeys, opts.APIKeyScopes, opts.OIDCTokenVerifier, opts.OIDCWriteScopes))
+	v1.Use(requestScopeMiddleware(opts.DefaultTenantID, opts.DefaultWorkspaceID))
 	v1.Use(requireReadableScopeMiddleware(opts.APIKeyScopes, opts.OIDCTokenVerifier))
 	v1.Use(rateLimitMiddleware(opts.RateLimitRPM, opts.RateLimitBurst))
 	v1.Use(auditLogMiddleware(logger, opts.AuditSink))
@@ -986,11 +992,17 @@ func requestScopeMiddleware(defaultTenantID string, defaultWorkspaceID string) g
 		WorkspaceID: defaultWorkspaceID,
 	}.Normalize()
 	return func(c *gin.Context) {
-		tenantID := strings.TrimSpace(c.GetHeader(scopeHeaderTenantID))
+		tenantID := authContextString(c, "auth.tenant_id")
+		if tenantID == "" {
+			tenantID = strings.TrimSpace(c.GetHeader(scopeHeaderTenantID))
+		}
 		if tenantID == "" {
 			tenantID = defaultScope.TenantID
 		}
-		workspaceID := strings.TrimSpace(c.GetHeader(scopeHeaderWorkspaceID))
+		workspaceID := authContextString(c, "auth.workspace_id")
+		if workspaceID == "" {
+			workspaceID = strings.TrimSpace(c.GetHeader(scopeHeaderWorkspaceID))
+		}
 		if workspaceID == "" {
 			workspaceID = defaultScope.WorkspaceID
 		}
@@ -1136,25 +1148,18 @@ func apiKeyAuthMiddleware(keys []string, scopedKeys map[string][]string, tokenVe
 			token, err := tokenVerifier.VerifyToken(c.Request.Context(), rawBearer)
 			if err == nil {
 				c.Set("auth.subject", token.Subject)
+				c.Set("auth.issuer", token.Issuer)
+				c.Set("auth.audiences", token.Audiences)
+				c.Set("auth.groups", token.Groups)
+				c.Set("auth.roles", token.Roles)
+				c.Set("auth.tenant_id", token.TenantID)
+				c.Set("auth.workspace_id", token.WorkspaceID)
 				c.Set("auth.scope_set", scopeSetFromOIDCToken(token, oidcWriteScopeSet))
 				c.Next()
 				return
 			}
-		}
-
-		// Backward-compatible fallback for legacy clients sending API key via Bearer token.
-		if rawBearer != "" {
-			if scopes, ok := scopedKeyLookup(scopedAllowed, rawBearer); ok {
-				c.Set("auth.api_key", rawBearer)
-				c.Set("auth.scope_set", scopes)
-				c.Next()
-				return
-			}
-			if keyInList(legacyAllowed, rawBearer) {
-				c.Set("auth.api_key", rawBearer)
-				c.Next()
-				return
-			}
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
 		}
 
 		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
@@ -1439,6 +1444,21 @@ func auditLogMiddleware(logger *zap.Logger, sink AuditSink) gin.HandlerFunc {
 
 func readAPIKey(c *gin.Context) string {
 	return strings.TrimSpace(c.GetHeader("X-API-Key"))
+}
+
+func authContextString(c *gin.Context, key string) string {
+	if c == nil {
+		return ""
+	}
+	value, exists := c.Get(key)
+	if !exists {
+		return ""
+	}
+	text, ok := value.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(text)
 }
 
 func triageActorFromContext(c *gin.Context) string {

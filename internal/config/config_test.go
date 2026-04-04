@@ -66,6 +66,10 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_LOCK_NAMESPACE", "")
 	t.Setenv("IDENTRAIL_DEFAULT_TENANT_ID", "")
 	t.Setenv("IDENTRAIL_DEFAULT_WORKSPACE_ID", "")
+	t.Setenv("IDENTRAIL_OIDC_TENANT_CLAIM", "")
+	t.Setenv("IDENTRAIL_OIDC_WORKSPACE_CLAIM", "")
+	t.Setenv("IDENTRAIL_OIDC_GROUPS_CLAIM", "")
+	t.Setenv("IDENTRAIL_OIDC_ROLES_CLAIM", "")
 
 	cfg := Load()
 	if cfg.HTTPAddr != defaultHTTPAddr {
@@ -251,6 +255,18 @@ func TestLoadDefaults(t *testing.T) {
 	if len(cfg.OIDCWriteScopes) == 0 {
 		t.Fatal("expected default oidc write scopes")
 	}
+	if cfg.OIDCTenantClaim != defaultOIDCTenantClaim {
+		t.Fatalf("expected default oidc tenant claim %q, got %q", defaultOIDCTenantClaim, cfg.OIDCTenantClaim)
+	}
+	if cfg.OIDCWorkspaceClaim != defaultOIDCWorkspaceClaim {
+		t.Fatalf("expected default oidc workspace claim %q, got %q", defaultOIDCWorkspaceClaim, cfg.OIDCWorkspaceClaim)
+	}
+	if cfg.OIDCGroupsClaim != defaultOIDCGroupsClaim {
+		t.Fatalf("expected default oidc groups claim %q, got %q", defaultOIDCGroupsClaim, cfg.OIDCGroupsClaim)
+	}
+	if cfg.OIDCRolesClaim != defaultOIDCRolesClaim {
+		t.Fatalf("expected default oidc roles claim %q, got %q", defaultOIDCRolesClaim, cfg.OIDCRolesClaim)
+	}
 }
 
 func TestLoadFromEnv(t *testing.T) {
@@ -316,6 +332,10 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_OIDC_ISSUER_URL", "https://iam.example.com/realms/identrail")
 	t.Setenv("IDENTRAIL_OIDC_AUDIENCE", "identrail-api")
 	t.Setenv("IDENTRAIL_OIDC_WRITE_SCOPES", "identrail.write,identrail.admin")
+	t.Setenv("IDENTRAIL_OIDC_TENANT_CLAIM", "tenant")
+	t.Setenv("IDENTRAIL_OIDC_WORKSPACE_CLAIM", "workspace")
+	t.Setenv("IDENTRAIL_OIDC_GROUPS_CLAIM", "groups")
+	t.Setenv("IDENTRAIL_OIDC_ROLES_CLAIM", "roles")
 
 	cfg := Load()
 	if cfg.HTTPAddr != "127.0.0.1:9090" {
@@ -500,6 +520,18 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if len(cfg.OIDCWriteScopes) != 2 || cfg.OIDCWriteScopes[0] != "identrail.write" || cfg.OIDCWriteScopes[1] != "identrail.admin" {
 		t.Fatalf("unexpected oidc write scopes: %+v", cfg.OIDCWriteScopes)
+	}
+	if cfg.OIDCTenantClaim != "tenant" {
+		t.Fatalf("unexpected oidc tenant claim: %q", cfg.OIDCTenantClaim)
+	}
+	if cfg.OIDCWorkspaceClaim != "workspace" {
+		t.Fatalf("unexpected oidc workspace claim: %q", cfg.OIDCWorkspaceClaim)
+	}
+	if cfg.OIDCGroupsClaim != "groups" {
+		t.Fatalf("unexpected oidc groups claim: %q", cfg.OIDCGroupsClaim)
+	}
+	if cfg.OIDCRolesClaim != "roles" {
+		t.Fatalf("unexpected oidc roles claim: %q", cfg.OIDCRolesClaim)
 	}
 }
 

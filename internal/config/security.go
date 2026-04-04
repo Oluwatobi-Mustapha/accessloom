@@ -22,6 +22,7 @@ const (
 	maxWorkerQueueBatchSize     = 500
 	minAPIKeyLength             = 24
 	maxScopeIdentifierLength    = 64
+	maxOIDCClaimNameLength      = 128
 )
 
 var allowedKeyScopes = map[string]struct{}{
@@ -67,6 +68,7 @@ var placeholderAPIKeys = map[string]struct{}{
 }
 
 var scopeIdentifierPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,63}$`)
+var oidcClaimNamePattern = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9._:-]{0,127}$`)
 
 // ValidateSecurity checks hard-fail security misconfigurations.
 func ValidateSecurity(cfg Config) error {
@@ -99,6 +101,36 @@ func ValidateSecurity(cfg Config) error {
 	}
 	if oidcAudience != "" && oidcIssuer == "" {
 		return fmt.Errorf("IDENTRAIL_OIDC_ISSUER_URL must be set when IDENTRAIL_OIDC_AUDIENCE is configured")
+	}
+	if oidcIssuer != "" {
+		tenantClaim := strings.TrimSpace(cfg.OIDCTenantClaim)
+		if tenantClaim == "" {
+			tenantClaim = defaultOIDCTenantClaim
+		}
+		if err := validateOIDCClaimName("IDENTRAIL_OIDC_TENANT_CLAIM", tenantClaim); err != nil {
+			return err
+		}
+		workspaceClaim := strings.TrimSpace(cfg.OIDCWorkspaceClaim)
+		if workspaceClaim == "" {
+			workspaceClaim = defaultOIDCWorkspaceClaim
+		}
+		if err := validateOIDCClaimName("IDENTRAIL_OIDC_WORKSPACE_CLAIM", workspaceClaim); err != nil {
+			return err
+		}
+		groupsClaim := strings.TrimSpace(cfg.OIDCGroupsClaim)
+		if groupsClaim == "" {
+			groupsClaim = defaultOIDCGroupsClaim
+		}
+		if err := validateOIDCClaimName("IDENTRAIL_OIDC_GROUPS_CLAIM", groupsClaim); err != nil {
+			return err
+		}
+		rolesClaim := strings.TrimSpace(cfg.OIDCRolesClaim)
+		if rolesClaim == "" {
+			rolesClaim = defaultOIDCRolesClaim
+		}
+		if err := validateOIDCClaimName("IDENTRAIL_OIDC_ROLES_CLAIM", rolesClaim); err != nil {
+			return err
+		}
 	}
 
 	if len(cfg.APIKeyScopes) > 0 {
@@ -349,6 +381,20 @@ func validateScopeIdentifier(envName string, value string) error {
 	}
 	if !scopeIdentifierPattern.MatchString(normalized) {
 		return fmt.Errorf("%s must match %s", envName, scopeIdentifierPattern.String())
+	}
+	return nil
+}
+
+func validateOIDCClaimName(envName string, value string) error {
+	normalized := strings.TrimSpace(value)
+	if normalized == "" {
+		return fmt.Errorf("%s must be non-empty", envName)
+	}
+	if len(normalized) > maxOIDCClaimNameLength {
+		return fmt.Errorf("%s must be <= %d characters", envName, maxOIDCClaimNameLength)
+	}
+	if !oidcClaimNamePattern.MatchString(normalized) {
+		return fmt.Errorf("%s must match %s", envName, oidcClaimNamePattern.String())
 	}
 	return nil
 }
