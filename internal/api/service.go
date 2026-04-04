@@ -711,11 +711,8 @@ func (s *Service) TriageFinding(ctx context.Context, findingID string, scanID st
 		nextState.Status = domain.FindingLifecycleOpen
 	}
 
-	if err := s.Store.UpsertFindingTriageState(ctx, nextState); err != nil {
-		return domain.Finding{}, err
-	}
 	action := deriveFindingTriageAction(currentState, nextState, comment)
-	if err := s.Store.AppendFindingTriageEvent(ctx, db.FindingTriageEvent{
+	if err := s.Store.ApplyFindingTriageTransition(ctx, nextState, db.FindingTriageEvent{
 		FindingID:            id,
 		Action:               action,
 		FromStatus:           currentState.Status,

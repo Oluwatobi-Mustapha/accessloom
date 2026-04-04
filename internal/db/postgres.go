@@ -21,6 +21,10 @@ type PostgresStore struct {
 	queries *sqlcdb.Queries
 }
 
+type sqlExecutor interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
 // NewPostgresStore opens a PostgreSQL connection and validates connectivity.
 func NewPostgresStore(databaseURL string) (*PostgresStore, error) {
 	db, err := sql.Open("pgx", databaseURL)
@@ -385,11 +389,15 @@ func (p *PostgresStore) ListFindingTriageStates(ctx context.Context, findingIDs 
 
 // UpsertFindingTriageState creates or updates mutable triage metadata.
 func (p *PostgresStore) UpsertFindingTriageState(ctx context.Context, state FindingTriageState) error {
+	return p.upsertFindingTriageStateWithExecutor(ctx, p.db, state)
+}
+
+func (p *PostgresStore) upsertFindingTriageStateWithExecutor(ctx context.Context, executor sqlExecutor, state FindingTriageState) error {
 	updatedAt := state.UpdatedAt
 	if updatedAt.IsZero() {
 		updatedAt = time.Now().UTC()
 	}
-	_, err := p.db.ExecContext(
+	_, err := executor.ExecContext(
 		ctx,
 		`INSERT INTO finding_triage_states (finding_id, status, assignee, suppression_expires_at, updated_at, updated_by)
 		 VALUES ($1, $2, $3, $4, $5, $6)
@@ -415,6 +423,10 @@ func (p *PostgresStore) UpsertFindingTriageState(ctx context.Context, state Find
 
 // AppendFindingTriageEvent records one immutable triage action.
 func (p *PostgresStore) AppendFindingTriageEvent(ctx context.Context, event FindingTriageEvent) error {
+	return p.appendFindingTriageEventWithExecutor(ctx, p.db, event)
+}
+
+func (p *PostgresStore) appendFindingTriageEventWithExecutor(ctx context.Context, executor sqlExecutor, event FindingTriageEvent) error {
 	createdAt := event.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -423,7 +435,7 @@ func (p *PostgresStore) AppendFindingTriageEvent(ctx context.Context, event Find
 	if eventID == "" {
 		eventID = uuid.NewString()
 	}
-	_, err := p.db.ExecContext(
+	_, err := executor.ExecContext(
 		ctx,
 		`INSERT INTO finding_triage_events (id, finding_id, action, from_status, to_status, assignee, suppression_expires_at, comment, actor, created_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
@@ -440,6 +452,33 @@ func (p *PostgresStore) AppendFindingTriageEvent(ctx context.Context, event Find
 	)
 	if err != nil {
 		return fmt.Errorf("insert finding triage event: %w", err)
+	}
+	return nil
+}
+
+// ApplyFindingTriageTransition persists state and audit history atomically.
+func (p *PostgresStore) ApplyFindingTriageTransition(ctx context.Context, state FindingTriageState, event FindingTriageEvent) error {
+	if strings.TrimSpace(state.FindingID) == "" || strings.TrimSpace(event.FindingID) == "" {
+		return fmt.Errorf("finding id is required")
+	}
+	if strings.TrimSpace(state.FindingID) != strings.TrimSpace(event.FindingID) {
+		return fmt.Errorf("finding id mismatch between state and event")
+	}
+
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin triage transition tx: %w", err)
+	}
+	if err := p.upsertFindingTriageStateWithExecutor(ctx, tx, state); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := p.appendFindingTriageEventWithExecutor(ctx, tx, event); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit triage transition tx: %w", err)
 	}
 	return nil
 }

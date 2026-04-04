@@ -148,6 +148,7 @@ type Store interface {
 	ListFindingTriageStates(ctx context.Context, findingIDs []string) ([]FindingTriageState, error)
 	UpsertFindingTriageState(ctx context.Context, state FindingTriageState) error
 	AppendFindingTriageEvent(ctx context.Context, event FindingTriageEvent) error
+	ApplyFindingTriageTransition(ctx context.Context, state FindingTriageState, event FindingTriageEvent) error
 	ListFindingTriageEvents(ctx context.Context, findingID string, limit int) ([]FindingTriageEvent, error)
 	ListScans(ctx context.Context, limit int) ([]ScanRecord, error)
 	ListFindings(ctx context.Context, limit int) ([]domain.Finding, error)

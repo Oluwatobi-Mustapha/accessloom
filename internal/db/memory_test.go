@@ -361,6 +361,37 @@ func TestMemoryStoreFindingTriageStateAndHistory(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreApplyFindingTriageTransitionAtomic(t *testing.T) {
+	store := NewMemoryStore()
+	now := time.Date(2026, 3, 28, 12, 0, 0, 0, time.UTC)
+
+	err := store.ApplyFindingTriageTransition(context.Background(), FindingTriageState{
+		FindingID: "finding-1",
+		Status:    domain.FindingLifecycleAck,
+		UpdatedAt: now,
+		UpdatedBy: "subject:alice",
+	}, FindingTriageEvent{
+		FindingID:  "finding-2",
+		Action:     FindingTriageActionAcknowledged,
+		FromStatus: domain.FindingLifecycleOpen,
+		ToStatus:   domain.FindingLifecycleAck,
+		CreatedAt:  now,
+	})
+	if err == nil {
+		t.Fatal("expected mismatch error for triage transition")
+	}
+	if _, err := store.GetFindingTriageState(context.Background(), "finding-1"); err == nil {
+		t.Fatal("expected no state to be persisted after failed transition")
+	}
+	events, err := store.ListFindingTriageEvents(context.Background(), "finding-1", 10)
+	if err != nil {
+		t.Fatalf("list triage events after failed transition: %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected no events to be persisted after failed transition, got %d", len(events))
+	}
+}
+
 func TestMemoryStoreScanQueueLifecycle(t *testing.T) {
 	store := NewMemoryStore()
 	now := time.Date(2026, 3, 21, 9, 0, 0, 0, time.UTC)

@@ -540,6 +540,94 @@ func TestPostgresStoreFindingTriageStateAndHistory(t *testing.T) {
 	}
 }
 
+func TestPostgresStoreApplyFindingTriageTransition(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	now := time.Now().UTC()
+
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO finding_triage_states").
+		WithArgs("finding-1", "ack", "sec-oncall", nil, sqlmock.AnyArg(), "subject:alice").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO finding_triage_events").
+		WithArgs(sqlmock.AnyArg(), "finding-1", FindingTriageActionAcknowledged, "open", "ack", "sec-oncall", nil, "acknowledged", "subject:alice", sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+
+	err = store.ApplyFindingTriageTransition(context.Background(), FindingTriageState{
+		FindingID: "finding-1",
+		Status:    domain.FindingLifecycleAck,
+		Assignee:  "sec-oncall",
+		UpdatedAt: now,
+		UpdatedBy: "subject:alice",
+	}, FindingTriageEvent{
+		FindingID:  "finding-1",
+		Action:     FindingTriageActionAcknowledged,
+		FromStatus: domain.FindingLifecycleOpen,
+		ToStatus:   domain.FindingLifecycleAck,
+		Assignee:   "sec-oncall",
+		Comment:    "acknowledged",
+		Actor:      "subject:alice",
+		CreatedAt:  now,
+	})
+	if err != nil {
+		t.Fatalf("apply triage transition failed: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreApplyFindingTriageTransitionRollsBackOnEventFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	now := time.Now().UTC()
+
+	mock.ExpectBegin()
+	mock.ExpectExec("INSERT INTO finding_triage_states").
+		WithArgs("finding-1", "ack", "sec-oncall", nil, sqlmock.AnyArg(), "subject:alice").
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO finding_triage_events").
+		WithArgs(sqlmock.AnyArg(), "finding-1", FindingTriageActionAcknowledged, "open", "ack", "sec-oncall", nil, "acknowledged", "subject:alice", sqlmock.AnyArg()).
+		WillReturnError(sql.ErrTxDone)
+	mock.ExpectRollback()
+
+	err = store.ApplyFindingTriageTransition(context.Background(), FindingTriageState{
+		FindingID: "finding-1",
+		Status:    domain.FindingLifecycleAck,
+		Assignee:  "sec-oncall",
+		UpdatedAt: now,
+		UpdatedBy: "subject:alice",
+	}, FindingTriageEvent{
+		FindingID:  "finding-1",
+		Action:     FindingTriageActionAcknowledged,
+		FromStatus: domain.FindingLifecycleOpen,
+		ToStatus:   domain.FindingLifecycleAck,
+		Assignee:   "sec-oncall",
+		Comment:    "acknowledged",
+		Actor:      "subject:alice",
+		CreatedAt:  now,
+	})
+	if err == nil {
+		t.Fatal("expected triage transition error")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestPostgresStoreScanQueueLifecycle(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

@@ -233,40 +233,46 @@ func (m *MemoryStore) ListFindingTriageStates(_ context.Context, findingIDs []st
 
 // UpsertFindingTriageState creates or updates mutable triage metadata.
 func (m *MemoryStore) UpsertFindingTriageState(_ context.Context, state FindingTriageState) error {
+	normalized, err := normalizeFindingTriageStateForWrite(state)
+	if err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	normalizedID := strings.TrimSpace(state.FindingID)
-	if normalizedID == "" {
-		return fmt.Errorf("finding id is required")
-	}
-	state.FindingID = normalizedID
-	state.Assignee = strings.TrimSpace(state.Assignee)
-	state.UpdatedBy = strings.TrimSpace(state.UpdatedBy)
-	state.UpdatedAt = state.UpdatedAt.UTC()
-	m.triageStates[normalizedID] = state
+	m.triageStates[normalized.FindingID] = normalized
 	return nil
 }
 
 // AppendFindingTriageEvent records one immutable triage action.
 func (m *MemoryStore) AppendFindingTriageEvent(_ context.Context, event FindingTriageEvent) error {
+	normalized, err := normalizeFindingTriageEventForWrite(event)
+	if err != nil {
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.triageEvents[normalized.FindingID] = append(m.triageEvents[normalized.FindingID], normalized)
+	return nil
+}
 
-	normalizedID := strings.TrimSpace(event.FindingID)
-	if normalizedID == "" {
-		return fmt.Errorf("finding id is required")
+// ApplyFindingTriageTransition persists state and audit history atomically.
+func (m *MemoryStore) ApplyFindingTriageTransition(_ context.Context, state FindingTriageState, event FindingTriageEvent) error {
+	normalizedState, err := normalizeFindingTriageStateForWrite(state)
+	if err != nil {
+		return err
 	}
-	if strings.TrimSpace(event.ID) == "" {
-		event.ID = uuid.NewString()
+	normalizedEvent, err := normalizeFindingTriageEventForWrite(event)
+	if err != nil {
+		return err
 	}
-	event.FindingID = normalizedID
-	event.Action = strings.TrimSpace(event.Action)
-	event.Assignee = strings.TrimSpace(event.Assignee)
-	event.Comment = strings.TrimSpace(event.Comment)
-	event.Actor = strings.TrimSpace(event.Actor)
-	event.CreatedAt = event.CreatedAt.UTC()
-	m.triageEvents[normalizedID] = append(m.triageEvents[normalizedID], event)
+	if normalizedState.FindingID != normalizedEvent.FindingID {
+		return fmt.Errorf("finding id mismatch between state and event")
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.triageStates[normalizedState.FindingID] = normalizedState
+	m.triageEvents[normalizedState.FindingID] = append(m.triageEvents[normalizedState.FindingID], normalizedEvent)
 	return nil
 }
 
@@ -537,6 +543,43 @@ func scanKeyPrefix(key string) string {
 		return ""
 	}
 	return parts[0]
+}
+
+func normalizeFindingTriageStateForWrite(state FindingTriageState) (FindingTriageState, error) {
+	normalizedID := strings.TrimSpace(state.FindingID)
+	if normalizedID == "" {
+		return FindingTriageState{}, fmt.Errorf("finding id is required")
+	}
+	state.FindingID = normalizedID
+	state.Assignee = strings.TrimSpace(state.Assignee)
+	state.UpdatedBy = strings.TrimSpace(state.UpdatedBy)
+	if state.UpdatedAt.IsZero() {
+		state.UpdatedAt = time.Now().UTC()
+	} else {
+		state.UpdatedAt = state.UpdatedAt.UTC()
+	}
+	return state, nil
+}
+
+func normalizeFindingTriageEventForWrite(event FindingTriageEvent) (FindingTriageEvent, error) {
+	normalizedID := strings.TrimSpace(event.FindingID)
+	if normalizedID == "" {
+		return FindingTriageEvent{}, fmt.Errorf("finding id is required")
+	}
+	if strings.TrimSpace(event.ID) == "" {
+		event.ID = uuid.NewString()
+	}
+	event.FindingID = normalizedID
+	event.Action = strings.TrimSpace(event.Action)
+	event.Assignee = strings.TrimSpace(event.Assignee)
+	event.Comment = strings.TrimSpace(event.Comment)
+	event.Actor = strings.TrimSpace(event.Actor)
+	if event.CreatedAt.IsZero() {
+		event.CreatedAt = time.Now().UTC()
+	} else {
+		event.CreatedAt = event.CreatedAt.UTC()
+	}
+	return event, nil
 }
 
 // CreateRepoScan persists one repository exposure scan start event.

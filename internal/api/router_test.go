@@ -157,6 +157,9 @@ func TestRouterCORSPreflightBypassesAuth(t *testing.T) {
 	if got := w.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodGet) {
 		t.Fatalf("expected allow methods header to include GET, got %q", got)
 	}
+	if got := w.Header().Get("Access-Control-Allow-Methods"); !strings.Contains(got, http.MethodPatch) {
+		t.Fatalf("expected allow methods header to include PATCH, got %q", got)
+	}
 	if got := w.Header().Get("Access-Control-Allow-Headers"); !strings.Contains(strings.ToLower(got), "x-api-key") {
 		t.Fatalf("expected allow headers to include x-api-key, got %q", got)
 	}
