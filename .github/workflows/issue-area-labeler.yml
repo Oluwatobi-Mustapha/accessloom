@@ -22,13 +22,10 @@ jobs:
             const issue = context.payload.issue;
             const body = issue.body || "";
             const areaMatch = body.match(/### Area\s*\n+([^\n]+)/i);
+            const currentLabels = issue.labels.map((item) => item.name);
+            const currentAreaLabels = currentLabels.filter((name) => name.startsWith("area/"));
 
-            if (!areaMatch) {
-              core.info(`No area field found for issue #${issue.number}.`);
-              return;
-            }
-
-            const selectedArea = areaMatch[1].trim().toLowerCase();
+            const selectedArea = areaMatch ? areaMatch[1].trim().toLowerCase() : "";
             const areaMap = {
               iam: "area/iam",
               ui: "area/ui",
@@ -44,14 +41,7 @@ jobs:
               workflows: "area/workflows"
             };
 
-            const label = areaMap[selectedArea];
-            if (!label) {
-              core.info(`Area '${selectedArea}' does not map to a managed label.`);
-              return;
-            }
-
-            const currentLabels = issue.labels.map((item) => item.name);
-            const currentAreaLabels = currentLabels.filter((name) => name.startsWith("area/"));
+            const label = selectedArea ? areaMap[selectedArea] : undefined;
 
             for (const existing of currentAreaLabels) {
               if (existing === label) {
@@ -69,6 +59,16 @@ jobs:
                   throw error;
                 }
               }
+            }
+
+            if (!areaMatch) {
+              core.info(`No area field found for issue #${issue.number}; removed stale area labels.`);
+              return;
+            }
+
+            if (!label) {
+              core.info(`Area '${selectedArea}' does not map to a managed label; removed stale area labels.`);
+              return;
             }
 
             if (!currentLabels.includes(label)) {
