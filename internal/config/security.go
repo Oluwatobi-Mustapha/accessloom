@@ -93,12 +93,14 @@ func ValidateSecurity(cfg Config) error {
 					continue
 				}
 				if _, ok := allowedKeyScopes[normalizedScope]; !ok {
-					return fmt.Errorf("invalid scope %q for api key %q", normalizedScope, trimmedKey)
+					// Do not include sensitive API key material or scope values in the error.
+					return fmt.Errorf("invalid API key scope configured")
 				}
 				validScopeCount++
 			}
 			if validScopeCount == 0 {
-				return fmt.Errorf("api key %q has no valid scopes", trimmedKey)
+				// Do not include the API key itself in the error to avoid leaking secrets.
+				return fmt.Errorf("API key configured without any valid scopes")
 			}
 		}
 	}
@@ -118,7 +120,8 @@ func ValidateSecurity(cfg Config) error {
 				continue
 			}
 			if _, ok := allowed[trimmed]; !ok {
-				return fmt.Errorf("write api key %q must also exist in IDENTRAIL_API_KEYS", trimmed)
+				// Avoid including the specific write API key value in the error.
+				return fmt.Errorf("configured write API key must also exist in IDENTRAIL_API_KEYS")
 			}
 		}
 	}
@@ -259,12 +262,14 @@ func ValidateSecurity(cfg Config) error {
 	// Placeholder validation follows the active API key mode.
 	// Scoped keys take precedence over legacy API_KEYS/WRITE_API_KEYS.
 	if len(cfg.APIKeyScopes) > 0 {
-		if key, found := findPlaceholderAPIKey(nil, nil, cfg.APIKeyScopes); found {
-			return fmt.Errorf("placeholder API key %q is not allowed in runtime configuration; provision real secrets", key)
+		if _, found := findPlaceholderAPIKey(nil, nil, cfg.APIKeyScopes); found {
+			// Do not echo the placeholder key value; just indicate that placeholders are not allowed.
+			return fmt.Errorf("placeholder API key is not allowed in runtime configuration; provision real secrets")
 		}
 	} else {
-		if key, found := findPlaceholderAPIKey(cfg.APIKeys, cfg.WriteAPIKeys, nil); found {
-			return fmt.Errorf("placeholder API key %q is not allowed in runtime configuration; provision real secrets", key)
+		if _, found := findPlaceholderAPIKey(cfg.APIKeys, cfg.WriteAPIKeys, nil); found {
+			// Do not echo the placeholder key value; just indicate that placeholders are not allowed.
+			return fmt.Errorf("placeholder API key is not allowed in runtime configuration; provision real secrets")
 		}
 	}
 	for _, trustedProxy := range cfg.TrustedProxies {
