@@ -217,14 +217,14 @@ func TestNewBootstrapWithMultipleAuditSinks(t *testing.T) {
 
 func TestNewBootstrapInvalidOIDCVerifierConfig(t *testing.T) {
 	cfg := config.Config{
-		HTTPAddr:       ":0",
-		LogLevel:       "info",
-		Provider:       "aws",
-		ServiceName:    "identrail-test",
-		OIDCIssuerURL:  "://bad-issuer",
-		OIDCAudience:   "identrail-api",
-		APIKeys:        []string{"test-read"},
-		WriteAPIKeys:   []string{"test-read"},
+		HTTPAddr:      ":0",
+		LogLevel:      "info",
+		Provider:      "aws",
+		ServiceName:   "identrail-test",
+		OIDCIssuerURL: "://bad-issuer",
+		OIDCAudience:  "identrail-api",
+		APIKeys:       []string{"test-read"},
+		WriteAPIKeys:  []string{"test-read"},
 	}
 	if _, err := NewBootstrap(context.Background(), cfg); err == nil {
 		t.Fatal("expected oidc verifier initialization error")
