@@ -1,0 +1,245 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing git tag to release (for example v1.2.3)"
+        required: true
+        type: string
+      web_api_url:
+        description: "Public HTTPS API URL for the web image build (for example https://api.identrail.io)"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  prepare:
+    name: Prepare Release Context
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      prerelease: ${{ steps.meta.outputs.prerelease }}
+      publish_latest: ${{ steps.meta.outputs.publish_latest }}
+
+    steps:
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "push" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="${{ github.event.inputs.tag }}"
+          fi
+
+          if ! [[ "${tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: ${tag}" >&2
+            exit 1
+          fi
+
+          prerelease="false"
+          publish_latest="true"
+          tag_without_build="${tag%%+*}"
+          if [[ "${tag_without_build}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
+            prerelease="true"
+            publish_latest="false"
+          fi
+
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "prerelease=${prerelease}" >> "${GITHUB_OUTPUT}"
+          echo "publish_latest=${publish_latest}" >> "${GITHUB_OUTPUT}"
+
+  build-binaries:
+    name: Build Release Binaries
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build archives and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ needs.prepare.outputs.tag }}"
+          mkdir -p dist
+
+          targets=(
+            "linux/amd64"
+            "linux/arm64"
+            "darwin/amd64"
+            "darwin/arm64"
+            "windows/amd64"
+          )
+
+          commands=("cli" "server" "worker")
+
+          for target in "${targets[@]}"; do
+            goos="${target%/*}"
+            goarch="${target#*/}"
+
+            for cmd in "${commands[@]}"; do
+              ext=""
+              if [ "${goos}" = "windows" ]; then
+                ext=".exe"
+              fi
+
+              bin_name="identrail-${cmd}-${tag}-${goos}-${goarch}${ext}"
+              out_path="dist/${bin_name}"
+
+              CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
+                go build -trimpath -ldflags="-s -w" -o "${out_path}" "./cmd/${cmd}"
+
+              if [ "${goos}" = "windows" ]; then
+                archive="dist/identrail-${cmd}-${tag}-${goos}-${goarch}.zip"
+                zip -j "${archive}" "${out_path}" >/dev/null
+              else
+                archive="dist/identrail-${cmd}-${tag}-${goos}-${goarch}.tar.gz"
+                tar -czf "${archive}" -C dist "${bin_name}"
+              fi
+
+              rm -f "${out_path}"
+            done
+          done
+
+          (
+            cd dist
+            shasum -a 256 *.tar.gz *.zip > checksums.txt
+          )
+
+      - name: Upload release binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-binaries
+          path: dist/*
+          if-no-files-found: error
+
+  publish-images:
+    name: Build and Publish Images
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push images
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          owner="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
+          base="ghcr.io/${owner}/identrail"
+          tag="${{ needs.prepare.outputs.tag }}"
+          publish_latest="${{ needs.prepare.outputs.publish_latest }}"
+          web_api_url="${{ vars.IDENTRAIL_WEB_API_URL }}"
+          input_web_api_url="${{ github.event.inputs.web_api_url }}"
+
+          if [ -n "${input_web_api_url}" ]; then
+            web_api_url="${input_web_api_url}"
+          fi
+
+          if [ -z "${web_api_url}" ]; then
+            echo "Web image build requires an API URL." >&2
+            echo "Set repository variable IDENTRAIL_WEB_API_URL or provide workflow_dispatch input web_api_url." >&2
+            exit 1
+          fi
+
+          if [[ ! "${web_api_url}" =~ ^https:// ]]; then
+            echo "web_api_url must start with https:// for release images: ${web_api_url}" >&2
+            exit 1
+          fi
+
+          mkdir -p dist
+
+          build_and_push() {
+            local name="$1"
+            shift
+            local image="${base}-${name}"
+            local args=("$@")
+
+            local tags=("-t" "${image}:${tag}")
+            if [ "${publish_latest}" = "true" ]; then
+              tags+=("-t" "${image}:latest")
+            fi
+
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --push \
+              "${tags[@]}" \
+              "${args[@]}"
+
+            digest="$(docker buildx imagetools inspect "${image}:${tag}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+            printf '%s\n' "${image}:${tag}@${digest}" >> dist/image-digests.txt
+          }
+
+          build_and_push "api" -f deploy/docker/Dockerfile.backend --build-arg TARGET=server .
+          build_and_push "worker" -f deploy/docker/Dockerfile.backend --build-arg TARGET=worker .
+          build_and_push "web" -f deploy/docker/Dockerfile.web --build-arg "VITE_IDENTRAIL_API_URL=${web_api_url}" .
+
+      - name: Upload image metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-image-metadata
+          path: dist/image-digests.txt
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [prepare, build-binaries, publish-images]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Download release binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: release-binaries
+          path: dist
+
+      - name: Download image metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: release-image-metadata
+          path: dist
+
+      - name: Publish release with generated notes
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          generate_release_notes: true
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
+          files: |
+            dist/*
