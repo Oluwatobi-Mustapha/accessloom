@@ -24,6 +24,18 @@ type confidenceThreshold struct {
 	P3Min float64 `json:"p3_min"`
 }
 
+var allowedRequiredFields = map[string]struct{}{
+	"id":             {},
+	"severity":       {},
+	"confidence":     {},
+	"rule_id":        {},
+	"summary":        {},
+	"rationale":      {},
+	"file":           {},
+	"line":           {},
+	"recommendation": {},
+}
+
 func Load(path string) (Config, error) {
 	if path == "" {
 		return defaultConfig(), nil
@@ -38,6 +50,11 @@ func Load(path string) (Config, error) {
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return Config{}, fmt.Errorf("parse policy JSON: %w", err)
 	}
+	requiredFields, err := normalizeRequiredFields(cfg.RequiredFields)
+	if err != nil {
+		return Config{}, fmt.Errorf("validate policy: %w", err)
+	}
+	cfg.RequiredFields = requiredFields
 	return cfg, nil
 }
 
@@ -112,7 +129,7 @@ func minConfidence(cfg Config, severity string) float64 {
 
 func hasRequiredFields(f model.Finding, fields []string) bool {
 	for _, field := range fields {
-		switch field {
+		switch strings.ToLower(strings.TrimSpace(field)) {
 		case "id":
 			if strings.TrimSpace(f.ID) == "" {
 				return false
@@ -149,9 +166,26 @@ func hasRequiredFields(f model.Finding, fields []string) bool {
 			if strings.TrimSpace(f.Recommendation) == "" {
 				return false
 			}
+		default:
+			return false
 		}
 	}
 	return true
+}
+
+func normalizeRequiredFields(fields []string) ([]string, error) {
+	normalized := make([]string, 0, len(fields))
+	for _, field := range fields {
+		value := strings.ToLower(strings.TrimSpace(field))
+		if value == "" {
+			return nil, fmt.Errorf("required_fields contains empty field name")
+		}
+		if _, ok := allowedRequiredFields[value]; !ok {
+			return nil, fmt.Errorf("required_fields contains unknown field %q", field)
+		}
+		normalized = append(normalized, value)
+	}
+	return normalized, nil
 }
 
 func defaultConfig() Config {
