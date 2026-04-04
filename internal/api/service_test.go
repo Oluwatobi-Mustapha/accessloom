@@ -69,7 +69,7 @@ func TestServiceRunScanSuccess(t *testing.T) {
 	}}, "aws")
 	svc.Now = func() time.Time { return now }
 
-	result, err := svc.RunScan(context.Background())
+	result, err := svc.RunScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("run scan failed: %v", err)
 	}
@@ -85,12 +85,12 @@ func TestServiceRunScanFailure(t *testing.T) {
 	svc := NewService(store, fakeScanner{err: errors.New("scanner failed")}, "aws")
 	svc.Now = func() time.Time { return now }
 
-	_, err := svc.RunScan(context.Background())
+	_, err := svc.RunScan(defaultScopeContext())
 	if err == nil {
 		t.Fatal("expected error")
 	}
 
-	scans, listErr := store.ListScans(context.Background(), 1)
+	scans, listErr := store.ListScans(defaultScopeContext(), 1)
 	if listErr != nil {
 		t.Fatalf("list scans failed: %v", listErr)
 	}
@@ -111,7 +111,7 @@ func TestServiceRunScanLocked(t *testing.T) {
 	svc := NewService(store, fakeScanner{}, "aws")
 	svc.Locker = locker
 
-	_, err := svc.RunScan(context.Background())
+	_, err := svc.RunScan(defaultScopeContext())
 	if !errors.Is(err, ErrScanInProgress) {
 		t.Fatalf("expected ErrScanInProgress, got %v", err)
 	}
@@ -128,7 +128,7 @@ func TestServiceRunScanAlertHookCalled(t *testing.T) {
 	svc.Now = func() time.Time { return now }
 	svc.Alerter = alerter
 
-	if _, err := svc.RunScan(context.Background()); err != nil {
+	if _, err := svc.RunScan(defaultScopeContext()); err != nil {
 		t.Fatalf("run scan: %v", err)
 	}
 	if alerter.calls != 1 {
@@ -154,7 +154,7 @@ func TestServiceRunScanAlertFailureIsNonBlocking(t *testing.T) {
 		}
 	}
 
-	result, err := svc.RunScan(context.Background())
+	result, err := svc.RunScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("expected scan success despite alert error, got %v", err)
 	}
@@ -169,11 +169,11 @@ func TestServiceRunScanAlertFailureIsNonBlocking(t *testing.T) {
 func TestServiceGetFindingsSummary(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
-	scan, err := store.CreateScan(context.Background(), "aws", now)
+	scan, err := store.CreateScan(defaultScopeContext(), "aws", now)
 	if err != nil {
 		t.Fatalf("create scan: %v", err)
 	}
-	if err := store.UpsertFindings(context.Background(), scan.ID, []domain.Finding{
+	if err := store.UpsertFindings(defaultScopeContext(), scan.ID, []domain.Finding{
 		{ID: "f1", Type: domain.FindingOwnerless, Severity: domain.SeverityHigh, CreatedAt: now},
 		{ID: "f2", Type: domain.FindingOwnerless, Severity: domain.SeverityMedium, CreatedAt: now},
 		{ID: "f3", Type: domain.FindingStaleIdentity, Severity: domain.SeverityHigh, CreatedAt: now},
@@ -182,7 +182,7 @@ func TestServiceGetFindingsSummary(t *testing.T) {
 	}
 
 	svc := NewService(store, fakeScanner{}, "aws")
-	summary, err := svc.GetFindingsSummary(context.Background(), 100)
+	summary, err := svc.GetFindingsSummary(defaultScopeContext(), 100)
 	if err != nil {
 		t.Fatalf("get summary: %v", err)
 	}
@@ -200,19 +200,19 @@ func TestServiceGetFindingsSummary(t *testing.T) {
 func TestServiceListFindingsFiltered(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
-	scanA, _ := store.CreateScan(context.Background(), "aws", now)
-	scanB, _ := store.CreateScan(context.Background(), "aws", now.Add(1*time.Minute))
-	_ = store.UpsertFindings(context.Background(), scanA.ID, []domain.Finding{
+	scanA, _ := store.CreateScan(defaultScopeContext(), "aws", now)
+	scanB, _ := store.CreateScan(defaultScopeContext(), "aws", now.Add(1*time.Minute))
+	_ = store.UpsertFindings(defaultScopeContext(), scanA.ID, []domain.Finding{
 		{ID: "f1", Type: domain.FindingOwnerless, Severity: domain.SeverityHigh, CreatedAt: now},
 	})
-	_ = store.UpsertFindings(context.Background(), scanB.ID, []domain.Finding{
+	_ = store.UpsertFindings(defaultScopeContext(), scanB.ID, []domain.Finding{
 		{ID: "f2", Type: domain.FindingEscalationPath, Severity: domain.SeverityCritical, CreatedAt: now.Add(1 * time.Minute)},
 		{ID: "f3", Type: domain.FindingOwnerless, Severity: domain.SeverityLow, CreatedAt: now.Add(1 * time.Minute)},
 	})
 
 	svc := NewService(store, fakeScanner{}, "aws")
 
-	highOnly, err := svc.ListFindingsFiltered(context.Background(), 10, FindingsFilter{Severity: "critical"})
+	highOnly, err := svc.ListFindingsFiltered(defaultScopeContext(), 10, FindingsFilter{Severity: "critical"})
 	if err != nil {
 		t.Fatalf("list findings filtered by severity: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestServiceListFindingsFiltered(t *testing.T) {
 		t.Fatalf("unexpected critical findings: %+v", highOnly)
 	}
 
-	scanOnly, err := svc.ListFindingsFiltered(context.Background(), 10, FindingsFilter{ScanID: scanA.ID, Type: "ownerless_identity"})
+	scanOnly, err := svc.ListFindingsFiltered(defaultScopeContext(), 10, FindingsFilter{ScanID: scanA.ID, Type: "ownerless_identity"})
 	if err != nil {
 		t.Fatalf("list findings filtered by scan/type: %v", err)
 	}
@@ -232,13 +232,13 @@ func TestServiceListFindingsFiltered(t *testing.T) {
 func TestServiceGetFinding(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
-	scan, _ := store.CreateScan(context.Background(), "aws", now)
-	_ = store.UpsertFindings(context.Background(), scan.ID, []domain.Finding{
+	scan, _ := store.CreateScan(defaultScopeContext(), "aws", now)
+	_ = store.UpsertFindings(defaultScopeContext(), scan.ID, []domain.Finding{
 		{ID: "finding-1", Type: domain.FindingOwnerless, Severity: domain.SeverityHigh, CreatedAt: now},
 	})
 
 	svc := NewService(store, fakeScanner{}, "aws")
-	found, err := svc.GetFinding(context.Background(), "finding-1", scan.ID)
+	found, err := svc.GetFinding(defaultScopeContext(), "finding-1", scan.ID)
 	if err != nil {
 		t.Fatalf("get finding: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestServiceGetFinding(t *testing.T) {
 		t.Fatalf("unexpected finding id: %q", found.ID)
 	}
 
-	if _, err := svc.GetFinding(context.Background(), "missing", scan.ID); !errors.Is(err, db.ErrNotFound) {
+	if _, err := svc.GetFinding(defaultScopeContext(), "missing", scan.ID); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("expected not found for missing finding, got %v", err)
 	}
 }
@@ -254,11 +254,11 @@ func TestServiceGetFinding(t *testing.T) {
 func TestServiceFindingTriageLifecycleAndHistory(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 22, 9, 0, 0, 0, time.UTC)
-	scan, err := store.CreateScan(context.Background(), "aws", now)
+	scan, err := store.CreateScan(defaultScopeContext(), "aws", now)
 	if err != nil {
 		t.Fatalf("create scan: %v", err)
 	}
-	if err := store.UpsertFindings(context.Background(), scan.ID, []domain.Finding{
+	if err := store.UpsertFindings(defaultScopeContext(), scan.ID, []domain.Finding{
 		{ID: "finding-1", Type: domain.FindingOwnerless, Severity: domain.SeverityHigh, CreatedAt: now},
 	}); err != nil {
 		t.Fatalf("upsert findings: %v", err)
@@ -268,7 +268,7 @@ func TestServiceFindingTriageLifecycleAndHistory(t *testing.T) {
 	svc := NewService(store, fakeScanner{}, "aws")
 	svc.Now = func() time.Time { return clock }
 
-	initial, err := svc.GetFinding(context.Background(), "finding-1", scan.ID)
+	initial, err := svc.GetFinding(defaultScopeContext(), "finding-1", scan.ID)
 	if err != nil {
 		t.Fatalf("get initial finding: %v", err)
 	}
@@ -280,7 +280,7 @@ func TestServiceFindingTriageLifecycleAndHistory(t *testing.T) {
 	assignee := "secops"
 	suppressionExpiry := clock.Add(2 * time.Hour).Format(time.RFC3339)
 	updated, err := svc.TriageFinding(
-		context.Background(),
+		defaultScopeContext(),
 		"finding-1",
 		scan.ID,
 		FindingTriageRequest{
@@ -307,7 +307,7 @@ func TestServiceFindingTriageLifecycleAndHistory(t *testing.T) {
 		t.Fatalf("expected triage actor to be persisted, got %q", updated.Triage.UpdatedBy)
 	}
 
-	history, err := svc.ListFindingTriageHistory(context.Background(), "finding-1", scan.ID, 10)
+	history, err := svc.ListFindingTriageHistory(defaultScopeContext(), "finding-1", scan.ID, 10)
 	if err != nil {
 		t.Fatalf("list triage history: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestServiceFindingTriageLifecycleAndHistory(t *testing.T) {
 		t.Fatalf("unexpected status transition: %+v", history[0])
 	}
 
-	suppressedItems, err := svc.ListFindingsFiltered(context.Background(), 10, FindingsFilter{
+	suppressedItems, err := svc.ListFindingsFiltered(defaultScopeContext(), 10, FindingsFilter{
 		LifecycleStatus: "suppressed",
 		Assignee:        "SECOPS",
 	})
@@ -333,7 +333,7 @@ func TestServiceFindingTriageLifecycleAndHistory(t *testing.T) {
 	}
 
 	clock = clock.Add(3 * time.Hour)
-	reopened, err := svc.GetFinding(context.Background(), "finding-1", scan.ID)
+	reopened, err := svc.GetFinding(defaultScopeContext(), "finding-1", scan.ID)
 	if err != nil {
 		t.Fatalf("get finding after suppression expiry: %v", err)
 	}
@@ -348,11 +348,11 @@ func TestServiceFindingTriageLifecycleAndHistory(t *testing.T) {
 func TestServiceTriageFindingRejectsInvalidRequest(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 22, 9, 0, 0, 0, time.UTC)
-	scan, err := store.CreateScan(context.Background(), "aws", now)
+	scan, err := store.CreateScan(defaultScopeContext(), "aws", now)
 	if err != nil {
 		t.Fatalf("create scan: %v", err)
 	}
-	if err := store.UpsertFindings(context.Background(), scan.ID, []domain.Finding{
+	if err := store.UpsertFindings(defaultScopeContext(), scan.ID, []domain.Finding{
 		{ID: "finding-1", Type: domain.FindingOwnerless, Severity: domain.SeverityHigh, CreatedAt: now},
 	}); err != nil {
 		t.Fatalf("upsert findings: %v", err)
@@ -361,14 +361,14 @@ func TestServiceTriageFindingRejectsInvalidRequest(t *testing.T) {
 	svc := NewService(store, fakeScanner{}, "aws")
 	svc.Now = func() time.Time { return now }
 
-	if _, err := svc.TriageFinding(context.Background(), "finding-1", scan.ID, FindingTriageRequest{}, "subject:user-1"); !errors.Is(err, ErrInvalidFindingTriageRequest) {
+	if _, err := svc.TriageFinding(defaultScopeContext(), "finding-1", scan.ID, FindingTriageRequest{}, "subject:user-1"); !errors.Is(err, ErrInvalidFindingTriageRequest) {
 		t.Fatalf("expected invalid triage request error for empty payload, got %v", err)
 	}
 
 	suppressed := string(domain.FindingLifecycleSuppressed)
 	pastExpiry := now.Add(-1 * time.Hour).Format(time.RFC3339)
 	if _, err := svc.TriageFinding(
-		context.Background(),
+		defaultScopeContext(),
 		"finding-1",
 		scan.ID,
 		FindingTriageRequest{
@@ -384,8 +384,8 @@ func TestServiceTriageFindingRejectsInvalidRequest(t *testing.T) {
 func TestServiceGetFindingExports(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
-	scan, _ := store.CreateScan(context.Background(), "aws", now)
-	_ = store.UpsertFindings(context.Background(), scan.ID, []domain.Finding{
+	scan, _ := store.CreateScan(defaultScopeContext(), "aws", now)
+	_ = store.UpsertFindings(defaultScopeContext(), scan.ID, []domain.Finding{
 		{
 			ID:        "finding-1",
 			Type:      domain.FindingOverPrivileged,
@@ -396,7 +396,7 @@ func TestServiceGetFindingExports(t *testing.T) {
 	})
 
 	svc := NewService(store, fakeScanner{}, "aws")
-	exports, err := svc.GetFindingExports(context.Background(), "finding-1", scan.ID)
+	exports, err := svc.GetFindingExports(defaultScopeContext(), "finding-1", scan.ID)
 	if err != nil {
 		t.Fatalf("get finding exports: %v", err)
 	}
@@ -416,22 +416,22 @@ func TestServiceGetScanDiff(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
 
-	first, err := store.CreateScan(context.Background(), "aws", now)
+	first, err := store.CreateScan(defaultScopeContext(), "aws", now)
 	if err != nil {
 		t.Fatalf("create first scan: %v", err)
 	}
-	if err := store.UpsertFindings(context.Background(), first.ID, []domain.Finding{
+	if err := store.UpsertFindings(defaultScopeContext(), first.ID, []domain.Finding{
 		{ID: "persist", Type: domain.FindingOwnerless, Severity: domain.SeverityHigh, CreatedAt: now.Add(1 * time.Second)},
 		{ID: "resolved", Type: domain.FindingStaleIdentity, Severity: domain.SeverityMedium, CreatedAt: now.Add(2 * time.Second)},
 	}); err != nil {
 		t.Fatalf("seed first findings: %v", err)
 	}
 
-	second, err := store.CreateScan(context.Background(), "aws", now.Add(10*time.Minute))
+	second, err := store.CreateScan(defaultScopeContext(), "aws", now.Add(10*time.Minute))
 	if err != nil {
 		t.Fatalf("create second scan: %v", err)
 	}
-	if err := store.UpsertFindings(context.Background(), second.ID, []domain.Finding{
+	if err := store.UpsertFindings(defaultScopeContext(), second.ID, []domain.Finding{
 		{ID: "persist", Type: domain.FindingOwnerless, Severity: domain.SeverityHigh, CreatedAt: now.Add(11 * time.Minute)},
 		{ID: "added", Type: domain.FindingEscalationPath, Severity: domain.SeverityCritical, CreatedAt: now.Add(12 * time.Minute)},
 	}); err != nil {
@@ -439,7 +439,7 @@ func TestServiceGetScanDiff(t *testing.T) {
 	}
 
 	svc := NewService(store, fakeScanner{}, "aws")
-	diff, err := svc.GetScanDiff(context.Background(), second.ID, 10)
+	diff, err := svc.GetScanDiff(defaultScopeContext(), second.ID, 10)
 	if err != nil {
 		t.Fatalf("get scan diff: %v", err)
 	}
@@ -455,19 +455,19 @@ func TestServiceGetScanDiffAgainst(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
 
-	first, _ := store.CreateScan(context.Background(), "aws", now)
-	_ = store.UpsertFindings(context.Background(), first.ID, []domain.Finding{
+	first, _ := store.CreateScan(defaultScopeContext(), "aws", now)
+	_ = store.UpsertFindings(defaultScopeContext(), first.ID, []domain.Finding{
 		{ID: "persist", Severity: domain.SeverityHigh, CreatedAt: now.Add(1 * time.Second)},
 		{ID: "resolved", Severity: domain.SeverityMedium, CreatedAt: now.Add(2 * time.Second)},
 	})
-	second, _ := store.CreateScan(context.Background(), "aws", now.Add(5*time.Minute))
-	_ = store.UpsertFindings(context.Background(), second.ID, []domain.Finding{
+	second, _ := store.CreateScan(defaultScopeContext(), "aws", now.Add(5*time.Minute))
+	_ = store.UpsertFindings(defaultScopeContext(), second.ID, []domain.Finding{
 		{ID: "persist", Severity: domain.SeverityHigh, CreatedAt: now.Add(5 * time.Minute)},
 		{ID: "added", Severity: domain.SeverityCritical, CreatedAt: now.Add(6 * time.Minute)},
 	})
 
 	svc := NewService(store, fakeScanner{}, "aws")
-	diff, err := svc.GetScanDiffAgainst(context.Background(), second.ID, first.ID, 10)
+	diff, err := svc.GetScanDiffAgainst(defaultScopeContext(), second.ID, first.ID, 10)
 	if err != nil {
 		t.Fatalf("get scan diff against baseline: %v", err)
 	}
@@ -480,23 +480,23 @@ func TestServiceGetScanDiffAgainstRejectsInvalidBaseline(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
 
-	current, _ := store.CreateScan(context.Background(), "aws", now)
-	previous, _ := store.CreateScan(context.Background(), "aws", now.Add(-5*time.Minute))
-	wrongProvider, _ := store.CreateScan(context.Background(), "azure", now.Add(-10*time.Minute))
-	newerBaseline, _ := store.CreateScan(context.Background(), "aws", now.Add(10*time.Minute))
+	current, _ := store.CreateScan(defaultScopeContext(), "aws", now)
+	previous, _ := store.CreateScan(defaultScopeContext(), "aws", now.Add(-5*time.Minute))
+	wrongProvider, _ := store.CreateScan(defaultScopeContext(), "azure", now.Add(-10*time.Minute))
+	newerBaseline, _ := store.CreateScan(defaultScopeContext(), "aws", now.Add(10*time.Minute))
 
 	svc := NewService(store, fakeScanner{}, "aws")
 
-	if _, err := svc.GetScanDiffAgainst(context.Background(), current.ID, current.ID, 10); !errors.Is(err, ErrInvalidScanDiffBaseline) {
+	if _, err := svc.GetScanDiffAgainst(defaultScopeContext(), current.ID, current.ID, 10); !errors.Is(err, ErrInvalidScanDiffBaseline) {
 		t.Fatalf("expected invalid baseline when baseline==current, got %v", err)
 	}
-	if _, err := svc.GetScanDiffAgainst(context.Background(), current.ID, wrongProvider.ID, 10); !errors.Is(err, ErrInvalidScanDiffBaseline) {
+	if _, err := svc.GetScanDiffAgainst(defaultScopeContext(), current.ID, wrongProvider.ID, 10); !errors.Is(err, ErrInvalidScanDiffBaseline) {
 		t.Fatalf("expected invalid baseline provider error, got %v", err)
 	}
-	if _, err := svc.GetScanDiffAgainst(context.Background(), current.ID, newerBaseline.ID, 10); !errors.Is(err, ErrInvalidScanDiffBaseline) {
+	if _, err := svc.GetScanDiffAgainst(defaultScopeContext(), current.ID, newerBaseline.ID, 10); !errors.Is(err, ErrInvalidScanDiffBaseline) {
 		t.Fatalf("expected invalid baseline time ordering error, got %v", err)
 	}
-	if _, err := svc.GetScanDiffAgainst(context.Background(), current.ID, previous.ID, 10); err != nil {
+	if _, err := svc.GetScanDiffAgainst(defaultScopeContext(), current.ID, previous.ID, 10); err != nil {
 		t.Fatalf("expected valid older baseline, got %v", err)
 	}
 }
@@ -506,11 +506,11 @@ func TestServiceListScanEvents(t *testing.T) {
 	svc := NewService(store, fakeScanner{result: app.ScanResult{}}, "aws")
 	svc.Now = func() time.Time { return time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC) }
 
-	result, err := svc.RunScan(context.Background())
+	result, err := svc.RunScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("run scan: %v", err)
 	}
-	events, err := svc.ListScanEvents(context.Background(), result.Scan.ID, 10)
+	events, err := svc.ListScanEvents(defaultScopeContext(), result.Scan.ID, 10)
 	if err != nil {
 		t.Fatalf("list scan events: %v", err)
 	}
@@ -518,10 +518,10 @@ func TestServiceListScanEvents(t *testing.T) {
 		t.Fatal("expected scan events")
 	}
 
-	if err := store.AppendScanEvent(context.Background(), result.Scan.ID, db.ScanEventLevelError, "forced error", nil); err != nil {
+	if err := store.AppendScanEvent(defaultScopeContext(), result.Scan.ID, db.ScanEventLevelError, "forced error", nil); err != nil {
 		t.Fatalf("append error event: %v", err)
 	}
-	errorEvents, err := svc.ListScanEventsFiltered(context.Background(), result.Scan.ID, db.ScanEventLevelError, 20)
+	errorEvents, err := svc.ListScanEventsFiltered(defaultScopeContext(), result.Scan.ID, db.ScanEventLevelError, 20)
 	if err != nil {
 		t.Fatalf("list filtered scan events: %v", err)
 	}
@@ -551,7 +551,7 @@ func TestServiceRunScanPartialLifecycleEvents(t *testing.T) {
 	}}, "aws")
 	svc.Now = func() time.Time { return now }
 
-	result, err := svc.RunScan(context.Background())
+	result, err := svc.RunScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("run scan: %v", err)
 	}
@@ -559,7 +559,7 @@ func TestServiceRunScanPartialLifecycleEvents(t *testing.T) {
 		t.Fatalf("expected completed scan status, got %q", result.Scan.Status)
 	}
 
-	events, err := svc.ListScanEvents(context.Background(), result.Scan.ID, 50)
+	events, err := svc.ListScanEvents(defaultScopeContext(), result.Scan.ID, 50)
 	if err != nil {
 		t.Fatalf("list scan events: %v", err)
 	}
@@ -652,7 +652,7 @@ func TestServiceRunScanPersistsRawAndNormalizedArtifactsConsistently(t *testing.
 	}}, "aws")
 	svc.Now = func() time.Time { return now }
 
-	result, err := svc.RunScan(context.Background())
+	result, err := svc.RunScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("run scan: %v", err)
 	}
@@ -660,7 +660,7 @@ func TestServiceRunScanPersistsRawAndNormalizedArtifactsConsistently(t *testing.
 		t.Fatalf("unexpected run result: %+v", result)
 	}
 
-	identities, err := svc.ListIdentities(context.Background(), result.Scan.ID, "aws", "role", "", 10)
+	identities, err := svc.ListIdentities(defaultScopeContext(), result.Scan.ID, "aws", "role", "", 10)
 	if err != nil {
 		t.Fatalf("list identities: %v", err)
 	}
@@ -668,7 +668,7 @@ func TestServiceRunScanPersistsRawAndNormalizedArtifactsConsistently(t *testing.
 		t.Fatalf("unexpected identities: %+v", identities)
 	}
 
-	relationships, err := svc.ListRelationships(context.Background(), result.Scan.ID, string(domain.RelationshipAttachedPolicy), "", "", 10)
+	relationships, err := svc.ListRelationships(defaultScopeContext(), result.Scan.ID, string(domain.RelationshipAttachedPolicy), "", "", 10)
 	if err != nil {
 		t.Fatalf("list relationships: %v", err)
 	}
@@ -676,7 +676,7 @@ func TestServiceRunScanPersistsRawAndNormalizedArtifactsConsistently(t *testing.
 		t.Fatalf("unexpected relationships: %+v", relationships)
 	}
 
-	findings, err := svc.ListFindingsFiltered(context.Background(), 10, FindingsFilter{ScanID: result.Scan.ID})
+	findings, err := svc.ListFindingsFiltered(defaultScopeContext(), 10, FindingsFilter{ScanID: result.Scan.ID})
 	if err != nil {
 		t.Fatalf("list findings filtered: %v", err)
 	}
@@ -689,11 +689,11 @@ func TestServiceListIdentitiesAndRelationshipsDefaultsToLatestScan(t *testing.T)
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
 
-	scanA, err := store.CreateScan(context.Background(), "aws", now)
+	scanA, err := store.CreateScan(defaultScopeContext(), "aws", now)
 	if err != nil {
 		t.Fatalf("create scan A: %v", err)
 	}
-	if err := store.UpsertArtifacts(context.Background(), scanA.ID, db.ScanArtifacts{
+	if err := store.UpsertArtifacts(defaultScopeContext(), scanA.ID, db.ScanArtifacts{
 		Bundle: providers.NormalizedBundle{
 			Identities: []domain.Identity{{ID: "id-1", Provider: domain.ProviderAWS, Type: domain.IdentityTypeRole, Name: "app-a", RawRef: "raw-a"}},
 		},
@@ -702,11 +702,11 @@ func TestServiceListIdentitiesAndRelationshipsDefaultsToLatestScan(t *testing.T)
 		t.Fatalf("seed artifacts A: %v", err)
 	}
 
-	scanB, err := store.CreateScan(context.Background(), "aws", now.Add(2*time.Minute))
+	scanB, err := store.CreateScan(defaultScopeContext(), "aws", now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("create scan B: %v", err)
 	}
-	if err := store.UpsertArtifacts(context.Background(), scanB.ID, db.ScanArtifacts{
+	if err := store.UpsertArtifacts(defaultScopeContext(), scanB.ID, db.ScanArtifacts{
 		Bundle: providers.NormalizedBundle{
 			Identities: []domain.Identity{{ID: "id-2", Provider: domain.ProviderAWS, Type: domain.IdentityTypeRole, Name: "app-b", RawRef: "raw-b"}},
 		},
@@ -716,7 +716,7 @@ func TestServiceListIdentitiesAndRelationshipsDefaultsToLatestScan(t *testing.T)
 	}
 
 	svc := NewService(store, fakeScanner{}, "aws")
-	identities, err := svc.ListIdentities(context.Background(), "", "aws", "role", "app", 10)
+	identities, err := svc.ListIdentities(defaultScopeContext(), "", "aws", "role", "app", 10)
 	if err != nil {
 		t.Fatalf("list identities: %v", err)
 	}
@@ -724,7 +724,7 @@ func TestServiceListIdentitiesAndRelationshipsDefaultsToLatestScan(t *testing.T)
 		t.Fatalf("unexpected identities from latest scan: %+v", identities)
 	}
 
-	relationships, err := svc.ListRelationships(context.Background(), "", "can_access", "", "", 10)
+	relationships, err := svc.ListRelationships(defaultScopeContext(), "", "can_access", "", "", 10)
 	if err != nil {
 		t.Fatalf("list relationships: %v", err)
 	}
@@ -736,11 +736,11 @@ func TestServiceListIdentitiesAndRelationshipsDefaultsToLatestScan(t *testing.T)
 func TestServiceListOwnershipSignals(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 17, 18, 0, 0, 0, time.UTC)
-	scan, err := store.CreateScan(context.Background(), "aws", now)
+	scan, err := store.CreateScan(defaultScopeContext(), "aws", now)
 	if err != nil {
 		t.Fatalf("create scan: %v", err)
 	}
-	if err := store.UpsertArtifacts(context.Background(), scan.ID, db.ScanArtifacts{
+	if err := store.UpsertArtifacts(defaultScopeContext(), scan.ID, db.ScanArtifacts{
 		Bundle: providers.NormalizedBundle{
 			Identities: []domain.Identity{
 				{
@@ -769,7 +769,7 @@ func TestServiceListOwnershipSignals(t *testing.T) {
 	}
 
 	svc := NewService(store, fakeScanner{}, "aws")
-	signals, err := svc.ListOwnershipSignals(context.Background(), 10, OwnershipFilter{ScanID: scan.ID})
+	signals, err := svc.ListOwnershipSignals(defaultScopeContext(), 10, OwnershipFilter{ScanID: scan.ID})
 	if err != nil {
 		t.Fatalf("list ownership signals: %v", err)
 	}
@@ -785,18 +785,18 @@ func TestServiceGetFindingsTrend(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
 
-	scanA, _ := store.CreateScan(context.Background(), "aws", now)
-	_ = store.UpsertFindings(context.Background(), scanA.ID, []domain.Finding{
+	scanA, _ := store.CreateScan(defaultScopeContext(), "aws", now)
+	_ = store.UpsertFindings(defaultScopeContext(), scanA.ID, []domain.Finding{
 		{ID: "f1", Severity: domain.SeverityHigh, CreatedAt: now},
 	})
-	scanB, _ := store.CreateScan(context.Background(), "aws", now.Add(3*time.Minute))
-	_ = store.UpsertFindings(context.Background(), scanB.ID, []domain.Finding{
+	scanB, _ := store.CreateScan(defaultScopeContext(), "aws", now.Add(3*time.Minute))
+	_ = store.UpsertFindings(defaultScopeContext(), scanB.ID, []domain.Finding{
 		{ID: "f2", Severity: domain.SeverityCritical, CreatedAt: now.Add(3 * time.Minute)},
 		{ID: "f3", Severity: domain.SeverityMedium, CreatedAt: now.Add(3 * time.Minute)},
 	})
 
 	svc := NewService(store, fakeScanner{}, "aws")
-	points, err := svc.GetFindingsTrend(context.Background(), 10)
+	points, err := svc.GetFindingsTrend(defaultScopeContext(), 10)
 	if err != nil {
 		t.Fatalf("get findings trend: %v", err)
 	}
@@ -814,14 +814,14 @@ func TestServiceGetFindingsTrend(t *testing.T) {
 func TestServiceGetFindingsTrendFiltered(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)
-	scan, _ := store.CreateScan(context.Background(), "aws", now)
-	_ = store.UpsertFindings(context.Background(), scan.ID, []domain.Finding{
+	scan, _ := store.CreateScan(defaultScopeContext(), "aws", now)
+	_ = store.UpsertFindings(defaultScopeContext(), scan.ID, []domain.Finding{
 		{ID: "f1", Severity: domain.SeverityCritical, Type: domain.FindingEscalationPath, CreatedAt: now},
 		{ID: "f2", Severity: domain.SeverityHigh, Type: domain.FindingOwnerless, CreatedAt: now},
 	})
 
 	svc := NewService(store, fakeScanner{}, "aws")
-	points, err := svc.GetFindingsTrendFiltered(context.Background(), 10, "critical", "escalation_path")
+	points, err := svc.GetFindingsTrendFiltered(defaultScopeContext(), 10, "critical", "escalation_path")
 	if err != nil {
 		t.Fatalf("trend filtered: %v", err)
 	}
@@ -850,7 +850,7 @@ func TestServiceRunRepoScanSuccess(t *testing.T) {
 		return executor
 	}
 
-	result, err := svc.RunRepoScan(context.Background(), RepoScanRequest{
+	result, err := svc.RunRepoScan(defaultScopeContext(), RepoScanRequest{
 		Repository:   "owner/repo",
 		HistoryLimit: 800,
 		MaxFindings:  300,
@@ -887,7 +887,7 @@ func TestServiceRunRepoScanPersistedStoresRecords(t *testing.T) {
 			},
 		}
 	}
-	run, err := svc.RunRepoScanPersisted(context.Background(), RepoScanRequest{
+	run, err := svc.RunRepoScanPersisted(defaultScopeContext(), RepoScanRequest{
 		Repository:   "owner/repo",
 		HistoryLimit: 10,
 		MaxFindings:  20,
@@ -899,7 +899,7 @@ func TestServiceRunRepoScanPersistedStoresRecords(t *testing.T) {
 		t.Fatalf("unexpected repo scan run result: %+v", run)
 	}
 
-	stored, err := svc.GetRepoScan(context.Background(), run.RepoScan.ID)
+	stored, err := svc.GetRepoScan(defaultScopeContext(), run.RepoScan.ID)
 	if err != nil {
 		t.Fatalf("get repo scan: %v", err)
 	}
@@ -907,7 +907,7 @@ func TestServiceRunRepoScanPersistedStoresRecords(t *testing.T) {
 		t.Fatalf("unexpected persisted repo scan: %+v", stored)
 	}
 
-	findings, err := svc.ListRepoFindings(context.Background(), 10, db.RepoFindingFilter{RepoScanID: run.RepoScan.ID})
+	findings, err := svc.ListRepoFindings(defaultScopeContext(), 10, db.RepoFindingFilter{RepoScanID: run.RepoScan.ID})
 	if err != nil {
 		t.Fatalf("list repo findings: %v", err)
 	}
@@ -919,23 +919,23 @@ func TestServiceRunRepoScanPersistedStoresRecords(t *testing.T) {
 func TestServiceRunRepoScanGuards(t *testing.T) {
 	svc := NewService(db.NewMemoryStore(), fakeScanner{}, "aws")
 	svc.RepoScanEnabled = false
-	if _, err := svc.RunRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo"}); !errors.Is(err, ErrRepoScanDisabled) {
+	if _, err := svc.RunRepoScan(defaultScopeContext(), RepoScanRequest{Repository: "owner/repo"}); !errors.Is(err, ErrRepoScanDisabled) {
 		t.Fatalf("expected disabled error, got %v", err)
 	}
 
 	svc.RepoScanEnabled = true
 	svc.RepoScanAllowedTargets = []string{"trusted/*"}
-	if _, err := svc.RunRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo"}); !errors.Is(err, ErrRepoTargetNotAllowed) {
+	if _, err := svc.RunRepoScan(defaultScopeContext(), RepoScanRequest{Repository: "owner/repo"}); !errors.Is(err, ErrRepoTargetNotAllowed) {
 		t.Fatalf("expected target not allowed error, got %v", err)
 	}
 
 	svc.RepoScanAllowedTargets = nil
-	if _, err := svc.RunRepoScan(context.Background(), RepoScanRequest{Repository: "", HistoryLimit: 10, MaxFindings: 10}); !errors.Is(err, ErrInvalidRepoScanRequest) {
+	if _, err := svc.RunRepoScan(defaultScopeContext(), RepoScanRequest{Repository: "", HistoryLimit: 10, MaxFindings: 10}); !errors.Is(err, ErrInvalidRepoScanRequest) {
 		t.Fatalf("expected invalid request error for missing repo, got %v", err)
 	}
 
 	svc.RepoScanAllowedTargets = []string{"owner/repo"}
-	if _, err := svc.RunRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo", HistoryLimit: -1, MaxFindings: 10}); !errors.Is(err, ErrInvalidRepoScanRequest) {
+	if _, err := svc.RunRepoScan(defaultScopeContext(), RepoScanRequest{Repository: "owner/repo", HistoryLimit: -1, MaxFindings: 10}); !errors.Is(err, ErrInvalidRepoScanRequest) {
 		t.Fatalf("expected invalid request error for negative history, got %v", err)
 	}
 }
@@ -952,7 +952,7 @@ func TestServiceRunRepoScanLocked(t *testing.T) {
 	defer release()
 	svc.Locker = locker
 
-	if _, err := svc.RunRepoScanPersisted(context.Background(), RepoScanRequest{Repository: "owner/repo"}); !errors.Is(err, ErrRepoScanInProgress) {
+	if _, err := svc.RunRepoScanPersisted(defaultScopeContext(), RepoScanRequest{Repository: "owner/repo"}); !errors.Is(err, ErrRepoScanInProgress) {
 		t.Fatalf("expected repo scan in progress error, got %v", err)
 	}
 }
@@ -960,24 +960,24 @@ func TestServiceRunRepoScanLocked(t *testing.T) {
 func TestServiceListFindingsWrapperAndRepoScanDetailGuard(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 17, 15, 10, 0, 0, time.UTC)
-	scan, err := store.CreateScan(context.Background(), "aws", now)
+	scan, err := store.CreateScan(defaultScopeContext(), "aws", now)
 	if err != nil {
 		t.Fatalf("create scan: %v", err)
 	}
-	if err := store.UpsertFindings(context.Background(), scan.ID, []domain.Finding{
+	if err := store.UpsertFindings(defaultScopeContext(), scan.ID, []domain.Finding{
 		{ID: "f1", Type: domain.FindingOwnerless, Severity: domain.SeverityHigh, CreatedAt: now},
 	}); err != nil {
 		t.Fatalf("upsert findings: %v", err)
 	}
 	svc := NewService(store, fakeScanner{}, "aws")
-	items, err := svc.ListFindings(context.Background(), 10)
+	items, err := svc.ListFindings(defaultScopeContext(), 10)
 	if err != nil {
 		t.Fatalf("list findings wrapper: %v", err)
 	}
 	if len(items) != 1 || items[0].ID != "f1" {
 		t.Fatalf("unexpected list findings result %+v", items)
 	}
-	if _, err := svc.GetRepoScan(context.Background(), " "); !errors.Is(err, db.ErrNotFound) {
+	if _, err := svc.GetRepoScan(defaultScopeContext(), " "); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("expected not found for empty repo scan id, got %v", err)
 	}
 }
@@ -989,12 +989,12 @@ func TestServiceRunRepoScanPersistedScannerError(t *testing.T) {
 	svc.RepoScannerFactory = func(int, int) RepoScanExecutor {
 		return &fakeRepoExecutor{err: errors.New("scanner failed")}
 	}
-	if _, err := svc.RunRepoScanPersisted(context.Background(), RepoScanRequest{
+	if _, err := svc.RunRepoScanPersisted(defaultScopeContext(), RepoScanRequest{
 		Repository: "owner/repo",
 	}); err == nil {
 		t.Fatal("expected scanner error")
 	}
-	repoScans, err := svc.ListRepoScans(context.Background(), 10)
+	repoScans, err := svc.ListRepoScans(defaultScopeContext(), 10)
 	if err != nil {
 		t.Fatalf("list repo scans: %v", err)
 	}
@@ -1012,28 +1012,28 @@ func TestServiceEnqueueScanAndProcessQueue(t *testing.T) {
 	}}, "aws")
 	svc.Now = func() time.Time { return now }
 
-	record, err := svc.EnqueueScan(context.Background())
+	record, err := svc.EnqueueScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("enqueue scan: %v", err)
 	}
 	if record.Status != "queued" {
 		t.Fatalf("expected queued status, got %q", record.Status)
 	}
-	processed, err := svc.ProcessNextQueuedScan(context.Background())
+	processed, err := svc.ProcessNextQueuedScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("process queued scan: %v", err)
 	}
 	if !processed {
 		t.Fatal("expected one queued scan to be processed")
 	}
-	scan, err := store.GetScan(context.Background(), record.ID)
+	scan, err := store.GetScan(defaultScopeContext(), record.ID)
 	if err != nil {
 		t.Fatalf("get scan: %v", err)
 	}
 	if scan.Status != "completed" || scan.FindingCount != 1 {
 		t.Fatalf("unexpected processed scan record: %+v", scan)
 	}
-	processed, err = svc.ProcessNextQueuedScan(context.Background())
+	processed, err = svc.ProcessNextQueuedScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("process queued scan again: %v", err)
 	}
@@ -1045,10 +1045,10 @@ func TestServiceEnqueueScanAndProcessQueue(t *testing.T) {
 func TestServiceEnqueueScanQueueFull(t *testing.T) {
 	svc := NewService(db.NewMemoryStore(), fakeScanner{}, "aws")
 	svc.ScanQueueMaxPending = 1
-	if _, err := svc.EnqueueScan(context.Background()); err != nil {
+	if _, err := svc.EnqueueScan(defaultScopeContext()); err != nil {
 		t.Fatalf("enqueue first scan: %v", err)
 	}
-	if _, err := svc.EnqueueScan(context.Background()); !errors.Is(err, ErrScanQueueFull) {
+	if _, err := svc.EnqueueScan(defaultScopeContext()); !errors.Is(err, ErrScanQueueFull) {
 		t.Fatalf("expected scan queue full error, got %v", err)
 	}
 }
@@ -1065,13 +1065,13 @@ func TestServiceQueuedScanBurstProcessing(t *testing.T) {
 
 	const queued = 40
 	for i := 0; i < queued; i++ {
-		if _, err := svc.EnqueueScan(context.Background()); err != nil {
+		if _, err := svc.EnqueueScan(defaultScopeContext()); err != nil {
 			t.Fatalf("enqueue burst scan %d: %v", i, err)
 		}
 	}
 	processedCount := 0
 	for {
-		processed, err := svc.ProcessNextQueuedScan(context.Background())
+		processed, err := svc.ProcessNextQueuedScan(defaultScopeContext())
 		if err != nil {
 			t.Fatalf("process burst queue: %v", err)
 		}
@@ -1083,7 +1083,7 @@ func TestServiceQueuedScanBurstProcessing(t *testing.T) {
 	if processedCount != queued {
 		t.Fatalf("expected %d processed scans, got %d", queued, processedCount)
 	}
-	scans, err := store.ListScans(context.Background(), 1000)
+	scans, err := store.ListScans(defaultScopeContext(), 1000)
 	if err != nil {
 		t.Fatalf("list scans: %v", err)
 	}
@@ -1115,7 +1115,7 @@ func TestServiceEnqueueRepoScanAndProcessQueue(t *testing.T) {
 			},
 		}
 	}
-	record, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{
+	record, err := svc.EnqueueRepoScan(defaultScopeContext(), RepoScanRequest{
 		Repository:   "owner/repo",
 		HistoryLimit: 25,
 		MaxFindings:  30,
@@ -1126,14 +1126,14 @@ func TestServiceEnqueueRepoScanAndProcessQueue(t *testing.T) {
 	if record.Status != "queued" {
 		t.Fatalf("expected queued repo scan status, got %q", record.Status)
 	}
-	processed, err := svc.ProcessNextQueuedRepoScan(context.Background())
+	processed, err := svc.ProcessNextQueuedRepoScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("process queued repo scan: %v", err)
 	}
 	if !processed {
 		t.Fatal("expected queued repo scan to be processed")
 	}
-	stored, err := svc.GetRepoScan(context.Background(), record.ID)
+	stored, err := svc.GetRepoScan(defaultScopeContext(), record.ID)
 	if err != nil {
 		t.Fatalf("get repo scan: %v", err)
 	}
@@ -1147,16 +1147,16 @@ func TestServiceEnqueueRepoScanGuards(t *testing.T) {
 	svc.RepoScanAllowedTargets = []string{"owner/*"}
 	svc.RepoQueueMaxPending = 1
 
-	if _, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo"}); err != nil {
+	if _, err := svc.EnqueueRepoScan(defaultScopeContext(), RepoScanRequest{Repository: "owner/repo"}); err != nil {
 		t.Fatalf("enqueue first repo scan: %v", err)
 	}
-	if _, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo"}); !errors.Is(err, ErrRepoScanInProgress) {
+	if _, err := svc.EnqueueRepoScan(defaultScopeContext(), RepoScanRequest{Repository: "owner/repo"}); !errors.Is(err, ErrRepoScanInProgress) {
 		t.Fatalf("expected repo in-progress error for duplicate target, got %v", err)
 	}
-	if _, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "Owner/Repo"}); !errors.Is(err, ErrRepoScanInProgress) {
+	if _, err := svc.EnqueueRepoScan(defaultScopeContext(), RepoScanRequest{Repository: "Owner/Repo"}); !errors.Is(err, ErrRepoScanInProgress) {
 		t.Fatalf("expected repo in-progress error for case-variant duplicate target, got %v", err)
 	}
-	if _, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/another"}); !errors.Is(err, ErrRepoScanQueueFull) {
+	if _, err := svc.EnqueueRepoScan(defaultScopeContext(), RepoScanRequest{Repository: "owner/another"}); !errors.Is(err, ErrRepoScanQueueFull) {
 		t.Fatalf("expected repo queue full error, got %v", err)
 	}
 }
@@ -1168,7 +1168,7 @@ func TestServiceProcessQueuedRepoScanRequeuesWhenExecutionLockHeld(t *testing.T)
 	queuedAt := time.Date(2026, 3, 24, 10, 0, 0, 0, time.UTC)
 	svc.Now = func() time.Time { return queuedAt }
 
-	record, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo"})
+	record, err := svc.EnqueueRepoScan(defaultScopeContext(), RepoScanRequest{Repository: "owner/repo"})
 	if err != nil {
 		t.Fatalf("enqueue repo scan: %v", err)
 	}
@@ -1180,14 +1180,14 @@ func TestServiceProcessQueuedRepoScanRequeuesWhenExecutionLockHeld(t *testing.T)
 	defer release()
 	svc.Locker = locker
 
-	processed, err := svc.ProcessNextQueuedRepoScan(context.Background())
+	processed, err := svc.ProcessNextQueuedRepoScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("process queued repo scan: %v", err)
 	}
 	if !processed {
 		t.Fatal("expected requeue handling to count as queue progress")
 	}
-	stored, err := svc.GetRepoScan(context.Background(), record.ID)
+	stored, err := svc.GetRepoScan(defaultScopeContext(), record.ID)
 	if err != nil {
 		t.Fatalf("get repo scan: %v", err)
 	}
@@ -1218,11 +1218,11 @@ func TestServiceProcessQueuedRepoScanContinuesToNextTargetAfterRequeue(t *testin
 		}
 	}
 
-	repoA, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo-a"})
+	repoA, err := svc.EnqueueRepoScan(defaultScopeContext(), RepoScanRequest{Repository: "owner/repo-a"})
 	if err != nil {
 		t.Fatalf("enqueue repo-a scan: %v", err)
 	}
-	repoB, err := svc.EnqueueRepoScan(context.Background(), RepoScanRequest{Repository: "owner/repo-b"})
+	repoB, err := svc.EnqueueRepoScan(defaultScopeContext(), RepoScanRequest{Repository: "owner/repo-b"})
 	if err != nil {
 		t.Fatalf("enqueue repo-b scan: %v", err)
 	}
@@ -1235,7 +1235,7 @@ func TestServiceProcessQueuedRepoScanContinuesToNextTargetAfterRequeue(t *testin
 	defer release()
 	svc.Locker = locker
 
-	processed, err := svc.ProcessNextQueuedRepoScan(context.Background())
+	processed, err := svc.ProcessNextQueuedRepoScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("first queue process failed: %v", err)
 	}
@@ -1243,7 +1243,7 @@ func TestServiceProcessQueuedRepoScanContinuesToNextTargetAfterRequeue(t *testin
 		t.Fatal("expected first queue pass to requeue locked target")
 	}
 
-	processed, err = svc.ProcessNextQueuedRepoScan(context.Background())
+	processed, err = svc.ProcessNextQueuedRepoScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("second queue process failed: %v", err)
 	}
@@ -1251,7 +1251,7 @@ func TestServiceProcessQueuedRepoScanContinuesToNextTargetAfterRequeue(t *testin
 		t.Fatal("expected second queue pass to process next target")
 	}
 
-	repoARecord, err := svc.GetRepoScan(context.Background(), repoA.ID)
+	repoARecord, err := svc.GetRepoScan(defaultScopeContext(), repoA.ID)
 	if err != nil {
 		t.Fatalf("get repo-a scan: %v", err)
 	}
@@ -1259,7 +1259,7 @@ func TestServiceProcessQueuedRepoScanContinuesToNextTargetAfterRequeue(t *testin
 		t.Fatalf("expected repo-a to remain queued while lock is held, got %q", repoARecord.Status)
 	}
 
-	repoBRecord, err := svc.GetRepoScan(context.Background(), repoB.ID)
+	repoBRecord, err := svc.GetRepoScan(defaultScopeContext(), repoB.ID)
 	if err != nil {
 		t.Fatalf("get repo-b scan: %v", err)
 	}
@@ -1289,7 +1289,7 @@ func TestServiceRunRepoScanRejectsLocalRepositoryTarget(t *testing.T) {
 		t.Fatalf("prepare local repo fixture: %v", err)
 	}
 
-	if _, err := svc.RunRepoScan(context.Background(), RepoScanRequest{Repository: repo}); !errors.Is(err, ErrRepoTargetNotAllowed) {
+	if _, err := svc.RunRepoScan(defaultScopeContext(), RepoScanRequest{Repository: repo}); !errors.Is(err, ErrRepoTargetNotAllowed) {
 		t.Fatalf("expected local repo target rejection, got %v", err)
 	}
 }

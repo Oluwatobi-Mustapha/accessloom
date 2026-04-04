@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
@@ -25,7 +26,7 @@ func TestPostgresStoreCreateAndCompleteScan(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), "default", "default", "aws", "running", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	scan, err := store.CreateScan(context.Background(), "aws", time.Now())
+	scan, err := store.CreateScan(defaultScopeContext(), "aws", time.Now())
 	if err != nil {
 		t.Fatalf("create scan failed: %v", err)
 	}
@@ -38,7 +39,7 @@ func TestPostgresStoreCreateAndCompleteScan(t *testing.T) {
 		WithArgs(scan.ID, "completed", sqlmock.AnyArg(), 2, 1, nil, "default", "default").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	if err := store.CompleteScan(context.Background(), scan.ID, "completed", time.Now(), 2, 1, ""); err != nil {
+	if err := store.CompleteScan(defaultScopeContext(), scan.ID, "completed", time.Now(), 2, 1, ""); err != nil {
 		t.Fatalf("complete scan failed: %v", err)
 	}
 
@@ -82,7 +83,7 @@ func TestPostgresStoreUpsertFindings(t *testing.T) {
 		CreatedAt:    time.Now(),
 	}}
 
-	if err := store.UpsertFindings(context.Background(), "scan-1", findings); err != nil {
+	if err := store.UpsertFindings(defaultScopeContext(), "scan-1", findings); err != nil {
 		t.Fatalf("upsert findings failed: %v", err)
 	}
 
@@ -118,7 +119,7 @@ func TestPostgresStoreUpsertArtifacts(t *testing.T) {
 	mock.ExpectExec("INSERT INTO permissions").WithArgs("scan-1", "a", "s3:GetObject", "*", "Allow").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	err = store.UpsertArtifacts(context.Background(), "scan-1", ScanArtifacts{
+	err = store.UpsertArtifacts(defaultScopeContext(), "scan-1", ScanArtifacts{
 		RawAssets: []providers.RawAsset{{
 			Kind:      "iam_role",
 			SourceID:  "arn:aws:iam::1:role/test",
@@ -155,7 +156,7 @@ func TestPostgresStoreListScansAndFindings(t *testing.T) {
 		AddRow("scan-1", "default", "default", "aws", "completed", now, now, 2, 1, "")
 	mock.ExpectQuery("SELECT id, tenant_id, workspace_id, provider, status").WithArgs("default", "default", 20).WillReturnRows(scanRows)
 
-	scans, err := store.ListScans(context.Background(), 20)
+	scans, err := store.ListScans(defaultScopeContext(), 20)
 	if err != nil {
 		t.Fatalf("list scans failed: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestPostgresStoreListScansAndFindings(t *testing.T) {
 		AddRow("scan-1", "f1", "ownerless_identity", "medium", "Ownerless", "summary", []byte("[\"x\"]"), []byte("{\"a\":1}"), "fix", now)
 	mock.ExpectQuery("SELECT f.scan_id, f.finding_id, f.type").WithArgs("default", "default", 100).WillReturnRows(findingsRows)
 
-	findings, err := store.ListFindings(context.Background(), 100)
+	findings, err := store.ListFindings(defaultScopeContext(), 100)
 	if err != nil {
 		t.Fatalf("list findings failed: %v", err)
 	}
@@ -194,7 +195,7 @@ func TestPostgresStoreGetScanAndFindingsByScan(t *testing.T) {
 		AddRow("scan-1", "default", "default", "aws", "completed", now, now, 2, 1, "")
 	mock.ExpectQuery("SELECT id, tenant_id, workspace_id, provider, status").WithArgs("scan-1", "default", "default").WillReturnRows(scanRow)
 
-	scan, err := store.GetScan(context.Background(), "scan-1")
+	scan, err := store.GetScan(defaultScopeContext(), "scan-1")
 	if err != nil {
 		t.Fatalf("get scan failed: %v", err)
 	}
@@ -215,7 +216,7 @@ func TestPostgresStoreGetScanAndFindingsByScan(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectQuery("SELECT f.scan_id, f.finding_id, f.type").WithArgs("scan-1", "default", "default", 100).WillReturnRows(findingsRows)
 
-	findings, err := store.ListFindingsByScan(context.Background(), "scan-1", 100)
+	findings, err := store.ListFindingsByScan(defaultScopeContext(), "scan-1", 100)
 	if err != nil {
 		t.Fatalf("list findings by scan failed: %v", err)
 	}
@@ -240,7 +241,7 @@ func TestPostgresStoreScanEvents(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), "scan-1", "info", "scan started", sqlmock.AnyArg(), "default", "default").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	if err := store.AppendScanEvent(context.Background(), "scan-1", "info", "scan started", map[string]any{"provider": "aws"}); err != nil {
+	if err := store.AppendScanEvent(defaultScopeContext(), "scan-1", "info", "scan started", map[string]any{"provider": "aws"}); err != nil {
 		t.Fatalf("append scan event failed: %v", err)
 	}
 
@@ -258,7 +259,7 @@ func TestPostgresStoreScanEvents(t *testing.T) {
 		AddRow("event-1", "scan-1", "info", "scan started", []byte(`{"provider":"aws"}`), now)
 	mock.ExpectQuery("SELECT e.id, e.scan_id, e.level, e.message, e.metadata, e.created_at").WithArgs("scan-1", "default", "default", 10).WillReturnRows(rows)
 
-	events, err := store.ListScanEvents(context.Background(), "scan-1", 10)
+	events, err := store.ListScanEvents(defaultScopeContext(), "scan-1", 10)
 	if err != nil {
 		t.Fatalf("list scan events failed: %v", err)
 	}
@@ -279,7 +280,7 @@ func TestPostgresStoreRejectsInvalidScanEventLevel(t *testing.T) {
 	defer db.Close()
 
 	store := NewPostgresStoreWithDB(db)
-	if err := store.AppendScanEvent(context.Background(), "scan-1", "invalid", "bad", nil); err == nil {
+	if err := store.AppendScanEvent(defaultScopeContext(), "scan-1", "invalid", "bad", nil); err == nil {
 		t.Fatal("expected invalid level error")
 	}
 }
@@ -298,7 +299,7 @@ func TestPostgresStoreListIdentitiesAndRelationships(t *testing.T) {
 		AddRow("id-1", "aws", "role", "app-role", "arn:aws:iam::1:role/app-role", "", now, nil, []byte(`{"team":"platform"}`), "raw-1")
 	mock.ExpectQuery("SELECT i.id, i.provider, i.type, i.name").WithArgs("", "aws", "role", "app", 20, "default", "default").WillReturnRows(identityRows)
 
-	identities, err := store.ListIdentities(context.Background(), IdentityFilter{
+	identities, err := store.ListIdentities(defaultScopeContext(), IdentityFilter{
 		Provider:   "aws",
 		Type:       "role",
 		NamePrefix: "app",
@@ -314,7 +315,7 @@ func TestPostgresStoreListIdentitiesAndRelationships(t *testing.T) {
 		AddRow("rel-1", "can_assume", "id-1", "id-2", "", now)
 	mock.ExpectQuery("SELECT r.id, r.type, r.from_node_id").WithArgs("", "can_assume", "", "", 30, "default", "default").WillReturnRows(relationshipRows)
 
-	relationships, err := store.ListRelationships(context.Background(), RelationshipFilter{Type: "can_assume"}, 30)
+	relationships, err := store.ListRelationships(defaultScopeContext(), RelationshipFilter{Type: "can_assume"}, 30)
 	if err != nil {
 		t.Fatalf("list relationships failed: %v", err)
 	}
@@ -349,7 +350,7 @@ func TestPostgresStoreRepoScanLifecycle(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), "default", "default", "owner/repo", "running", sqlmock.AnyArg(), 0, 0).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	record, err := store.CreateRepoScan(context.Background(), "owner/repo", now)
+	record, err := store.CreateRepoScan(defaultScopeContext(), "owner/repo", now)
 	if err != nil {
 		t.Fatalf("create repo scan failed: %v", err)
 	}
@@ -369,7 +370,7 @@ func TestPostgresStoreRepoScanLifecycle(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	if err := store.UpsertRepoFindings(context.Background(), record.ID, []domain.Finding{{
+	if err := store.UpsertRepoFindings(defaultScopeContext(), record.ID, []domain.Finding{{
 		ID:           "rf-1",
 		Type:         domain.FindingSecretExposure,
 		Severity:     domain.SeverityHigh,
@@ -397,14 +398,14 @@ func TestPostgresStoreRepoScanLifecycle(t *testing.T) {
 		WithArgs(record.ID, "completed", sqlmock.AnyArg(), 12, 8, 1, false, nil, "default", "default").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	if err := store.CompleteRepoScan(context.Background(), record.ID, "completed", now, 12, 8, 1, false, ""); err != nil {
+	if err := store.CompleteRepoScan(defaultScopeContext(), record.ID, "completed", now, 12, 8, 1, false, ""); err != nil {
 		t.Fatalf("complete repo scan failed: %v", err)
 	}
 
 	repoScanRows := sqlmock.NewRows([]string{"id", "tenant_id", "workspace_id", "repository", "status", "started_at", "finished_at", "commits_scanned", "files_scanned", "finding_count", "truncated", "error_message", "history_limit", "max_findings_limit"}).
 		AddRow(record.ID, "default", "default", "owner/repo", "completed", now, now, 12, 8, 1, false, "", 0, 0)
 	mock.ExpectQuery("SELECT id, tenant_id, workspace_id, repository, status").WithArgs("default", "default", 20).WillReturnRows(repoScanRows)
-	repoScans, err := store.ListRepoScans(context.Background(), 20)
+	repoScans, err := store.ListRepoScans(defaultScopeContext(), 20)
 	if err != nil {
 		t.Fatalf("list repo scans failed: %v", err)
 	}
@@ -424,7 +425,7 @@ func TestPostgresStoreRepoScanLifecycle(t *testing.T) {
 		WithArgs(record.ID, "default", "default").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
 	mock.ExpectQuery("SELECT rf.repo_scan_id, rf.finding_id, rf.type").WithArgs(record.ID, "", "", 100, "default", "default").WillReturnRows(repoFindingsRows)
-	repoFindings, err := store.ListRepoFindings(context.Background(), RepoFindingFilter{RepoScanID: record.ID}, 100)
+	repoFindings, err := store.ListRepoFindings(defaultScopeContext(), RepoFindingFilter{RepoScanID: record.ID}, 100)
 	if err != nil {
 		t.Fatalf("list repo findings failed: %v", err)
 	}
@@ -435,7 +436,7 @@ func TestPostgresStoreRepoScanLifecycle(t *testing.T) {
 	repoScanRow := sqlmock.NewRows([]string{"id", "tenant_id", "workspace_id", "repository", "status", "started_at", "finished_at", "commits_scanned", "files_scanned", "finding_count", "truncated", "error_message", "history_limit", "max_findings_limit"}).
 		AddRow(record.ID, "default", "default", "owner/repo", "completed", now, now, 12, 8, 1, false, "", 0, 0)
 	mock.ExpectQuery("SELECT id, tenant_id, workspace_id, repository, status").WithArgs(record.ID, "default", "default").WillReturnRows(repoScanRow)
-	gotRepoScan, err := store.GetRepoScan(context.Background(), record.ID)
+	gotRepoScan, err := store.GetRepoScan(defaultScopeContext(), record.ID)
 	if err != nil {
 		t.Fatalf("get repo scan failed: %v", err)
 	}
@@ -460,10 +461,10 @@ func TestPostgresStoreFindingTriageStateAndHistory(t *testing.T) {
 	expiry := now.Add(2 * time.Hour)
 
 	mock.ExpectExec("INSERT INTO finding_triage_states").
-		WithArgs("finding-1", "ack", "sec-oncall", sqlmock.AnyArg(), sqlmock.AnyArg(), "subject:alice").
+		WithArgs("default", "default", "finding-1", "ack", "sec-oncall", sqlmock.AnyArg(), sqlmock.AnyArg(), "subject:alice").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	if err := store.UpsertFindingTriageState(context.Background(), FindingTriageState{
+	if err := store.UpsertFindingTriageState(defaultScopeContext(), FindingTriageState{
 		FindingID:            "finding-1",
 		Status:               domain.FindingLifecycleAck,
 		Assignee:             "sec-oncall",
@@ -477,10 +478,10 @@ func TestPostgresStoreFindingTriageStateAndHistory(t *testing.T) {
 	stateRows := sqlmock.NewRows([]string{"finding_id", "status", "assignee", "suppression_expires_at", "updated_at", "updated_by"}).
 		AddRow("finding-1", "ack", "sec-oncall", expiry, now, "subject:alice")
 	mock.ExpectQuery("SELECT finding_id, status, assignee, suppression_expires_at, updated_at, updated_by").
-		WithArgs("finding-1").
+		WithArgs("finding-1", "default", "default").
 		WillReturnRows(stateRows)
 
-	state, err := store.GetFindingTriageState(context.Background(), "finding-1")
+	state, err := store.GetFindingTriageState(defaultScopeContext(), "finding-1")
 	if err != nil {
 		t.Fatalf("get triage state failed: %v", err)
 	}
@@ -491,10 +492,10 @@ func TestPostgresStoreFindingTriageStateAndHistory(t *testing.T) {
 	listRows := sqlmock.NewRows([]string{"finding_id", "status", "assignee", "suppression_expires_at", "updated_at", "updated_by"}).
 		AddRow("finding-1", "ack", "sec-oncall", expiry, now, "subject:alice")
 	mock.ExpectQuery("SELECT finding_id, status, assignee, suppression_expires_at, updated_at, updated_by").
-		WithArgs("finding-1", "finding-2").
+		WithArgs("default", "default", "finding-1", "finding-2").
 		WillReturnRows(listRows)
 
-	states, err := store.ListFindingTriageStates(context.Background(), []string{"finding-1", "finding-2"})
+	states, err := store.ListFindingTriageStates(defaultScopeContext(), []string{"finding-1", "finding-2"})
 	if err != nil {
 		t.Fatalf("list triage states failed: %v", err)
 	}
@@ -503,10 +504,10 @@ func TestPostgresStoreFindingTriageStateAndHistory(t *testing.T) {
 	}
 
 	mock.ExpectExec("INSERT INTO finding_triage_events").
-		WithArgs(sqlmock.AnyArg(), "finding-1", FindingTriageActionAcknowledged, "open", "ack", "sec-oncall", sqlmock.AnyArg(), "accepted risk", "subject:alice", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "default", "default", "finding-1", FindingTriageActionAcknowledged, "open", "ack", "sec-oncall", sqlmock.AnyArg(), "accepted risk", "subject:alice", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	if err := store.AppendFindingTriageEvent(context.Background(), FindingTriageEvent{
+	if err := store.AppendFindingTriageEvent(defaultScopeContext(), FindingTriageEvent{
 		FindingID:            "finding-1",
 		Action:               FindingTriageActionAcknowledged,
 		FromStatus:           domain.FindingLifecycleOpen,
@@ -524,10 +525,10 @@ func TestPostgresStoreFindingTriageStateAndHistory(t *testing.T) {
 		AddRow("evt-2", "finding-1", FindingTriageActionCommented, "ack", "ack", "sec-oncall", nil, "reviewed", "subject:bob", now.Add(2*time.Minute)).
 		AddRow("evt-1", "finding-1", FindingTriageActionAcknowledged, "open", "ack", "sec-oncall", expiry, "accepted risk", "subject:alice", now)
 	mock.ExpectQuery("SELECT id, finding_id, action, from_status, to_status, assignee, suppression_expires_at, comment, actor, created_at").
-		WithArgs("finding-1", 10).
+		WithArgs("finding-1", "default", "default", 10).
 		WillReturnRows(eventRows)
 
-	events, err := store.ListFindingTriageEvents(context.Background(), "finding-1", 10)
+	events, err := store.ListFindingTriageEvents(defaultScopeContext(), "finding-1", 10)
 	if err != nil {
 		t.Fatalf("list triage events failed: %v", err)
 	}
@@ -552,14 +553,14 @@ func TestPostgresStoreApplyFindingTriageTransition(t *testing.T) {
 
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO finding_triage_states").
-		WithArgs("finding-1", "ack", "sec-oncall", nil, sqlmock.AnyArg(), "subject:alice").
+		WithArgs("default", "default", "finding-1", "ack", "sec-oncall", nil, sqlmock.AnyArg(), "subject:alice").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO finding_triage_events").
-		WithArgs(sqlmock.AnyArg(), "finding-1", FindingTriageActionAcknowledged, "open", "ack", "sec-oncall", nil, "acknowledged", "subject:alice", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "default", "default", "finding-1", FindingTriageActionAcknowledged, "open", "ack", "sec-oncall", nil, "acknowledged", "subject:alice", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectCommit()
 
-	err = store.ApplyFindingTriageTransition(context.Background(), FindingTriageState{
+	err = store.ApplyFindingTriageTransition(defaultScopeContext(), FindingTriageState{
 		FindingID: "finding-1",
 		Status:    domain.FindingLifecycleAck,
 		Assignee:  "sec-oncall",
@@ -596,14 +597,14 @@ func TestPostgresStoreApplyFindingTriageTransitionRollsBackOnEventFailure(t *tes
 
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO finding_triage_states").
-		WithArgs("finding-1", "ack", "sec-oncall", nil, sqlmock.AnyArg(), "subject:alice").
+		WithArgs("default", "default", "finding-1", "ack", "sec-oncall", nil, sqlmock.AnyArg(), "subject:alice").
 		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO finding_triage_events").
-		WithArgs(sqlmock.AnyArg(), "finding-1", FindingTriageActionAcknowledged, "open", "ack", "sec-oncall", nil, "acknowledged", "subject:alice", sqlmock.AnyArg()).
+		WithArgs(sqlmock.AnyArg(), "default", "default", "finding-1", FindingTriageActionAcknowledged, "open", "ack", "sec-oncall", nil, "acknowledged", "subject:alice", sqlmock.AnyArg()).
 		WillReturnError(sql.ErrTxDone)
 	mock.ExpectRollback()
 
-	err = store.ApplyFindingTriageTransition(context.Background(), FindingTriageState{
+	err = store.ApplyFindingTriageTransition(defaultScopeContext(), FindingTriageState{
 		FindingID: "finding-1",
 		Status:    domain.FindingLifecycleAck,
 		Assignee:  "sec-oncall",
@@ -642,7 +643,7 @@ func TestPostgresStoreScanQueueLifecycle(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), "default", "default", "aws", "queued", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	queued, err := store.CreateQueuedScan(context.Background(), "aws", now)
+	queued, err := store.CreateQueuedScan(defaultScopeContext(), "aws", now)
 	if err != nil {
 		t.Fatalf("create queued scan failed: %v", err)
 	}
@@ -660,7 +661,7 @@ func TestPostgresStoreScanQueueLifecycle(t *testing.T) {
 		WithArgs("default", "default", "aws").
 		WillReturnRows(countRows)
 
-	count, err := store.CountQueuedScans(context.Background(), "aws")
+	count, err := store.CountQueuedScans(defaultScopeContext(), "aws")
 	if err != nil {
 		t.Fatalf("count queued scans failed: %v", err)
 	}
@@ -672,7 +673,7 @@ func TestPostgresStoreScanQueueLifecycle(t *testing.T) {
 		AddRow(queued.ID, "default", "default", "aws", "running", now, nil, 0, 0, "")
 	mock.ExpectQuery("WITH next_scan AS").WithArgs("default", "default", "aws").WillReturnRows(claimRows)
 
-	claimed, err := store.ClaimNextQueuedScan(context.Background(), "aws")
+	claimed, err := store.ClaimNextQueuedScan(defaultScopeContext(), "aws")
 	if err != nil {
 		t.Fatalf("claim queued scan failed: %v", err)
 	}
@@ -682,6 +683,19 @@ func TestPostgresStoreScanQueueLifecycle(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreRequiresScopeContext(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	if _, err := store.ListScans(context.Background(), 10); !errors.Is(err, ErrScopeRequired) {
+		t.Fatalf("expected ErrScopeRequired, got %v", err)
 	}
 }
 
@@ -700,7 +714,7 @@ func TestPostgresStoreRepoQueueLifecycle(t *testing.T) {
 		WithArgs(sqlmock.AnyArg(), "default", "default", "owner/repo", "queued", sqlmock.AnyArg(), 50, 80).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
-	queued, err := store.CreateQueuedRepoScan(context.Background(), "owner/repo", 50, 80, now)
+	queued, err := store.CreateQueuedRepoScan(defaultScopeContext(), "owner/repo", 50, 80, now)
 	if err != nil {
 		t.Fatalf("create queued repo scan failed: %v", err)
 	}
@@ -720,7 +734,7 @@ func TestPostgresStoreRepoQueueLifecycle(t *testing.T) {
 		WithArgs("default", "default").
 		WillReturnRows(queuedCountRows)
 
-	queuedCount, err := store.CountQueuedRepoScans(context.Background())
+	queuedCount, err := store.CountQueuedRepoScans(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("count queued repo scans failed: %v", err)
 	}
@@ -738,7 +752,7 @@ func TestPostgresStoreRepoQueueLifecycle(t *testing.T) {
 		WithArgs("default", "default", "OWNER/REPO").
 		WillReturnRows(pendingRows)
 
-	pendingCount, err := store.CountPendingRepoScansByRepository(context.Background(), "OWNER/REPO")
+	pendingCount, err := store.CountPendingRepoScansByRepository(defaultScopeContext(), "OWNER/REPO")
 	if err != nil {
 		t.Fatalf("count pending repo scans failed: %v", err)
 	}
@@ -764,7 +778,7 @@ func TestPostgresStoreRepoQueueLifecycle(t *testing.T) {
 	}).AddRow(queued.ID, "default", "default", "owner/repo", "running", now, nil, 0, 0, 0, false, "", 50, 80)
 	mock.ExpectQuery("WITH next_repo_scan AS").WithArgs("default", "default").WillReturnRows(claimRows)
 
-	claimed, err := store.ClaimNextQueuedRepoScan(context.Background())
+	claimed, err := store.ClaimNextQueuedRepoScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("claim queued repo scan failed: %v", err)
 	}
@@ -784,7 +798,7 @@ func TestPostgresStoreRepoQueueLifecycle(t *testing.T) {
 		WithArgs(claimed.ID, "default", "default").
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
-	if err := store.RequeueRepoScan(context.Background(), claimed.ID); err != nil {
+	if err := store.RequeueRepoScan(defaultScopeContext(), claimed.ID); err != nil {
 		t.Fatalf("requeue repo scan failed: %v", err)
 	}
 

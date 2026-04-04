@@ -65,6 +65,15 @@ func ScopeFromContext(ctx context.Context) Scope {
 	return Scope{}.Normalize()
 }
 
+// RequireScope returns the active scope and fails when context is unscoped.
+func RequireScope(ctx context.Context) (Scope, error) {
+	scope, ok := LookupScope(ctx)
+	if !ok {
+		return Scope{}, ErrScopeRequired
+	}
+	return scope.Normalize(), nil
+}
+
 // WithDefaultScope applies fallback scope only when context has no scope.
 func WithDefaultScope(ctx context.Context, fallback Scope) context.Context {
 	if _, ok := LookupScope(ctx); ok {

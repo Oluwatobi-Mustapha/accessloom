@@ -12,6 +12,9 @@ import (
 // ErrNotFound indicates the requested record does not exist.
 var ErrNotFound = errors.New("record not found")
 
+// ErrScopeRequired indicates tenant/workspace scope must be provided in context.
+var ErrScopeRequired = errors.New("scope is required")
+
 const (
 	ScanEventLevelDebug = "debug"
 	ScanEventLevelInfo  = "info"

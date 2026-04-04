@@ -299,7 +299,7 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 		t.Fatal("expected second scan id in post response")
 	}
 	for i := 0; i < 2; i++ {
-		processed, err := svc.ProcessNextQueuedScan(context.Background())
+		processed, err := svc.ProcessNextQueuedScan(defaultScopeContext())
 		if err != nil {
 			t.Fatalf("process queued scan: %v", err)
 		}
@@ -438,7 +438,7 @@ func TestRouterRunsScanAndListsData(t *testing.T) {
 	if repoW.Code != http.StatusAccepted {
 		t.Fatalf("expected repo scan 202, got %d", repoW.Code)
 	}
-	processedRepo, processRepoErr := svc.ProcessNextQueuedRepoScan(context.Background())
+	processedRepo, processRepoErr := svc.ProcessNextQueuedRepoScan(defaultScopeContext())
 	if processRepoErr != nil {
 		t.Fatalf("process queued repo scan: %v", processRepoErr)
 	}
@@ -696,11 +696,11 @@ func TestRouterSupportsFindingsSortParameters(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC)
 
-	scan, err := store.CreateScan(context.Background(), "aws", now)
+	scan, err := store.CreateScan(defaultScopeContext(), "aws", now)
 	if err != nil {
 		t.Fatalf("create scan: %v", err)
 	}
-	if err := store.UpsertFindings(context.Background(), scan.ID, []domain.Finding{
+	if err := store.UpsertFindings(defaultScopeContext(), scan.ID, []domain.Finding{
 		{ID: "f-critical", Severity: domain.SeverityCritical, Type: domain.FindingEscalationPath, Title: "critical", CreatedAt: now},
 		{ID: "f-info", Severity: domain.SeverityInfo, Type: domain.FindingOwnerless, Title: "info", CreatedAt: now},
 		{ID: "f-high", Severity: domain.SeverityHigh, Type: domain.FindingRiskyTrustPolicy, Title: "high", CreatedAt: now},
@@ -737,18 +737,18 @@ func TestRouterSupportsScansSortParameters(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 20, 9, 0, 0, 0, time.UTC)
 
-	scanA, err := store.CreateScan(context.Background(), "aws", now)
+	scanA, err := store.CreateScan(defaultScopeContext(), "aws", now)
 	if err != nil {
 		t.Fatalf("create scan A: %v", err)
 	}
-	scanB, err := store.CreateScan(context.Background(), "aws", now.Add(1*time.Minute))
+	scanB, err := store.CreateScan(defaultScopeContext(), "aws", now.Add(1*time.Minute))
 	if err != nil {
 		t.Fatalf("create scan B: %v", err)
 	}
-	if err := store.CompleteScan(context.Background(), scanA.ID, "completed", now.Add(2*time.Minute), 2, 7, ""); err != nil {
+	if err := store.CompleteScan(defaultScopeContext(), scanA.ID, "completed", now.Add(2*time.Minute), 2, 7, ""); err != nil {
 		t.Fatalf("complete scan A: %v", err)
 	}
-	if err := store.CompleteScan(context.Background(), scanB.ID, "completed", now.Add(3*time.Minute), 2, 1, ""); err != nil {
+	if err := store.CompleteScan(defaultScopeContext(), scanB.ID, "completed", now.Add(3*time.Minute), 2, 1, ""); err != nil {
 		t.Fatalf("complete scan B: %v", err)
 	}
 
@@ -1016,7 +1016,7 @@ func TestRouterFindingTriageWorkflowEndpoints(t *testing.T) {
 	if triggerBody.Scan.ID == "" {
 		t.Fatal("expected scan id in trigger response")
 	}
-	processed, err := svc.ProcessNextQueuedScan(context.Background())
+	processed, err := svc.ProcessNextQueuedScan(defaultScopeContext())
 	if err != nil {
 		t.Fatalf("process queued scan: %v", err)
 	}
@@ -1472,7 +1472,7 @@ func TestRouterScanDiffAndEventsNotFound(t *testing.T) {
 		t.Fatalf("expected finding-by-id 404 for missing finding, got %d", findingW.Code)
 	}
 
-	scan, err := store.CreateScan(context.Background(), "aws", time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC))
+	scan, err := store.CreateScan(defaultScopeContext(), "aws", time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("create scan: %v", err)
 	}
