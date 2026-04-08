@@ -1166,60 +1166,6 @@ func apiKeyAuthMiddleware(keys []string, scopedKeys map[string][]string, tokenVe
 	}
 }
 
-func requireWriteKeyMiddleware(writeKeys []string, scopedKeys map[string][]string) gin.HandlerFunc {
-	allowed := []string{}
-	for _, key := range writeKeys {
-		trimmed := strings.TrimSpace(key)
-		if trimmed == "" {
-			continue
-		}
-		allowed = append(allowed, trimmed)
-	}
-
-	// When scoped auth exists (scoped API keys or OIDC token scopes), prefer scope-based write checks.
-	// This keeps API keys backward compatible while allowing OAuth/OIDC write scopes.
-	return func(c *gin.Context) {
-		if scopeSetValue, exists := c.Get("auth.scope_set"); exists {
-			scopes, ok := scopeSetValue.(scopeSet)
-			if !ok || !scopes.has(scopeWrite) {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-				return
-			}
-			c.Next()
-			return
-		}
-
-		if len(scopedKeys) > 0 {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-			return
-		}
-
-		if len(allowed) == 0 {
-			// When auth middleware is disabled (test/local stubs), keep route behavior unchanged.
-			// In authenticated API-key mode, empty write-key config must not grant write access.
-			if _, exists := c.Get("auth.api_key"); exists {
-				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-				return
-			}
-			c.Next()
-			return
-		}
-
-		apiKeyValue, exists := c.Get("auth.api_key")
-		if !exists {
-			// If API key auth is disabled, write authorization cannot be enforced.
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-			return
-		}
-		apiKey, _ := apiKeyValue.(string)
-		if !keyInList(allowed, apiKey) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-			return
-		}
-		c.Next()
-	}
-}
-
 func keyInList(keys []string, candidate string) bool {
 	for _, key := range keys {
 		if secureKeyEquals(key, candidate) {
@@ -1243,36 +1189,6 @@ func secureKeyEquals(expected string, candidate string) bool {
 		return false
 	}
 	return subtle.ConstantTimeCompare([]byte(expected), []byte(candidate)) == 1
-}
-
-func requireReadableScopeMiddleware(scopedKeys map[string][]string, tokenVerifier TokenVerifier) gin.HandlerFunc {
-	if len(scopedKeys) == 0 && tokenVerifier == nil {
-		return func(c *gin.Context) { c.Next() }
-	}
-	return func(c *gin.Context) {
-		// Backward compatibility: in legacy API-key mode (no scoped keys), an API key
-		// authenticated request remains read-authorized even when OIDC is also enabled.
-		if len(scopedKeys) == 0 {
-			if _, hasAPIKey := c.Get("auth.api_key"); hasAPIKey {
-				if _, hasScopes := c.Get("auth.scope_set"); !hasScopes {
-					c.Next()
-					return
-				}
-			}
-		}
-
-		scopeSetValue, exists := c.Get("auth.scope_set")
-		if !exists {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-			return
-		}
-		scopes, ok := scopeSetValue.(scopeSet)
-		if !ok || !scopes.has(scopeRead) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-			return
-		}
-		c.Next()
-	}
 }
 
 type ipRateLimiter struct {
