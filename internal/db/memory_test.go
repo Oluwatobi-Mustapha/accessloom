@@ -551,3 +551,115 @@ func TestMemoryStoreRequiresScopeContext(t *testing.T) {
 		t.Fatalf("expected ErrScopeRequired, got %v", err)
 	}
 }
+
+func TestMemoryStoreAuthzEntityAttributesLifecycle(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := defaultScopeContext()
+
+	err := store.UpsertAuthzEntityAttributes(ctx, AuthzEntityAttributes{
+		EntityKind:     AuthzEntityKindResource,
+		EntityType:     "finding",
+		EntityID:       "finding-1",
+		OwnerTeam:      "platform_sec",
+		Environment:    AuthzAttributeEnvProd,
+		RiskTier:       AuthzAttributeRiskTierHigh,
+		Classification: AuthzAttributeClassificationConfidential,
+	})
+	if err != nil {
+		t.Fatalf("upsert authz attributes: %v", err)
+	}
+
+	attrs, err := store.GetAuthzEntityAttributes(ctx, AuthzEntityKindResource, "finding", "finding-1")
+	if err != nil {
+		t.Fatalf("get authz attributes: %v", err)
+	}
+	if attrs.OwnerTeam != "platform_sec" || attrs.Environment != AuthzAttributeEnvProd {
+		t.Fatalf("unexpected authz attributes: %+v", attrs)
+	}
+
+	otherScope := WithScope(ctx, Scope{TenantID: "tenant-b", WorkspaceID: "workspace-b"})
+	if _, err := store.GetAuthzEntityAttributes(otherScope, AuthzEntityKindResource, "finding", "finding-1"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected scoped authz attributes isolation, got %v", err)
+	}
+
+	if err := store.UpsertAuthzEntityAttributes(ctx, AuthzEntityAttributes{
+		EntityKind:  AuthzEntityKindResource,
+		EntityType:  "finding",
+		EntityID:    "finding-2",
+		Environment: "qa",
+	}); err == nil {
+		t.Fatal("expected invalid authz env error")
+	}
+}
+
+func TestMemoryStoreAuthzRelationshipLifecycle(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := defaultScopeContext()
+	expiredAt := time.Now().UTC().Add(-1 * time.Minute)
+
+	if err := store.UpsertAuthzRelationship(ctx, AuthzRelationship{
+		SubjectType: "user",
+		SubjectID:   "alice",
+		Relation:    AuthzRelationshipManages,
+		ObjectType:  "workspace",
+		ObjectID:    "workspace-1",
+		Source:      "sync",
+	}); err != nil {
+		t.Fatalf("upsert active authz relationship: %v", err)
+	}
+	if err := store.UpsertAuthzRelationship(ctx, AuthzRelationship{
+		SubjectType: "user",
+		SubjectID:   "alice",
+		Relation:    AuthzRelationshipDelegatedAdmin,
+		ObjectType:  "workspace",
+		ObjectID:    "workspace-1",
+		ExpiresAt:   &expiredAt,
+	}); err != nil {
+		t.Fatalf("upsert expired authz relationship: %v", err)
+	}
+
+	relationships, err := store.ListAuthzRelationships(ctx, AuthzRelationshipFilter{
+		SubjectType: "user",
+		SubjectID:   "alice",
+	}, 10)
+	if err != nil {
+		t.Fatalf("list active authz relationships: %v", err)
+	}
+	if len(relationships) != 1 || relationships[0].Relation != AuthzRelationshipManages {
+		t.Fatalf("unexpected active relationships: %+v", relationships)
+	}
+
+	withExpired, err := store.ListAuthzRelationships(ctx, AuthzRelationshipFilter{
+		SubjectType:    "user",
+		SubjectID:      "alice",
+		IncludeExpired: true,
+	}, 10)
+	if err != nil {
+		t.Fatalf("list relationships with expired: %v", err)
+	}
+	if len(withExpired) != 2 {
+		t.Fatalf("expected 2 relationships including expired, got %d", len(withExpired))
+	}
+
+	if err := store.DeleteAuthzRelationship(ctx, AuthzRelationship{
+		SubjectType: "user",
+		SubjectID:   "alice",
+		Relation:    AuthzRelationshipManages,
+		ObjectType:  "workspace",
+		ObjectID:    "workspace-1",
+	}); err != nil {
+		t.Fatalf("delete authz relationship: %v", err)
+	}
+
+	remaining, err := store.ListAuthzRelationships(ctx, AuthzRelationshipFilter{
+		SubjectType:    "user",
+		SubjectID:      "alice",
+		IncludeExpired: true,
+	}, 10)
+	if err != nil {
+		t.Fatalf("list remaining authz relationships: %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].Relation != AuthzRelationshipDelegatedAdmin {
+		t.Fatalf("unexpected remaining relationships: %+v", remaining)
+	}
+}

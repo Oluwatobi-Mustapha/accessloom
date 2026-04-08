@@ -159,3 +159,25 @@ func TestEighthMigrationContainsPostgresRLSGuardrails(t *testing.T) {
 		}
 	}
 }
+
+func TestNinthMigrationContainsAuthzABACAndReBACDataTables(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "000009_authz_abac_rebac_data.up.sql")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	text := string(content)
+	required := []string{
+		"CREATE TABLE IF NOT EXISTS authz_entity_attributes",
+		"CREATE TABLE IF NOT EXISTS authz_relationships",
+		"idx_authz_entity_attributes_scope_kind_type",
+		"idx_authz_relationships_scope_subject_relation",
+		"CREATE POLICY authz_entity_attributes_scope_isolation",
+		"CREATE POLICY authz_relationships_scope_isolation",
+	}
+	for _, item := range required {
+		if !strings.Contains(text, item) {
+			t.Fatalf("expected authz data migration item %q", item)
+		}
+	}
+}

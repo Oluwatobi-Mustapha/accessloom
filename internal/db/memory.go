@@ -27,6 +27,8 @@ type MemoryStore struct {
 	repoFindings map[string]domain.Finding
 
 	rawAssets     map[string]providers.RawAsset
+	authzAttrs    map[string]AuthzEntityAttributes
+	authzRels     map[string]AuthzRelationship
 	identities    map[string]domain.Identity
 	policies      map[string]domain.Policy
 	relationships map[string]domain.Relationship
@@ -47,6 +49,8 @@ func NewMemoryStore() *MemoryStore {
 		repoFindings: map[string]domain.Finding{},
 
 		rawAssets:     map[string]providers.RawAsset{},
+		authzAttrs:    map[string]AuthzEntityAttributes{},
+		authzRels:     map[string]AuthzRelationship{},
 		identities:    map[string]domain.Identity{},
 		policies:      map[string]domain.Policy{},
 		relationships: map[string]domain.Relationship{},
@@ -464,6 +468,176 @@ func (m *MemoryStore) ListFindingsByScan(ctx context.Context, scanID string, lim
 	return result, nil
 }
 
+// UpsertAuthzEntityAttributes creates or updates trusted authorization attributes.
+func (m *MemoryStore) UpsertAuthzEntityAttributes(ctx context.Context, attributes AuthzEntityAttributes) error {
+	normalized, err := NormalizeAuthzEntityAttributesForWrite(attributes)
+	if err != nil {
+		return err
+	}
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	scoped := scope.Normalize()
+	normalized.TenantID = scoped.TenantID
+	normalized.WorkspaceID = scoped.WorkspaceID
+	m.authzAttrs[authzEntityScopeKey(scoped, normalized.EntityKind, normalized.EntityType, normalized.EntityID)] = normalized
+	return nil
+}
+
+// GetAuthzEntityAttributes returns trusted authorization attributes for one entity.
+func (m *MemoryStore) GetAuthzEntityAttributes(ctx context.Context, entityKind string, entityType string, entityID string) (AuthzEntityAttributes, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return AuthzEntityAttributes{}, err
+	}
+	lookup, err := NormalizeAuthzEntityAttributesForWrite(AuthzEntityAttributes{
+		EntityKind: entityKind,
+		EntityType: entityType,
+		EntityID:   entityID,
+	})
+	if err != nil {
+		return AuthzEntityAttributes{}, err
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	scoped := scope.Normalize()
+	record, exists := m.authzAttrs[authzEntityScopeKey(scoped, lookup.EntityKind, lookup.EntityType, lookup.EntityID)]
+	if !exists {
+		return AuthzEntityAttributes{}, ErrNotFound
+	}
+	return record, nil
+}
+
+// UpsertAuthzRelationship creates or updates one scoped ReBAC tuple.
+func (m *MemoryStore) UpsertAuthzRelationship(ctx context.Context, relationship AuthzRelationship) error {
+	normalized, err := NormalizeAuthzRelationshipForWrite(relationship)
+	if err != nil {
+		return err
+	}
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	scoped := scope.Normalize()
+	normalized.TenantID = scoped.TenantID
+	normalized.WorkspaceID = scoped.WorkspaceID
+	key := authzRelationshipScopeKey(scoped, normalized.SubjectType, normalized.SubjectID, normalized.Relation, normalized.ObjectType, normalized.ObjectID)
+	if existing, exists := m.authzRels[key]; exists {
+		normalized.CreatedAt = existing.CreatedAt
+	}
+	m.authzRels[key] = normalized
+	return nil
+}
+
+// DeleteAuthzRelationship removes one scoped ReBAC tuple.
+func (m *MemoryStore) DeleteAuthzRelationship(ctx context.Context, relationship AuthzRelationship) error {
+	normalized, err := NormalizeAuthzRelationshipForWrite(relationship)
+	if err != nil {
+		return err
+	}
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	scoped := scope.Normalize()
+	key := authzRelationshipScopeKey(scoped, normalized.SubjectType, normalized.SubjectID, normalized.Relation, normalized.ObjectType, normalized.ObjectID)
+	if _, exists := m.authzRels[key]; !exists {
+		return ErrNotFound
+	}
+	delete(m.authzRels, key)
+	return nil
+}
+
+// ListAuthzRelationships returns filtered scoped ReBAC tuples.
+func (m *MemoryStore) ListAuthzRelationships(ctx context.Context, filter AuthzRelationshipFilter, limit int) ([]AuthzRelationship, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	normalizedScope := scope.Normalize()
+	subjectType := strings.ToLower(strings.TrimSpace(filter.SubjectType))
+	subjectID := strings.TrimSpace(filter.SubjectID)
+	relation := strings.ToLower(strings.TrimSpace(filter.Relation))
+	if relation != "" {
+		if _, ok := validAuthzRelationships[relation]; !ok {
+			return nil, fmt.Errorf("invalid relation value")
+		}
+	}
+	objectType := strings.ToLower(strings.TrimSpace(filter.ObjectType))
+	objectID := strings.TrimSpace(filter.ObjectID)
+	now := time.Now().UTC()
+
+	records := make([]AuthzRelationship, 0, len(m.authzRels))
+	for _, relationship := range m.authzRels {
+		if !MatchScope(normalizedScope, relationship.TenantID, relationship.WorkspaceID) {
+			continue
+		}
+		if subjectType != "" && relationship.SubjectType != subjectType {
+			continue
+		}
+		if subjectID != "" && relationship.SubjectID != subjectID {
+			continue
+		}
+		if relation != "" && relationship.Relation != relation {
+			continue
+		}
+		if objectType != "" && relationship.ObjectType != objectType {
+			continue
+		}
+		if objectID != "" && relationship.ObjectID != objectID {
+			continue
+		}
+		if !filter.IncludeExpired && relationship.ExpiresAt != nil && !relationship.ExpiresAt.After(now) {
+			continue
+		}
+		records = append(records, relationship)
+	}
+
+	sort.Slice(records, func(i, j int) bool {
+		left := records[i]
+		right := records[j]
+		if left.SubjectType != right.SubjectType {
+			return left.SubjectType < right.SubjectType
+		}
+		if left.SubjectID != right.SubjectID {
+			return left.SubjectID < right.SubjectID
+		}
+		if left.Relation != right.Relation {
+			return left.Relation < right.Relation
+		}
+		if left.ObjectType != right.ObjectType {
+			return left.ObjectType < right.ObjectType
+		}
+		if left.ObjectID != right.ObjectID {
+			return left.ObjectID < right.ObjectID
+		}
+		return left.UpdatedAt.After(right.UpdatedAt)
+	})
+	if limit > 0 && len(records) > limit {
+		records = records[:limit]
+	}
+	return records, nil
+}
+
 // ListIdentities returns identities filtered by scan/provider/type/name.
 func (m *MemoryStore) ListIdentities(ctx context.Context, filter IdentityFilter, limit int) ([]domain.Identity, error) {
 	m.mu.RLock()
@@ -622,6 +796,16 @@ func scanKeyPrefix(key string) string {
 func findingScopeKey(scope Scope, findingID string) string {
 	normalized := scope.Normalize()
 	return normalized.TenantID + "|" + normalized.WorkspaceID + "|" + strings.TrimSpace(findingID)
+}
+
+func authzEntityScopeKey(scope Scope, entityKind string, entityType string, entityID string) string {
+	normalized := scope.Normalize()
+	return normalized.TenantID + "|" + normalized.WorkspaceID + "|" + strings.ToLower(strings.TrimSpace(entityKind)) + "|" + strings.ToLower(strings.TrimSpace(entityType)) + "|" + strings.TrimSpace(entityID)
+}
+
+func authzRelationshipScopeKey(scope Scope, subjectType string, subjectID string, relation string, objectType string, objectID string) string {
+	normalized := scope.Normalize()
+	return normalized.TenantID + "|" + normalized.WorkspaceID + "|" + strings.ToLower(strings.TrimSpace(subjectType)) + "|" + strings.TrimSpace(subjectID) + "|" + strings.ToLower(strings.TrimSpace(relation)) + "|" + strings.ToLower(strings.TrimSpace(objectType)) + "|" + strings.TrimSpace(objectID)
 }
 
 func normalizeFindingTriageStateForWrite(state FindingTriageState) (FindingTriageState, error) {

@@ -808,6 +808,218 @@ func TestPostgresStoreRepoQueueLifecycle(t *testing.T) {
 	}
 }
 
+func TestPostgresStoreAuthzEntityAttributesLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	mock.ExpectExec("INSERT INTO authz_entity_attributes").
+		WithArgs(
+			"default",
+			"default",
+			AuthzEntityKindResource,
+			"finding",
+			"finding-1",
+			"platform_sec",
+			AuthzAttributeEnvProd,
+			AuthzAttributeRiskTierHigh,
+			AuthzAttributeClassificationConfidential,
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if err := store.UpsertAuthzEntityAttributes(defaultScopeContext(), AuthzEntityAttributes{
+		EntityKind:     AuthzEntityKindResource,
+		EntityType:     "finding",
+		EntityID:       "finding-1",
+		OwnerTeam:      "platform_sec",
+		Environment:    AuthzAttributeEnvProd,
+		RiskTier:       AuthzAttributeRiskTierHigh,
+		Classification: AuthzAttributeClassificationConfidential,
+	}); err != nil {
+		t.Fatalf("upsert authz attributes: %v", err)
+	}
+
+	now := time.Now().UTC()
+	rows := sqlmock.NewRows([]string{
+		"tenant_id",
+		"workspace_id",
+		"entity_kind",
+		"entity_type",
+		"entity_id",
+		"owner_team",
+		"env",
+		"risk_tier",
+		"classification",
+		"updated_at",
+	}).AddRow("default", "default", AuthzEntityKindResource, "finding", "finding-1", "platform_sec", AuthzAttributeEnvProd, AuthzAttributeRiskTierHigh, AuthzAttributeClassificationConfidential, now)
+	mock.ExpectQuery("SELECT tenant_id, workspace_id, entity_kind, entity_type, entity_id").
+		WithArgs("default", "default", AuthzEntityKindResource, "finding", "finding-1").
+		WillReturnRows(rows)
+
+	record, err := store.GetAuthzEntityAttributes(defaultScopeContext(), AuthzEntityKindResource, "finding", "finding-1")
+	if err != nil {
+		t.Fatalf("get authz attributes: %v", err)
+	}
+	if record.OwnerTeam != "platform_sec" || record.Environment != AuthzAttributeEnvProd {
+		t.Fatalf("unexpected authz attributes %+v", record)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreAuthzRelationshipLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	mock.ExpectExec("INSERT INTO authz_relationships").
+		WithArgs(
+			"default",
+			"default",
+			"user",
+			"alice",
+			AuthzRelationshipManages,
+			"workspace",
+			"workspace-1",
+			"sync",
+			nil,
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if err := store.UpsertAuthzRelationship(defaultScopeContext(), AuthzRelationship{
+		SubjectType: "user",
+		SubjectID:   "alice",
+		Relation:    AuthzRelationshipManages,
+		ObjectType:  "workspace",
+		ObjectID:    "workspace-1",
+		Source:      "sync",
+	}); err != nil {
+		t.Fatalf("upsert authz relationship: %v", err)
+	}
+
+	now := time.Now().UTC()
+	rows := sqlmock.NewRows([]string{
+		"tenant_id",
+		"workspace_id",
+		"subject_type",
+		"subject_id",
+		"relation",
+		"object_type",
+		"object_id",
+		"source",
+		"expires_at",
+		"created_at",
+		"updated_at",
+	}).AddRow("default", "default", "user", "alice", AuthzRelationshipManages, "workspace", "workspace-1", "sync", nil, now, now)
+	mock.ExpectQuery("SELECT tenant_id, workspace_id, subject_type, subject_id, relation, object_type, object_id, source, expires_at, created_at, updated_at").
+		WithArgs("default", "default", "user", "alice", sqlmock.AnyArg(), 10).
+		WillReturnRows(rows)
+
+	relationships, err := store.ListAuthzRelationships(defaultScopeContext(), AuthzRelationshipFilter{
+		SubjectType: "user",
+		SubjectID:   "alice",
+	}, 10)
+	if err != nil {
+		t.Fatalf("list authz relationships: %v", err)
+	}
+	if len(relationships) != 1 || relationships[0].Relation != AuthzRelationshipManages {
+		t.Fatalf("unexpected authz relationships: %+v", relationships)
+	}
+
+	mock.ExpectExec("DELETE FROM authz_relationships").
+		WithArgs("default", "default", "user", "alice", AuthzRelationshipManages, "workspace", "workspace-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := store.DeleteAuthzRelationship(defaultScopeContext(), AuthzRelationship{
+		SubjectType: "user",
+		SubjectID:   "alice",
+		Relation:    AuthzRelationshipManages,
+		ObjectType:  "workspace",
+		ObjectID:    "workspace-1",
+	}); err != nil {
+		t.Fatalf("delete authz relationship: %v", err)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreListAuthzRelationshipsWithFullFilters(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	now := time.Now().UTC()
+	rows := sqlmock.NewRows([]string{
+		"tenant_id",
+		"workspace_id",
+		"subject_type",
+		"subject_id",
+		"relation",
+		"object_type",
+		"object_id",
+		"source",
+		"expires_at",
+		"created_at",
+		"updated_at",
+	}).AddRow("default", "default", "user", "alice", AuthzRelationshipManages, "workspace", "workspace-1", "manual", now, now, now)
+	mock.ExpectQuery("SELECT tenant_id, workspace_id, subject_type, subject_id, relation, object_type, object_id, source, expires_at, created_at, updated_at").
+		WithArgs("default", "default", "user", "alice", AuthzRelationshipManages, "workspace", "workspace-1").
+		WillReturnRows(rows)
+
+	relationships, err := store.ListAuthzRelationships(defaultScopeContext(), AuthzRelationshipFilter{
+		SubjectType:    "user",
+		SubjectID:      "alice",
+		Relation:       AuthzRelationshipManages,
+		ObjectType:     "workspace",
+		ObjectID:       "workspace-1",
+		IncludeExpired: true,
+	}, 0)
+	if err != nil {
+		t.Fatalf("list authz relationships with full filters: %v", err)
+	}
+	if len(relationships) != 1 {
+		t.Fatalf("expected one relationship, got %d", len(relationships))
+	}
+	if relationships[0].ExpiresAt == nil {
+		t.Fatalf("expected expires_at to be populated")
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreListAuthzRelationshipsRejectsInvalidRelationFilter(t *testing.T) {
+	db, _, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	if _, err := store.ListAuthzRelationships(defaultScopeContext(), AuthzRelationshipFilter{
+		Relation: "viewer",
+	}, 10); err == nil {
+		t.Fatal("expected invalid relation filter error")
+	}
+}
+
 func TestPostgresStoreInjectScopeCTEBypassWhenDisabled(t *testing.T) {
 	store := &PostgresStore{}
 	query := "SELECT id FROM scans WHERE tenant_id = $1"

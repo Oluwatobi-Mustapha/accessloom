@@ -838,6 +838,247 @@ func (p *PostgresStore) ListFindingsByScan(ctx context.Context, scanID string, l
 	return findingsFromSQLRows(rows)
 }
 
+// UpsertAuthzEntityAttributes creates or updates trusted authorization attributes.
+func (p *PostgresStore) UpsertAuthzEntityAttributes(ctx context.Context, attributes AuthzEntityAttributes) error {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+	normalized, err := NormalizeAuthzEntityAttributesForWrite(attributes)
+	if err != nil {
+		return err
+	}
+	normalized.TenantID = scope.TenantID
+	normalized.WorkspaceID = scope.WorkspaceID
+
+	_, err = p.execContext(
+		ctx,
+		`INSERT INTO authz_entity_attributes (
+			tenant_id, workspace_id, entity_kind, entity_type, entity_id, owner_team, env, risk_tier, classification, updated_at
+		) VALUES ($1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), NULLIF($8, ''), NULLIF($9, ''), $10)
+		ON CONFLICT (tenant_id, workspace_id, entity_kind, entity_type, entity_id)
+		DO UPDATE SET
+			owner_team = EXCLUDED.owner_team,
+			env = EXCLUDED.env,
+			risk_tier = EXCLUDED.risk_tier,
+			classification = EXCLUDED.classification,
+			updated_at = EXCLUDED.updated_at`,
+		normalized.TenantID,
+		normalized.WorkspaceID,
+		normalized.EntityKind,
+		normalized.EntityType,
+		normalized.EntityID,
+		normalized.OwnerTeam,
+		normalized.Environment,
+		normalized.RiskTier,
+		normalized.Classification,
+		normalized.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert authz entity attributes: %w", err)
+	}
+	return nil
+}
+
+// GetAuthzEntityAttributes returns trusted authorization attributes for one entity.
+func (p *PostgresStore) GetAuthzEntityAttributes(ctx context.Context, entityKind string, entityType string, entityID string) (AuthzEntityAttributes, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return AuthzEntityAttributes{}, err
+	}
+	normalized, err := NormalizeAuthzEntityAttributesForWrite(AuthzEntityAttributes{
+		EntityKind: entityKind,
+		EntityType: entityType,
+		EntityID:   entityID,
+	})
+	if err != nil {
+		return AuthzEntityAttributes{}, err
+	}
+
+	row := p.queryRowContext(
+		ctx,
+		`SELECT tenant_id, workspace_id, entity_kind, entity_type, entity_id, COALESCE(owner_team, ''), COALESCE(env, ''), COALESCE(risk_tier, ''), COALESCE(classification, ''), updated_at
+		 FROM authz_entity_attributes
+		 WHERE tenant_id = $1
+		   AND workspace_id = $2
+		   AND entity_kind = $3
+		   AND entity_type = $4
+		   AND entity_id = $5`,
+		scope.TenantID,
+		scope.WorkspaceID,
+		normalized.EntityKind,
+		normalized.EntityType,
+		normalized.EntityID,
+	)
+	record, err := scanAuthzEntityAttributes(row)
+	if err != nil {
+		if errorsIsNoRows(err) {
+			return AuthzEntityAttributes{}, ErrNotFound
+		}
+		return AuthzEntityAttributes{}, fmt.Errorf("query authz entity attributes: %w", err)
+	}
+	return record, nil
+}
+
+// UpsertAuthzRelationship creates or updates one scoped ReBAC tuple.
+func (p *PostgresStore) UpsertAuthzRelationship(ctx context.Context, relationship AuthzRelationship) error {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+	normalized, err := NormalizeAuthzRelationshipForWrite(relationship)
+	if err != nil {
+		return err
+	}
+	normalized.TenantID = scope.TenantID
+	normalized.WorkspaceID = scope.WorkspaceID
+
+	_, err = p.execContext(
+		ctx,
+		`INSERT INTO authz_relationships (
+			tenant_id, workspace_id, subject_type, subject_id, relation, object_type, object_id, source, expires_at, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT (tenant_id, workspace_id, subject_type, subject_id, relation, object_type, object_id)
+		DO UPDATE SET
+			source = EXCLUDED.source,
+			expires_at = EXCLUDED.expires_at,
+			updated_at = EXCLUDED.updated_at`,
+		normalized.TenantID,
+		normalized.WorkspaceID,
+		normalized.SubjectType,
+		normalized.SubjectID,
+		normalized.Relation,
+		normalized.ObjectType,
+		normalized.ObjectID,
+		normalized.Source,
+		normalized.ExpiresAt,
+		normalized.CreatedAt,
+		normalized.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert authz relationship: %w", err)
+	}
+	return nil
+}
+
+// DeleteAuthzRelationship removes one scoped ReBAC tuple.
+func (p *PostgresStore) DeleteAuthzRelationship(ctx context.Context, relationship AuthzRelationship) error {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+	normalized, err := NormalizeAuthzRelationshipForWrite(relationship)
+	if err != nil {
+		return err
+	}
+	result, err := p.execContext(
+		ctx,
+		`DELETE FROM authz_relationships
+		 WHERE tenant_id = $1
+		   AND workspace_id = $2
+		   AND subject_type = $3
+		   AND subject_id = $4
+		   AND relation = $5
+		   AND object_type = $6
+		   AND object_id = $7`,
+		scope.TenantID,
+		scope.WorkspaceID,
+		normalized.SubjectType,
+		normalized.SubjectID,
+		normalized.Relation,
+		normalized.ObjectType,
+		normalized.ObjectID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete authz relationship: %w", err)
+	}
+	if err := ensureRowsAffected(result); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ListAuthzRelationships returns scoped ReBAC tuples using optional filters.
+func (p *PostgresStore) ListAuthzRelationships(ctx context.Context, filter AuthzRelationshipFilter, limit int) ([]AuthzRelationship, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	subjectType := strings.ToLower(strings.TrimSpace(filter.SubjectType))
+	subjectID := strings.TrimSpace(filter.SubjectID)
+	relation := strings.ToLower(strings.TrimSpace(filter.Relation))
+	if relation != "" {
+		if _, ok := validAuthzRelationships[relation]; !ok {
+			return nil, fmt.Errorf("invalid relation value")
+		}
+	}
+	objectType := strings.ToLower(strings.TrimSpace(filter.ObjectType))
+	objectID := strings.TrimSpace(filter.ObjectID)
+
+	args := []any{scope.TenantID, scope.WorkspaceID}
+	query := strings.Builder{}
+	query.WriteString(`SELECT tenant_id, workspace_id, subject_type, subject_id, relation, object_type, object_id, source, expires_at, created_at, updated_at
+		FROM authz_relationships
+		WHERE tenant_id = $1
+		  AND workspace_id = $2`)
+
+	next := 3
+	if subjectType != "" {
+		query.WriteString(fmt.Sprintf(" AND subject_type = $%d", next))
+		args = append(args, subjectType)
+		next++
+	}
+	if subjectID != "" {
+		query.WriteString(fmt.Sprintf(" AND subject_id = $%d", next))
+		args = append(args, subjectID)
+		next++
+	}
+	if relation != "" {
+		query.WriteString(fmt.Sprintf(" AND relation = $%d", next))
+		args = append(args, relation)
+		next++
+	}
+	if objectType != "" {
+		query.WriteString(fmt.Sprintf(" AND object_type = $%d", next))
+		args = append(args, objectType)
+		next++
+	}
+	if objectID != "" {
+		query.WriteString(fmt.Sprintf(" AND object_id = $%d", next))
+		args = append(args, objectID)
+		next++
+	}
+	if !filter.IncludeExpired {
+		query.WriteString(fmt.Sprintf(" AND (expires_at IS NULL OR expires_at > $%d)", next))
+		args = append(args, time.Now().UTC())
+		next++
+	}
+	query.WriteString(" ORDER BY subject_type ASC, subject_id ASC, relation ASC, object_type ASC, object_id ASC")
+	if limit > 0 {
+		query.WriteString(fmt.Sprintf(" LIMIT $%d", next))
+		args = append(args, limit)
+	}
+
+	rows, err := p.queryContext(ctx, query.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("query authz relationships: %w", err)
+	}
+	defer rows.Close()
+
+	result := []AuthzRelationship{}
+	for rows.Next() {
+		record, scanErr := scanAuthzRelationship(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("authz relationship row: %w", scanErr)
+		}
+		result = append(result, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("authz relationship rows: %w", err)
+	}
+	return result, nil
+}
+
 // ListIdentities returns identities filtered by scan/provider/type/name prefix.
 func (p *PostgresStore) ListIdentities(ctx context.Context, filter IdentityFilter, limit int) ([]domain.Identity, error) {
 	if limit <= 0 {
@@ -1761,6 +2002,53 @@ func scanScanRecord(scanner scanner) (ScanRecord, error) {
 		finished := finishedAt.Time.UTC()
 		record.FinishedAt = &finished
 	}
+	return record, nil
+}
+
+func scanAuthzEntityAttributes(scanner scanner) (AuthzEntityAttributes, error) {
+	var record AuthzEntityAttributes
+	if err := scanner.Scan(
+		&record.TenantID,
+		&record.WorkspaceID,
+		&record.EntityKind,
+		&record.EntityType,
+		&record.EntityID,
+		&record.OwnerTeam,
+		&record.Environment,
+		&record.RiskTier,
+		&record.Classification,
+		&record.UpdatedAt,
+	); err != nil {
+		return AuthzEntityAttributes{}, err
+	}
+	record.UpdatedAt = record.UpdatedAt.UTC()
+	return record, nil
+}
+
+func scanAuthzRelationship(scanner scanner) (AuthzRelationship, error) {
+	var record AuthzRelationship
+	var expiresAt sql.NullTime
+	if err := scanner.Scan(
+		&record.TenantID,
+		&record.WorkspaceID,
+		&record.SubjectType,
+		&record.SubjectID,
+		&record.Relation,
+		&record.ObjectType,
+		&record.ObjectID,
+		&record.Source,
+		&expiresAt,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	); err != nil {
+		return AuthzRelationship{}, err
+	}
+	if expiresAt.Valid {
+		converted := expiresAt.Time.UTC()
+		record.ExpiresAt = &converted
+	}
+	record.CreatedAt = record.CreatedAt.UTC()
+	record.UpdatedAt = record.UpdatedAt.UTC()
 	return record, nil
 }
 
