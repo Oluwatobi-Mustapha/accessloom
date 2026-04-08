@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/telemetry"
@@ -281,6 +282,143 @@ func TestRequireCentralPolicyMiddlewareABACTriageDeniesWhenMemberDelegationRelat
 		ObjectID:    "finding-1",
 	}); err != nil {
 		t.Fatalf("upsert manages relationship: %v", err)
+	}
+
+	r := newPolicyTriageRouter(newScopeSet([]string{scopeWrite}), true, store)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/v1/findings/finding-1/triage", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
+func TestRequireCentralPolicyMiddlewareABACTriageDeniesWhenMemberDelegationRiskTierTooLow(t *testing.T) {
+	store := db.NewMemoryStore()
+	ctx := policyTestScopeContext()
+	if err := store.UpsertAuthzEntityAttributes(ctx, db.AuthzEntityAttributes{
+		EntityKind: db.AuthzEntityKindSubject,
+		EntityType: "subject",
+		EntityID:   "principal-1",
+		OwnerTeam:  "platform",
+	}); err != nil {
+		t.Fatalf("upsert subject attributes: %v", err)
+	}
+	if err := store.UpsertAuthzEntityAttributes(ctx, db.AuthzEntityAttributes{
+		EntityKind:     db.AuthzEntityKindResource,
+		EntityType:     "finding",
+		EntityID:       "finding-1",
+		OwnerTeam:      "security",
+		Environment:    db.AuthzAttributeEnvProd,
+		RiskTier:       db.AuthzAttributeRiskTierMedium,
+		Classification: db.AuthzAttributeClassificationConfidential,
+	}); err != nil {
+		t.Fatalf("upsert resource attributes: %v", err)
+	}
+	if err := store.UpsertAuthzRelationship(ctx, db.AuthzRelationship{
+		SubjectType: "subject",
+		SubjectID:   "principal-1",
+		Relation:    db.AuthzRelationshipMemberOf,
+		ObjectType:  "team",
+		ObjectID:    "platform-admins",
+	}); err != nil {
+		t.Fatalf("upsert member_of relationship: %v", err)
+	}
+	if err := store.UpsertAuthzRelationship(ctx, db.AuthzRelationship{
+		SubjectType: "team",
+		SubjectID:   "platform-admins",
+		Relation:    db.AuthzRelationshipManages,
+		ObjectType:  "finding",
+		ObjectID:    "finding-1",
+	}); err != nil {
+		t.Fatalf("upsert manages relationship: %v", err)
+	}
+
+	r := newPolicyTriageRouter(newScopeSet([]string{scopeWrite}), true, store)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/v1/findings/finding-1/triage", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
+func TestRequireCentralPolicyMiddlewareABACTriageDeniesWhenDirectDelegationExpired(t *testing.T) {
+	store := db.NewMemoryStore()
+	ctx := policyTestScopeContext()
+	if err := store.UpsertAuthzEntityAttributes(ctx, db.AuthzEntityAttributes{
+		EntityKind: db.AuthzEntityKindSubject,
+		EntityType: "subject",
+		EntityID:   "principal-1",
+		OwnerTeam:  "platform",
+	}); err != nil {
+		t.Fatalf("upsert subject attributes: %v", err)
+	}
+	if err := store.UpsertAuthzEntityAttributes(ctx, db.AuthzEntityAttributes{
+		EntityKind:     db.AuthzEntityKindResource,
+		EntityType:     "finding",
+		EntityID:       "finding-1",
+		OwnerTeam:      "security",
+		Environment:    db.AuthzAttributeEnvProd,
+		RiskTier:       db.AuthzAttributeRiskTierHigh,
+		Classification: db.AuthzAttributeClassificationConfidential,
+	}); err != nil {
+		t.Fatalf("upsert resource attributes: %v", err)
+	}
+	expiredAt := time.Now().UTC().Add(-30 * time.Minute)
+	if err := store.UpsertAuthzRelationship(ctx, db.AuthzRelationship{
+		SubjectType: "subject",
+		SubjectID:   "principal-1",
+		Relation:    db.AuthzRelationshipDelegatedAdmin,
+		ObjectType:  "finding",
+		ObjectID:    "finding-1",
+		ExpiresAt:   &expiredAt,
+	}); err != nil {
+		t.Fatalf("upsert expired delegated_admin relationship: %v", err)
+	}
+
+	r := newPolicyTriageRouter(newScopeSet([]string{scopeWrite}), true, store)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/v1/findings/finding-1/triage", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
+func TestRequireCentralPolicyMiddlewareABACTriageDeniesWhenDelegationExistsInDifferentWorkspace(t *testing.T) {
+	store := db.NewMemoryStore()
+	scopeA := db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"}
+	scopeB := db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-b"}
+	ctxA := db.WithScope(context.Background(), scopeA)
+	ctxB := db.WithScope(context.Background(), scopeB)
+	if err := store.UpsertAuthzEntityAttributes(ctxA, db.AuthzEntityAttributes{
+		EntityKind: db.AuthzEntityKindSubject,
+		EntityType: "subject",
+		EntityID:   "principal-1",
+		OwnerTeam:  "platform",
+	}); err != nil {
+		t.Fatalf("upsert subject attributes: %v", err)
+	}
+	if err := store.UpsertAuthzEntityAttributes(ctxA, db.AuthzEntityAttributes{
+		EntityKind:     db.AuthzEntityKindResource,
+		EntityType:     "finding",
+		EntityID:       "finding-1",
+		OwnerTeam:      "security",
+		Environment:    db.AuthzAttributeEnvProd,
+		RiskTier:       db.AuthzAttributeRiskTierHigh,
+		Classification: db.AuthzAttributeClassificationConfidential,
+	}); err != nil {
+		t.Fatalf("upsert resource attributes: %v", err)
+	}
+	if err := store.UpsertAuthzRelationship(ctxB, db.AuthzRelationship{
+		SubjectType: "subject",
+		SubjectID:   "principal-1",
+		Relation:    db.AuthzRelationshipDelegatedAdmin,
+		ObjectType:  "finding",
+		ObjectID:    "finding-1",
+	}); err != nil {
+		t.Fatalf("upsert delegated_admin relationship in workspace-b: %v", err)
 	}
 
 	r := newPolicyTriageRouter(newScopeSet([]string{scopeWrite}), true, store)
