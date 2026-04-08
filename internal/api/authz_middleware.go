@@ -140,12 +140,12 @@ func defaultRouteActionRoleGrants() map[string][]string {
 	}
 }
 
-func newCentralPolicyEngine() *PolicyEngine {
+func newCentralPolicyEngine(store db.Store) *PolicyEngine {
 	return NewPolicyEngine(
 		newTenantIsolationEvaluator(),
 		newRBACRequirementEvaluator(defaultRouteActionRoleGrants()),
 		newABACPolicyEvaluator(defaultRouteActionABACPolicies()),
-		nil,
+		newReBACPolicyEvaluator(store, defaultRouteActionReBACPolicies()),
 	)
 }
 
@@ -161,6 +161,7 @@ func defaultRouteActionABACPolicies() map[string]abacActionPolicy {
 		policyActionRepoScansRead: passThroughPolicy,
 		policyActionRepoScansRun:  passThroughPolicy,
 		policyActionFindingsTriage: {
+			OnNoMatch: PolicyOutcomeNoOpinion,
 			AnyOf: []abacClause{
 				{
 					AllOf: []abacPredicate{
@@ -227,6 +228,21 @@ func defaultRouteActionABACPolicies() map[string]abacActionPolicy {
 						},
 					},
 				},
+			},
+		},
+	}
+}
+
+func defaultRouteActionReBACPolicies() map[string]rebacActionPolicy {
+	return map[string]rebacActionPolicy{
+		policyActionFindingsTriage: {
+			AnyOf: []rebacRelationPath{
+				{Relations: []string{db.AuthzRelationshipOwns}},
+				{Relations: []string{db.AuthzRelationshipManages}},
+				{Relations: []string{db.AuthzRelationshipDelegatedAdmin}},
+				{Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipOwns}},
+				{Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipManages}},
+				{Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipDelegatedAdmin}},
 			},
 		},
 	}

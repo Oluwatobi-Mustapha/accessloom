@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
 )
 
 func TestTenantIsolationEvaluatorDenyMismatch(t *testing.T) {
@@ -261,5 +263,140 @@ func TestABACPolicyEvaluatorNoOpinionWhenActionUnmapped(t *testing.T) {
 	}
 	if reason != "" {
 		t.Fatalf("expected empty reason, got %q", reason)
+	}
+}
+
+func TestReBACPolicyEvaluatorAllowWhenDirectRelationshipMatches(t *testing.T) {
+	store := db.NewMemoryStore()
+	ctx := db.WithScope(context.Background(), db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"})
+	if err := store.UpsertAuthzRelationship(ctx, db.AuthzRelationship{
+		SubjectType: "subject",
+		SubjectID:   "principal-1",
+		Relation:    db.AuthzRelationshipDelegatedAdmin,
+		ObjectType:  "finding",
+		ObjectID:    "finding-1",
+	}); err != nil {
+		t.Fatalf("upsert relationship: %v", err)
+	}
+
+	evaluator := newReBACPolicyEvaluator(store, map[string]rebacActionPolicy{
+		"findings.triage": {
+			AnyOf: []rebacRelationPath{
+				{Relations: []string{db.AuthzRelationshipDelegatedAdmin}},
+			},
+		},
+	})
+
+	outcome, reason, err := evaluator.Evaluate(ctx, PolicyInput{
+		Action: "findings.triage",
+		Subject: PolicySubject{
+			Type: "subject",
+			ID:   "principal-1",
+		},
+		Resource: PolicyResource{
+			Type: "finding",
+			ID:   "finding-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if outcome != PolicyOutcomeAllow {
+		t.Fatalf("expected allow, got %q", outcome)
+	}
+	if strings.TrimSpace(reason) == "" {
+		t.Fatal("expected allow reason")
+	}
+}
+
+func TestReBACPolicyEvaluatorAllowWhenMemberOfPathMatches(t *testing.T) {
+	store := db.NewMemoryStore()
+	ctx := db.WithScope(context.Background(), db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"})
+	if err := store.UpsertAuthzRelationship(ctx, db.AuthzRelationship{
+		SubjectType: "subject",
+		SubjectID:   "principal-1",
+		Relation:    db.AuthzRelationshipMemberOf,
+		ObjectType:  "team",
+		ObjectID:    "platform",
+	}); err != nil {
+		t.Fatalf("upsert membership relationship: %v", err)
+	}
+	if err := store.UpsertAuthzRelationship(ctx, db.AuthzRelationship{
+		SubjectType: "team",
+		SubjectID:   "platform",
+		Relation:    db.AuthzRelationshipManages,
+		ObjectType:  "finding",
+		ObjectID:    "finding-1",
+	}); err != nil {
+		t.Fatalf("upsert managed relationship: %v", err)
+	}
+
+	evaluator := newReBACPolicyEvaluator(store, map[string]rebacActionPolicy{
+		"findings.triage": {
+			AnyOf: []rebacRelationPath{
+				{Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipManages}},
+			},
+		},
+	})
+
+	outcome, _, err := evaluator.Evaluate(ctx, PolicyInput{
+		Action: "findings.triage",
+		Subject: PolicySubject{
+			Type: "subject",
+			ID:   "principal-1",
+		},
+		Resource: PolicyResource{
+			Type: "finding",
+			ID:   "finding-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if outcome != PolicyOutcomeAllow {
+		t.Fatalf("expected allow, got %q", outcome)
+	}
+}
+
+func TestReBACPolicyEvaluatorDenyWhenNoPathMatches(t *testing.T) {
+	store := db.NewMemoryStore()
+	ctx := db.WithScope(context.Background(), db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"})
+	if err := store.UpsertAuthzRelationship(ctx, db.AuthzRelationship{
+		SubjectType: "subject",
+		SubjectID:   "principal-1",
+		Relation:    db.AuthzRelationshipOwns,
+		ObjectType:  "finding",
+		ObjectID:    "finding-2",
+	}); err != nil {
+		t.Fatalf("upsert relationship: %v", err)
+	}
+
+	evaluator := newReBACPolicyEvaluator(store, map[string]rebacActionPolicy{
+		"findings.triage": {
+			AnyOf: []rebacRelationPath{
+				{Relations: []string{db.AuthzRelationshipOwns}},
+			},
+		},
+	})
+
+	outcome, reason, err := evaluator.Evaluate(ctx, PolicyInput{
+		Action: "findings.triage",
+		Subject: PolicySubject{
+			Type: "subject",
+			ID:   "principal-1",
+		},
+		Resource: PolicyResource{
+			Type: "finding",
+			ID:   "finding-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if outcome != PolicyOutcomeDeny {
+		t.Fatalf("expected deny, got %q", outcome)
+	}
+	if !strings.Contains(reason, "does not grant") {
+		t.Fatalf("expected relationship deny reason, got %q", reason)
 	}
 }

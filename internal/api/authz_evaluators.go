@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
 )
 
 const (
@@ -165,7 +167,8 @@ type abacClause struct {
 }
 
 type abacActionPolicy struct {
-	AnyOf []abacClause
+	AnyOf     []abacClause
+	OnNoMatch PolicyOutcome
 }
 
 type abacPolicyEvaluator struct {
@@ -196,6 +199,14 @@ func normalizeABACPolicy(policy abacActionPolicy) abacActionPolicy {
 			normalizedClause.AllOf = append(normalizedClause.AllOf, normalizeABACPredicate(predicate))
 		}
 		result.AnyOf = append(result.AnyOf, normalizedClause)
+	}
+	switch PolicyOutcome(strings.ToLower(strings.TrimSpace(string(policy.OnNoMatch)))) {
+	case PolicyOutcomeNoOpinion:
+		result.OnNoMatch = PolicyOutcomeNoOpinion
+	case PolicyOutcomeAllow:
+		result.OnNoMatch = PolicyOutcomeAllow
+	default:
+		result.OnNoMatch = PolicyOutcomeDeny
 	}
 	return result
 }
@@ -263,7 +274,14 @@ func (e *abacPolicyEvaluator) Evaluate(_ context.Context, input PolicyInput) (Po
 			return PolicyOutcomeAllow, "abac policy grants action", nil
 		}
 	}
-	return PolicyOutcomeDeny, denyReason, nil
+	switch policy.OnNoMatch {
+	case PolicyOutcomeNoOpinion:
+		return PolicyOutcomeNoOpinion, "", nil
+	case PolicyOutcomeAllow:
+		return PolicyOutcomeAllow, "abac policy grants action", nil
+	default:
+		return PolicyOutcomeDeny, denyReason, nil
+	}
 }
 
 func evaluateABACPredicate(input PolicyInput, predicate abacPredicate) (bool, string) {
@@ -372,4 +390,173 @@ func lookupPolicyAttribute(attributes map[string]string, key string) (string, bo
 		return trimmed, trimmed != ""
 	}
 	return "", false
+}
+
+type rebacRelationPath struct {
+	Relations []string
+}
+
+type rebacActionPolicy struct {
+	AnyOf []rebacRelationPath
+}
+
+type rebacPolicyEvaluator struct {
+	store          db.Store
+	actionPolicies map[string]rebacActionPolicy
+	lookupLimit    int
+}
+
+type rebacNode struct {
+	SubjectType string
+	SubjectID   string
+}
+
+const rebacDefaultLookupLimit = 200
+
+func newReBACPolicyEvaluator(store db.Store, policies map[string]rebacActionPolicy) PolicyEvaluator {
+	return &rebacPolicyEvaluator{
+		store:          store,
+		actionPolicies: normalizeReBACPolicies(policies),
+		lookupLimit:    rebacDefaultLookupLimit,
+	}
+}
+
+func normalizeReBACPolicies(policies map[string]rebacActionPolicy) map[string]rebacActionPolicy {
+	normalized := make(map[string]rebacActionPolicy, len(policies))
+	for action, policy := range policies {
+		normalizedAction := strings.ToLower(strings.TrimSpace(action))
+		if normalizedAction == "" {
+			continue
+		}
+		normalizedPolicy := rebacActionPolicy{AnyOf: make([]rebacRelationPath, 0, len(policy.AnyOf))}
+		for _, path := range policy.AnyOf {
+			normalizedPath := normalizeReBACPath(path)
+			if len(normalizedPath.Relations) == 0 {
+				continue
+			}
+			normalizedPolicy.AnyOf = append(normalizedPolicy.AnyOf, normalizedPath)
+		}
+		if len(normalizedPolicy.AnyOf) == 0 {
+			continue
+		}
+		normalized[normalizedAction] = normalizedPolicy
+	}
+	return normalized
+}
+
+func normalizeReBACPath(path rebacRelationPath) rebacRelationPath {
+	normalized := rebacRelationPath{Relations: make([]string, 0, len(path.Relations))}
+	for _, relation := range path.Relations {
+		normalizedRelation := strings.ToLower(strings.TrimSpace(relation))
+		if !isSupportedReBACRelation(normalizedRelation) {
+			continue
+		}
+		normalized.Relations = append(normalized.Relations, normalizedRelation)
+	}
+	return normalized
+}
+
+func isSupportedReBACRelation(relation string) bool {
+	switch strings.ToLower(strings.TrimSpace(relation)) {
+	case db.AuthzRelationshipOwns, db.AuthzRelationshipManages, db.AuthzRelationshipDelegatedAdmin, db.AuthzRelationshipMemberOf:
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *rebacPolicyEvaluator) Evaluate(ctx context.Context, input PolicyInput) (PolicyOutcome, string, error) {
+	if e == nil || e.store == nil || len(e.actionPolicies) == 0 {
+		return PolicyOutcomeNoOpinion, "", nil
+	}
+	action := strings.ToLower(strings.TrimSpace(input.Action))
+	if action == "" {
+		return PolicyOutcomeNoOpinion, "", nil
+	}
+	policy, exists := e.actionPolicies[action]
+	if !exists {
+		return PolicyOutcomeNoOpinion, "", nil
+	}
+	if len(policy.AnyOf) == 0 {
+		return PolicyOutcomeNoOpinion, "", nil
+	}
+
+	subjectType := strings.ToLower(strings.TrimSpace(input.Subject.Type))
+	subjectID := strings.TrimSpace(input.Subject.ID)
+	objectType := strings.ToLower(strings.TrimSpace(input.Resource.Type))
+	objectID := strings.TrimSpace(input.Resource.ID)
+	if subjectType == "" || subjectID == "" || objectType == "" || objectID == "" {
+		return PolicyOutcomeDeny, "rebac subject or resource identity is missing", nil
+	}
+
+	start := rebacNode{SubjectType: subjectType, SubjectID: subjectID}
+	for _, path := range policy.AnyOf {
+		matches, err := e.evaluateReBACPath(ctx, start, objectType, objectID, path)
+		if err != nil {
+			return PolicyOutcomeNoOpinion, "", err
+		}
+		if matches {
+			return PolicyOutcomeAllow, "rebac relationship grants action", nil
+		}
+	}
+	return PolicyOutcomeDeny, "rebac relationship does not grant action", nil
+}
+
+func (e *rebacPolicyEvaluator) evaluateReBACPath(ctx context.Context, start rebacNode, objectType string, objectID string, path rebacRelationPath) (bool, error) {
+	if len(path.Relations) == 0 {
+		return false, nil
+	}
+
+	nodes := []rebacNode{start}
+	for index, relation := range path.Relations {
+		isLastHop := index == len(path.Relations)-1
+		if isLastHop {
+			for _, node := range nodes {
+				tuples, err := e.store.ListAuthzRelationships(ctx, db.AuthzRelationshipFilter{
+					SubjectType: node.SubjectType,
+					SubjectID:   node.SubjectID,
+					Relation:    relation,
+					ObjectType:  objectType,
+					ObjectID:    objectID,
+				}, e.lookupLimit)
+				if err != nil {
+					return false, fmt.Errorf("list rebac relationships: %w", err)
+				}
+				if len(tuples) > 0 {
+					return true, nil
+				}
+			}
+			return false, nil
+		}
+
+		nextNodes := map[string]rebacNode{}
+		for _, node := range nodes {
+			tuples, err := e.store.ListAuthzRelationships(ctx, db.AuthzRelationshipFilter{
+				SubjectType: node.SubjectType,
+				SubjectID:   node.SubjectID,
+				Relation:    relation,
+			}, e.lookupLimit)
+			if err != nil {
+				return false, fmt.Errorf("list rebac relationships: %w", err)
+			}
+			for _, tuple := range tuples {
+				nextType := strings.ToLower(strings.TrimSpace(tuple.ObjectType))
+				nextID := strings.TrimSpace(tuple.ObjectID)
+				if nextType == "" || nextID == "" {
+					continue
+				}
+				nextKey := nextType + "|" + nextID
+				nextNodes[nextKey] = rebacNode{SubjectType: nextType, SubjectID: nextID}
+			}
+		}
+		if len(nextNodes) == 0 {
+			return false, nil
+		}
+		nodes = make([]rebacNode, 0, len(nextNodes))
+		for _, node := range nextNodes {
+			nodes = append(nodes, node)
+		}
+	}
+
+	return false, nil
 }
