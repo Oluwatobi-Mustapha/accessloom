@@ -400,3 +400,136 @@ func TestReBACPolicyEvaluatorDenyWhenNoPathMatches(t *testing.T) {
 		t.Fatalf("expected relationship deny reason, got %q", reason)
 	}
 }
+
+func TestReBACPolicyEvaluatorAllowWhenRelationshipAndAttributeConditionsMatch(t *testing.T) {
+	store := db.NewMemoryStore()
+	ctx := db.WithScope(context.Background(), db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"})
+	if err := store.UpsertAuthzRelationship(ctx, db.AuthzRelationship{
+		SubjectType: "subject",
+		SubjectID:   "principal-1",
+		Relation:    db.AuthzRelationshipMemberOf,
+		ObjectType:  "team",
+		ObjectID:    "platform-admins",
+	}); err != nil {
+		t.Fatalf("upsert member_of relationship: %v", err)
+	}
+	if err := store.UpsertAuthzRelationship(ctx, db.AuthzRelationship{
+		SubjectType: "team",
+		SubjectID:   "platform-admins",
+		Relation:    db.AuthzRelationshipManages,
+		ObjectType:  "finding",
+		ObjectID:    "finding-1",
+	}); err != nil {
+		t.Fatalf("upsert manages relationship: %v", err)
+	}
+
+	evaluator := newReBACPolicyEvaluator(store, map[string]rebacActionPolicy{
+		"findings.triage": {
+			AnyOf: []rebacRelationPath{
+				{
+					Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipManages},
+					AllOf: []abacPredicate{
+						{
+							Source:   abacAttributeSourceResource,
+							Key:      policyAttributeClassification,
+							Operator: abacOperatorOneOf,
+							Values: []string{
+								db.AuthzAttributeClassificationConfidential,
+								db.AuthzAttributeClassificationRestricted,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	outcome, _, err := evaluator.Evaluate(ctx, PolicyInput{
+		Action: "findings.triage",
+		Subject: PolicySubject{
+			Type: "subject",
+			ID:   "principal-1",
+		},
+		Resource: PolicyResource{
+			Type: "finding",
+			ID:   "finding-1",
+			Attributes: map[string]string{
+				policyAttributeClassification: db.AuthzAttributeClassificationConfidential,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if outcome != PolicyOutcomeAllow {
+		t.Fatalf("expected allow, got %q", outcome)
+	}
+}
+
+func TestReBACPolicyEvaluatorDenyWhenRelationshipMatchesButAttributeConditionFails(t *testing.T) {
+	store := db.NewMemoryStore()
+	ctx := db.WithScope(context.Background(), db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"})
+	if err := store.UpsertAuthzRelationship(ctx, db.AuthzRelationship{
+		SubjectType: "subject",
+		SubjectID:   "principal-1",
+		Relation:    db.AuthzRelationshipMemberOf,
+		ObjectType:  "team",
+		ObjectID:    "platform-admins",
+	}); err != nil {
+		t.Fatalf("upsert member_of relationship: %v", err)
+	}
+	if err := store.UpsertAuthzRelationship(ctx, db.AuthzRelationship{
+		SubjectType: "team",
+		SubjectID:   "platform-admins",
+		Relation:    db.AuthzRelationshipManages,
+		ObjectType:  "finding",
+		ObjectID:    "finding-1",
+	}); err != nil {
+		t.Fatalf("upsert manages relationship: %v", err)
+	}
+
+	evaluator := newReBACPolicyEvaluator(store, map[string]rebacActionPolicy{
+		"findings.triage": {
+			AnyOf: []rebacRelationPath{
+				{
+					Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipManages},
+					AllOf: []abacPredicate{
+						{
+							Source:   abacAttributeSourceResource,
+							Key:      policyAttributeClassification,
+							Operator: abacOperatorOneOf,
+							Values: []string{
+								db.AuthzAttributeClassificationConfidential,
+								db.AuthzAttributeClassificationRestricted,
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	outcome, reason, err := evaluator.Evaluate(ctx, PolicyInput{
+		Action: "findings.triage",
+		Subject: PolicySubject{
+			Type: "subject",
+			ID:   "principal-1",
+		},
+		Resource: PolicyResource{
+			Type: "finding",
+			ID:   "finding-1",
+			Attributes: map[string]string{
+				policyAttributeClassification: db.AuthzAttributeClassificationPublic,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if outcome != PolicyOutcomeDeny {
+		t.Fatalf("expected deny, got %q", outcome)
+	}
+	if !strings.Contains(reason, "rebac condition failed") {
+		t.Fatalf("expected rebac condition deny reason, got %q", reason)
+	}
+}
