@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,7 +45,7 @@ func TestPolicyRolesFromAuthLegacyKey(t *testing.T) {
 }
 
 func TestRequireCentralPolicyMiddlewareWriteDeniedForReadRole(t *testing.T) {
-	r := newPolicyTestRouter(newScopeSet([]string{scopeRead}), true)
+	r := newPolicyTestRouter(newScopeSet([]string{scopeRead}), true, nil)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
 	r.ServeHTTP(w, req)
@@ -54,7 +55,7 @@ func TestRequireCentralPolicyMiddlewareWriteDeniedForReadRole(t *testing.T) {
 }
 
 func TestRequireCentralPolicyMiddlewareWriteAllowedForWriteRole(t *testing.T) {
-	r := newPolicyTestRouter(newScopeSet([]string{scopeWrite}), true)
+	r := newPolicyTestRouter(newScopeSet([]string{scopeWrite}), true, nil)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
 	r.ServeHTTP(w, req)
@@ -64,7 +65,7 @@ func TestRequireCentralPolicyMiddlewareWriteAllowedForWriteRole(t *testing.T) {
 }
 
 func TestRequireCentralPolicyMiddlewareBypassWhenAuthDisabled(t *testing.T) {
-	r := newPolicyTestRouter(nil, false)
+	r := newPolicyTestRouter(nil, false, nil)
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
 	r.ServeHTTP(w, req)
@@ -86,7 +87,125 @@ func TestRoutePolicyRegistryCoversAllV1Routes(t *testing.T) {
 	}
 }
 
-func newPolicyTestRouter(scopes scopeSet, setPrincipal bool) *gin.Engine {
+func TestRequireCentralPolicyMiddlewareABACTriageAllowsWhenTrustedAttributesMatch(t *testing.T) {
+	store := db.NewMemoryStore()
+	ctx := policyTestScopeContext()
+	if err := store.UpsertAuthzEntityAttributes(ctx, db.AuthzEntityAttributes{
+		EntityKind: db.AuthzEntityKindSubject,
+		EntityType: "subject",
+		EntityID:   "principal-1",
+		OwnerTeam:  "platform",
+	}); err != nil {
+		t.Fatalf("upsert subject attributes: %v", err)
+	}
+	if err := store.UpsertAuthzEntityAttributes(ctx, db.AuthzEntityAttributes{
+		EntityKind:     db.AuthzEntityKindResource,
+		EntityType:     "finding",
+		EntityID:       "finding-1",
+		OwnerTeam:      "platform",
+		Environment:    db.AuthzAttributeEnvProd,
+		RiskTier:       db.AuthzAttributeRiskTierHigh,
+		Classification: db.AuthzAttributeClassificationConfidential,
+	}); err != nil {
+		t.Fatalf("upsert resource attributes: %v", err)
+	}
+
+	r := newPolicyTriageRouter(newScopeSet([]string{scopeWrite}), true, store)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/v1/findings/finding-1/triage", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+}
+
+func TestRequireCentralPolicyMiddlewareABACTriageDeniesWhenOwnerTeamMismatch(t *testing.T) {
+	store := db.NewMemoryStore()
+	ctx := policyTestScopeContext()
+	if err := store.UpsertAuthzEntityAttributes(ctx, db.AuthzEntityAttributes{
+		EntityKind: db.AuthzEntityKindSubject,
+		EntityType: "subject",
+		EntityID:   "principal-1",
+		OwnerTeam:  "platform",
+	}); err != nil {
+		t.Fatalf("upsert subject attributes: %v", err)
+	}
+	if err := store.UpsertAuthzEntityAttributes(ctx, db.AuthzEntityAttributes{
+		EntityKind:     db.AuthzEntityKindResource,
+		EntityType:     "finding",
+		EntityID:       "finding-1",
+		OwnerTeam:      "security",
+		Environment:    db.AuthzAttributeEnvProd,
+		RiskTier:       db.AuthzAttributeRiskTierHigh,
+		Classification: db.AuthzAttributeClassificationConfidential,
+	}); err != nil {
+		t.Fatalf("upsert resource attributes: %v", err)
+	}
+
+	r := newPolicyTriageRouter(newScopeSet([]string{scopeWrite}), true, store)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/v1/findings/finding-1/triage", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+}
+
+func TestRequireCentralPolicyMiddlewareABACTriageAllowsWhenTrustedAttributesMissing(t *testing.T) {
+	store := db.NewMemoryStore()
+	if err := store.UpsertAuthzEntityAttributes(policyTestScopeContext(), db.AuthzEntityAttributes{
+		EntityKind: db.AuthzEntityKindSubject,
+		EntityType: "subject",
+		EntityID:   "principal-1",
+		OwnerTeam:  "platform",
+	}); err != nil {
+		t.Fatalf("upsert subject attributes: %v", err)
+	}
+
+	r := newPolicyTriageRouter(newScopeSet([]string{scopeWrite}), true, store)
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPatch, "/v1/findings/finding-1/triage", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+}
+
+func TestTrustedAttributesFromStoreNormalizesEnumCasing(t *testing.T) {
+	store := authzOverrideStore{
+		Store: db.NewMemoryStore(),
+		records: map[string]db.AuthzEntityAttributes{
+			"resource|finding|finding-1": {
+				EntityKind:     db.AuthzEntityKindResource,
+				EntityType:     "finding",
+				EntityID:       "finding-1",
+				OwnerTeam:      "Platform_Sec",
+				Environment:    "Prod",
+				RiskTier:       "High",
+				Classification: "Confidential",
+			},
+		},
+	}
+
+	attributes, err := trustedAttributesFromStore(policyTestScopeContext(), store, db.AuthzEntityKindResource, "finding", "finding-1")
+	if err != nil {
+		t.Fatalf("trusted attributes from store: %v", err)
+	}
+	if got := attributes[policyAttributeOwnerTeam]; got != "platform_sec" {
+		t.Fatalf("expected normalized owner_team, got %q", got)
+	}
+	if got := attributes[policyAttributeEnvironment]; got != "prod" {
+		t.Fatalf("expected normalized env, got %q", got)
+	}
+	if got := attributes[policyAttributeRiskTier]; got != "high" {
+		t.Fatalf("expected normalized risk_tier, got %q", got)
+	}
+	if got := attributes[policyAttributeClassification]; got != "confidential" {
+		t.Fatalf("expected normalized classification, got %q", got)
+	}
+}
+
+func newPolicyTestRouter(scopes scopeSet, setPrincipal bool, store db.Store) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
@@ -95,13 +214,52 @@ func newPolicyTestRouter(scopes scopeSet, setPrincipal bool) *gin.Engine {
 			c.Set("auth.scope_set", scopes)
 		}
 		if setPrincipal {
+			c.Set("auth.principal_type", "subject")
 			c.Set("auth.principal_id", "principal-1")
 		}
 		c.Next()
 	})
-	r.Use(requireCentralPolicyMiddleware(newCentralPolicyEngine(), newRoutePolicyRegistry(), nil, nil))
+	r.Use(requireCentralPolicyMiddleware(newCentralPolicyEngine(), newRoutePolicyRegistry(), nil, nil, store))
 	r.POST("/v1/scans", func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
 	return r
+}
+
+func newPolicyTriageRouter(scopes scopeSet, setPrincipal bool, store db.Store) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Request = c.Request.WithContext(db.WithScope(c.Request.Context(), db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"}))
+		if scopes != nil {
+			c.Set("auth.scope_set", scopes)
+		}
+		if setPrincipal {
+			c.Set("auth.principal_type", "subject")
+			c.Set("auth.principal_id", "principal-1")
+		}
+		c.Next()
+	})
+	r.Use(requireCentralPolicyMiddleware(newCentralPolicyEngine(), newRoutePolicyRegistry(), nil, nil, store))
+	r.PATCH("/v1/findings/:finding_id/triage", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	return r
+}
+
+func policyTestScopeContext() context.Context {
+	return db.WithScope(context.Background(), db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"})
+}
+
+type authzOverrideStore struct {
+	db.Store
+	records map[string]db.AuthzEntityAttributes
+}
+
+func (s authzOverrideStore) GetAuthzEntityAttributes(_ context.Context, entityKind string, entityType string, entityID string) (db.AuthzEntityAttributes, error) {
+	key := strings.ToLower(strings.TrimSpace(entityKind)) + "|" + strings.ToLower(strings.TrimSpace(entityType)) + "|" + strings.TrimSpace(entityID)
+	if record, exists := s.records[key]; exists {
+		return record, nil
+	}
+	return db.AuthzEntityAttributes{}, db.ErrNotFound
 }

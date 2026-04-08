@@ -1,9 +1,12 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
 	"github.com/gin-gonic/gin"
@@ -17,6 +20,9 @@ const (
 	policyActionScansRun       = "scans.run"
 	policyActionRepoScansRead  = "repo_scans.read"
 	policyActionRepoScansRun   = "repo_scans.run"
+
+	policyContextABACSubjectAttrsLoadedKey  = "abac.subject_attributes_loaded"
+	policyContextABACResourceAttrsLoadedKey = "abac.resource_attributes_loaded"
 )
 
 type routePolicy struct {
@@ -137,13 +143,96 @@ func defaultRouteActionRoleGrants() map[string][]string {
 func newCentralPolicyEngine() *PolicyEngine {
 	return NewPolicyEngine(
 		newTenantIsolationEvaluator(),
-		newRBACPolicyEvaluator(defaultRouteActionRoleGrants()),
-		nil,
+		newRBACRequirementEvaluator(defaultRouteActionRoleGrants()),
+		newABACPolicyEvaluator(defaultRouteActionABACPolicies()),
 		nil,
 	)
 }
 
-func requireCentralPolicyMiddleware(engine *PolicyEngine, registry routePolicyRegistry, writeKeys []string, scopedKeys map[string][]string) gin.HandlerFunc {
+func defaultRouteActionABACPolicies() map[string]abacActionPolicy {
+	passThroughPolicy := abacActionPolicy{
+		AnyOf: []abacClause{{}},
+	}
+	return map[string]abacActionPolicy{
+		policyActionFindingsRead:  passThroughPolicy,
+		policyActionGraphRead:     passThroughPolicy,
+		policyActionScansRead:     passThroughPolicy,
+		policyActionScansRun:      passThroughPolicy,
+		policyActionRepoScansRead: passThroughPolicy,
+		policyActionRepoScansRun:  passThroughPolicy,
+		policyActionFindingsTriage: {
+			AnyOf: []abacClause{
+				{
+					AllOf: []abacPredicate{
+						{
+							Source:   abacAttributeSourceContext,
+							Key:      policyContextABACSubjectAttrsLoadedKey,
+							Operator: abacOperatorEquals,
+							Value:    "false",
+						},
+					},
+				},
+				{
+					AllOf: []abacPredicate{
+						{
+							Source:   abacAttributeSourceContext,
+							Key:      policyContextABACResourceAttrsLoadedKey,
+							Operator: abacOperatorEquals,
+							Value:    "false",
+						},
+					},
+				},
+				{
+					AllOf: []abacPredicate{
+						{
+							Source:        abacAttributeSourceSubject,
+							Key:           policyAttributeOwnerTeam,
+							Operator:      abacOperatorEqualsAttribute,
+							CompareSource: abacAttributeSourceResource,
+							CompareKey:    policyAttributeOwnerTeam,
+						},
+						{
+							Source:   abacAttributeSourceResource,
+							Key:      policyAttributeEnvironment,
+							Operator: abacOperatorOneOf,
+							Values: []string{
+								db.AuthzAttributeEnvProd,
+								db.AuthzAttributeEnvStaging,
+								db.AuthzAttributeEnvDev,
+								db.AuthzAttributeEnvTest,
+								db.AuthzAttributeEnvSandbox,
+							},
+						},
+						{
+							Source:   abacAttributeSourceResource,
+							Key:      policyAttributeRiskTier,
+							Operator: abacOperatorOneOf,
+							Values: []string{
+								db.AuthzAttributeRiskTierLow,
+								db.AuthzAttributeRiskTierMedium,
+								db.AuthzAttributeRiskTierHigh,
+								db.AuthzAttributeRiskTierCritical,
+							},
+						},
+						{
+							Source:   abacAttributeSourceResource,
+							Key:      policyAttributeClassification,
+							Operator: abacOperatorOneOf,
+							Values: []string{
+								db.AuthzAttributeClassificationPublic,
+								db.AuthzAttributeClassificationInternal,
+								db.AuthzAttributeClassificationConfidential,
+								db.AuthzAttributeClassificationRestricted,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func requireCentralPolicyMiddleware(engine *PolicyEngine, registry routePolicyRegistry, writeKeys []string, scopedKeys map[string][]string, store db.Store) gin.HandlerFunc {
 	normalizedWriteKeys := normalizeKeyList(writeKeys)
 	return func(c *gin.Context) {
 		fullPath := strings.TrimSpace(c.FullPath())
@@ -163,7 +252,13 @@ func requireCentralPolicyMiddleware(engine *PolicyEngine, registry routePolicyRe
 			return
 		}
 
-		decision, err := engine.Decide(c.Request.Context(), buildPolicyInputFromGinContext(c, policy, normalizedWriteKeys, scopedKeys))
+		input, err := buildPolicyInputFromGinContext(c, policy, normalizedWriteKeys, scopedKeys, store)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "authorization failed"})
+			return
+		}
+
+		decision, err := engine.Decide(c.Request.Context(), input)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "authorization failed"})
 			return
@@ -178,16 +273,18 @@ func requireCentralPolicyMiddleware(engine *PolicyEngine, registry routePolicyRe
 	}
 }
 
-func buildPolicyInputFromGinContext(c *gin.Context, policy routePolicy, writeKeys []string, scopedKeys map[string][]string) PolicyInput {
+func buildPolicyInputFromGinContext(c *gin.Context, policy routePolicy, writeKeys []string, scopedKeys map[string][]string, store db.Store) (PolicyInput, error) {
 	scope := db.ScopeFromContext(c.Request.Context())
 	resourceID := ""
 	if strings.TrimSpace(policy.ResourceIDParam) != "" {
 		resourceID = strings.TrimSpace(c.Param(policy.ResourceIDParam))
 	}
-	return PolicyInput{
+	subjectType := firstNonEmpty(authContextString(c, "auth.principal_type"), inferPrincipalType(c))
+	subjectID := firstNonEmpty(authContextString(c, "auth.principal_id"), inferPrincipalID(c))
+	input := PolicyInput{
 		Subject: PolicySubject{
-			Type:        authContextString(c, "auth.principal_type"),
-			ID:          authContextString(c, "auth.principal_id"),
+			Type:        subjectType,
+			ID:          subjectID,
 			TenantID:    firstNonEmpty(authContextString(c, "auth.tenant_id"), strings.TrimSpace(scope.TenantID)),
 			WorkspaceID: firstNonEmpty(authContextString(c, "auth.workspace_id"), strings.TrimSpace(scope.WorkspaceID)),
 			Roles:       policyRolesFromAuth(c, writeKeys, scopedKeys),
@@ -202,12 +299,20 @@ func buildPolicyInputFromGinContext(c *gin.Context, policy routePolicy, writeKey
 		Context: PolicyContext{
 			RequestPath:   strings.TrimSpace(c.FullPath()),
 			RequestMethod: strings.ToUpper(strings.TrimSpace(c.Request.Method)),
+			Now:           time.Now().UTC(),
 			Attributes: map[string]string{
-				policyContextTenantIDKey:    strings.TrimSpace(scope.TenantID),
-				policyContextWorkspaceIDKey: strings.TrimSpace(scope.WorkspaceID),
+				policyContextTenantIDKey:                strings.TrimSpace(scope.TenantID),
+				policyContextWorkspaceIDKey:             strings.TrimSpace(scope.WorkspaceID),
+				policyContextABACSubjectAttrsLoadedKey:  "false",
+				policyContextABACResourceAttrsLoadedKey: "false",
 			},
 		},
 	}
+
+	if err := loadTrustedPolicyAttributes(c.Request.Context(), store, &input); err != nil {
+		return PolicyInput{}, err
+	}
+	return input, nil
 }
 
 func firstNonEmpty(primary string, fallback string) string {
@@ -215,6 +320,32 @@ func firstNonEmpty(primary string, fallback string) string {
 		return strings.TrimSpace(primary)
 	}
 	return strings.TrimSpace(fallback)
+}
+
+func inferPrincipalType(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	if authContextString(c, "auth.subject") != "" {
+		return "subject"
+	}
+	if authContextString(c, "auth.api_key") != "" {
+		return "api_key"
+	}
+	return ""
+}
+
+func inferPrincipalID(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	if subject := authContextString(c, "auth.subject"); subject != "" {
+		return subject
+	}
+	if apiKey := authContextString(c, "auth.api_key"); apiKey != "" {
+		return apiKey
+	}
+	return ""
 }
 
 func hasAuthContext(c *gin.Context) bool {
@@ -243,6 +374,77 @@ func normalizeKeyList(keys []string) []string {
 		normalized = append(normalized, trimmed)
 	}
 	return normalized
+}
+
+func loadTrustedPolicyAttributes(ctx context.Context, store db.Store, input *PolicyInput) error {
+	if store == nil || input == nil {
+		return nil
+	}
+
+	subjectAttrs, err := trustedAttributesFromStore(ctx, store, db.AuthzEntityKindSubject, input.Subject.Type, input.Subject.ID)
+	if err != nil {
+		return err
+	}
+	resourceAttrs, err := trustedAttributesFromStore(ctx, store, db.AuthzEntityKindResource, input.Resource.Type, input.Resource.ID)
+	if err != nil {
+		return err
+	}
+	if len(subjectAttrs) > 0 {
+		input.Subject.Attributes = subjectAttrs
+		input.Context.Attributes[policyContextABACSubjectAttrsLoadedKey] = "true"
+	}
+	if len(resourceAttrs) > 0 {
+		input.Resource.Attributes = resourceAttrs
+		input.Context.Attributes[policyContextABACResourceAttrsLoadedKey] = "true"
+	}
+	return nil
+}
+
+func trustedAttributesFromStore(ctx context.Context, store db.Store, entityKind string, entityType string, entityID string) (map[string]string, error) {
+	if store == nil {
+		return nil, nil
+	}
+	normalizedType := strings.ToLower(strings.TrimSpace(entityType))
+	normalizedID := strings.TrimSpace(entityID)
+	if normalizedType == "" || normalizedID == "" {
+		return nil, nil
+	}
+
+	record, err := store.GetAuthzEntityAttributes(ctx, entityKind, normalizedType, normalizedID)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	normalizedRecord, err := db.NormalizeAuthzEntityAttributesForWrite(db.AuthzEntityAttributes{
+		EntityKind:     entityKind,
+		EntityType:     normalizedType,
+		EntityID:       normalizedID,
+		OwnerTeam:      record.OwnerTeam,
+		Environment:    record.Environment,
+		RiskTier:       record.RiskTier,
+		Classification: record.Classification,
+		UpdatedAt:      record.UpdatedAt,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	attributes := map[string]string{}
+	if value := strings.TrimSpace(normalizedRecord.OwnerTeam); value != "" {
+		attributes[policyAttributeOwnerTeam] = value
+	}
+	if value := strings.TrimSpace(normalizedRecord.Environment); value != "" {
+		attributes[policyAttributeEnvironment] = value
+	}
+	if value := strings.TrimSpace(normalizedRecord.RiskTier); value != "" {
+		attributes[policyAttributeRiskTier] = value
+	}
+	if value := strings.TrimSpace(normalizedRecord.Classification); value != "" {
+		attributes[policyAttributeClassification] = value
+	}
+	return attributes, nil
 }
 
 func policyRolesFromAuth(c *gin.Context, writeKeys []string, scopedKeys map[string][]string) []string {

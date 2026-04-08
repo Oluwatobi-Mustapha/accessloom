@@ -35,6 +35,7 @@ type PolicySubject struct {
 	WorkspaceID string
 	Groups      []string
 	Roles       []string
+	Attributes  map[string]string
 }
 
 // PolicyResource identifies the target object.
