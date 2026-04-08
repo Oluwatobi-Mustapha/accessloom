@@ -533,3 +533,55 @@ func TestReBACPolicyEvaluatorDenyWhenRelationshipMatchesButAttributeConditionFai
 		t.Fatalf("expected rebac condition deny reason, got %q", reason)
 	}
 }
+
+func TestReBACPolicyEvaluatorDenyReasonResetsWhenLaterPathRelationshipCheckFails(t *testing.T) {
+	store := db.NewMemoryStore()
+	ctx := db.WithScope(context.Background(), db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"})
+
+	evaluator := newReBACPolicyEvaluator(store, map[string]rebacActionPolicy{
+		"findings.triage": {
+			AnyOf: []rebacRelationPath{
+				{
+					Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipManages},
+					AllOf: []abacPredicate{
+						{
+							Source:   abacAttributeSourceResource,
+							Key:      policyAttributeClassification,
+							Operator: abacOperatorOneOf,
+							Values: []string{
+								db.AuthzAttributeClassificationRestricted,
+							},
+						},
+					},
+				},
+				{
+					Relations: []string{db.AuthzRelationshipOwns},
+				},
+			},
+		},
+	})
+
+	outcome, reason, err := evaluator.Evaluate(ctx, PolicyInput{
+		Action: "findings.triage",
+		Subject: PolicySubject{
+			Type: "subject",
+			ID:   "principal-1",
+		},
+		Resource: PolicyResource{
+			Type: "finding",
+			ID:   "finding-1",
+			Attributes: map[string]string{
+				policyAttributeClassification: db.AuthzAttributeClassificationPublic,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("evaluate: %v", err)
+	}
+	if outcome != PolicyOutcomeDeny {
+		t.Fatalf("expected deny, got %q", outcome)
+	}
+	if reason != "rebac relationship does not grant action" {
+		t.Fatalf("expected default relationship deny reason, got %q", reason)
+	}
+}

@@ -506,6 +506,10 @@ func (e *rebacPolicyEvaluator) Evaluate(ctx context.Context, input PolicyInput) 
 			}
 			continue
 		}
+		// This path is eligible for relationship checks. Reset to the default
+		// relationship-deny reason so stale condition failures from earlier paths
+		// do not mask the actual deny cause.
+		denyReason = "rebac relationship does not grant action"
 		matches, err := e.evaluateReBACPath(ctx, start, objectType, objectID, path)
 		if err != nil {
 			return PolicyOutcomeNoOpinion, "", err
