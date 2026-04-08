@@ -449,7 +449,7 @@ func normalizeReBACPath(path rebacRelationPath) rebacRelationPath {
 	for _, relation := range path.Relations {
 		normalizedRelation := strings.ToLower(strings.TrimSpace(relation))
 		if !isSupportedReBACRelation(normalizedRelation) {
-			continue
+			return rebacRelationPath{}
 		}
 		normalized.Relations = append(normalized.Relations, normalizedRelation)
 	}
