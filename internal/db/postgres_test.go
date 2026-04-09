@@ -1020,6 +1020,348 @@ func TestPostgresStoreListAuthzRelationshipsRejectsInvalidRelationFilter(t *test
 	}
 }
 
+func TestPostgresStoreAuthzPolicySetLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	mock.ExpectExec("INSERT INTO authz_policy_sets").
+		WithArgs(
+			"default",
+			"default",
+			"core_policy",
+			"Core Policy",
+			"workspace baseline",
+			"owner",
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if err := store.UpsertAuthzPolicySet(defaultScopeContext(), AuthzPolicySet{
+		PolicySetID: "core_policy",
+		DisplayName: "Core Policy",
+		Description: "workspace baseline",
+		CreatedBy:   "owner",
+	}); err != nil {
+		t.Fatalf("upsert authz policy set: %v", err)
+	}
+
+	now := time.Now().UTC()
+	rows := sqlmock.NewRows([]string{
+		"tenant_id",
+		"workspace_id",
+		"policy_set_id",
+		"display_name",
+		"description",
+		"created_by",
+		"created_at",
+		"updated_at",
+	}).AddRow("default", "default", "core_policy", "Core Policy", "workspace baseline", "owner", now, now)
+	mock.ExpectQuery("SELECT tenant_id, workspace_id, policy_set_id, display_name").
+		WithArgs("default", "default", "core_policy").
+		WillReturnRows(rows)
+
+	record, err := store.GetAuthzPolicySet(defaultScopeContext(), "core_policy")
+	if err != nil {
+		t.Fatalf("get authz policy set: %v", err)
+	}
+	if record.DisplayName != "Core Policy" || record.PolicySetID != "core_policy" {
+		t.Fatalf("unexpected authz policy set %+v", record)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreAuthzPolicyVersionLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	now := time.Now().UTC()
+
+	setRows := sqlmock.NewRows([]string{
+		"tenant_id",
+		"workspace_id",
+		"policy_set_id",
+		"display_name",
+		"description",
+		"created_by",
+		"created_at",
+		"updated_at",
+	}).AddRow("default", "default", "core_policy", "Core Policy", "workspace baseline", "owner", now, now)
+	mock.ExpectQuery("SELECT tenant_id, workspace_id, policy_set_id, display_name").
+		WithArgs("default", "default", "core_policy").
+		WillReturnRows(setRows)
+
+	createdRows := sqlmock.NewRows([]string{
+		"tenant_id",
+		"workspace_id",
+		"policy_set_id",
+		"version",
+		"bundle",
+		"checksum",
+		"created_by",
+		"created_at",
+	}).AddRow(
+		"default",
+		"default",
+		"core_policy",
+		1,
+		`{"rules":[{"id":"allow-read","effect":"allow"}]}`,
+		"7d506f99ea690c4297132763253db76fb6cc4eed6a7307b3dbd83eb9b1618240",
+		"owner",
+		now,
+	)
+	mock.ExpectQuery("INSERT INTO authz_policy_versions").
+		WithArgs(
+			"default",
+			"default",
+			"core_policy",
+			1,
+			`{"rules":[{"id":"allow-read","effect":"allow"}]}`,
+			"7d506f99ea690c4297132763253db76fb6cc4eed6a7307b3dbd83eb9b1618240",
+			"owner",
+			sqlmock.AnyArg(),
+		).
+		WillReturnRows(createdRows)
+
+	created, err := store.CreateAuthzPolicyVersion(defaultScopeContext(), AuthzPolicyVersion{
+		PolicySetID: "core_policy",
+		Version:     1,
+		Bundle:      `{"rules":[{"id":"allow-read","effect":"allow"}]}`,
+		CreatedBy:   "owner",
+	})
+	if err != nil {
+		t.Fatalf("create authz policy version: %v", err)
+	}
+	if created.Version != 1 || created.PolicySetID != "core_policy" {
+		t.Fatalf("unexpected created version %+v", created)
+	}
+
+	getRows := sqlmock.NewRows([]string{
+		"tenant_id",
+		"workspace_id",
+		"policy_set_id",
+		"version",
+		"bundle",
+		"checksum",
+		"created_by",
+		"created_at",
+	}).AddRow(
+		"default",
+		"default",
+		"core_policy",
+		1,
+		`{"rules":[{"id":"allow-read","effect":"allow"}]}`,
+		created.Checksum,
+		"owner",
+		now,
+	)
+	mock.ExpectQuery("SELECT tenant_id, workspace_id, policy_set_id, version, bundle::text, checksum").
+		WithArgs("default", "default", "core_policy", 1).
+		WillReturnRows(getRows)
+
+	got, err := store.GetAuthzPolicyVersion(defaultScopeContext(), "core_policy", 1)
+	if err != nil {
+		t.Fatalf("get authz policy version: %v", err)
+	}
+	if got.Checksum != created.Checksum {
+		t.Fatalf("unexpected checksum from get: %s", got.Checksum)
+	}
+
+	listRows := sqlmock.NewRows([]string{
+		"tenant_id",
+		"workspace_id",
+		"policy_set_id",
+		"version",
+		"bundle",
+		"checksum",
+		"created_by",
+		"created_at",
+	}).AddRow(
+		"default",
+		"default",
+		"core_policy",
+		1,
+		`{"rules":[{"id":"allow-read","effect":"allow"}]}`,
+		created.Checksum,
+		"owner",
+		now,
+	)
+	mock.ExpectQuery("SELECT tenant_id, workspace_id, policy_set_id, version, bundle::text, checksum").
+		WithArgs("default", "default", "core_policy", 10).
+		WillReturnRows(listRows)
+
+	versions, err := store.ListAuthzPolicyVersions(defaultScopeContext(), "core_policy", 10)
+	if err != nil {
+		t.Fatalf("list authz policy versions: %v", err)
+	}
+	if len(versions) != 1 || versions[0].Version != 1 {
+		t.Fatalf("unexpected listed versions %+v", versions)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreAuthzPolicyRolloutLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	active := 1
+	candidate := 2
+	mock.ExpectExec("INSERT INTO authz_policy_rollouts").
+		WithArgs(
+			"default",
+			"default",
+			"core_policy",
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			AuthzPolicyRolloutModeShadow,
+			"owner",
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if err := store.UpsertAuthzPolicyRollout(defaultScopeContext(), AuthzPolicyRollout{
+		PolicySetID:      "core_policy",
+		ActiveVersion:    &active,
+		CandidateVersion: &candidate,
+		Mode:             AuthzPolicyRolloutModeShadow,
+		UpdatedBy:        "owner",
+	}); err != nil {
+		t.Fatalf("upsert authz policy rollout: %v", err)
+	}
+
+	now := time.Now().UTC()
+	rows := sqlmock.NewRows([]string{
+		"tenant_id",
+		"workspace_id",
+		"policy_set_id",
+		"active_version",
+		"candidate_version",
+		"mode",
+		"updated_by",
+		"updated_at",
+	}).AddRow("default", "default", "core_policy", int64(1), int64(2), AuthzPolicyRolloutModeShadow, "owner", now)
+	mock.ExpectQuery("SELECT tenant_id, workspace_id, policy_set_id, active_version, candidate_version, mode, COALESCE\\(updated_by, ''\\), updated_at").
+		WithArgs("default", "default", "core_policy").
+		WillReturnRows(rows)
+
+	rollout, err := store.GetAuthzPolicyRollout(defaultScopeContext(), "core_policy")
+	if err != nil {
+		t.Fatalf("get authz policy rollout: %v", err)
+	}
+	if rollout.ActiveVersion == nil || rollout.CandidateVersion == nil {
+		t.Fatalf("expected rollout versions to be present: %+v", rollout)
+	}
+	if *rollout.ActiveVersion != 1 || *rollout.CandidateVersion != 2 {
+		t.Fatalf("unexpected rollout versions: %+v", rollout)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
+func TestPostgresStoreAuthzPolicyEventsLifecycle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock: %v", err)
+	}
+	defer db.Close()
+
+	store := NewPostgresStoreWithDB(db)
+	fromVersion := 1
+	toVersion := 2
+	mock.ExpectExec("INSERT INTO authz_policy_events").
+		WithArgs(
+			sqlmock.AnyArg(),
+			"default",
+			"default",
+			"core_policy",
+			"promote",
+			&fromVersion,
+			&toVersion,
+			"owner",
+			"promoted candidate",
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if err := store.AppendAuthzPolicyEvent(defaultScopeContext(), AuthzPolicyEvent{
+		PolicySetID: "core_policy",
+		EventType:   "promote",
+		FromVersion: &fromVersion,
+		ToVersion:   &toVersion,
+		Actor:       "owner",
+		Message:     "promoted candidate",
+		Metadata:    map[string]any{"source": "test"},
+	}); err != nil {
+		t.Fatalf("append authz policy event: %v", err)
+	}
+
+	now := time.Now().UTC()
+	rows := sqlmock.NewRows([]string{
+		"id",
+		"tenant_id",
+		"workspace_id",
+		"policy_set_id",
+		"event_type",
+		"from_version",
+		"to_version",
+		"actor",
+		"message",
+		"metadata",
+		"created_at",
+	}).AddRow(
+		"event-1",
+		"default",
+		"default",
+		"core_policy",
+		"promote",
+		int64(1),
+		int64(2),
+		"owner",
+		"promoted candidate",
+		[]byte(`{"source":"test"}`),
+		now,
+	)
+	mock.ExpectQuery("SELECT id, tenant_id, workspace_id, policy_set_id, event_type, from_version, to_version").
+		WithArgs("default", "default", "core_policy", 10).
+		WillReturnRows(rows)
+
+	events, err := store.ListAuthzPolicyEvents(defaultScopeContext(), "core_policy", 10)
+	if err != nil {
+		t.Fatalf("list authz policy events: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Metadata["source"] != "test" {
+		t.Fatalf("unexpected event metadata: %+v", events[0].Metadata)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet expectations: %v", err)
+	}
+}
+
 func TestPostgresStoreInjectScopeCTEBypassWhenDisabled(t *testing.T) {
 	store := &PostgresStore{}
 	query := "SELECT id FROM scans WHERE tenant_id = $1"

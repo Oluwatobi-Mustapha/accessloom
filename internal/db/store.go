@@ -2,6 +2,9 @@ package db
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -57,6 +60,10 @@ const (
 	AuthzRelationshipManages        = "manages"
 	AuthzRelationshipDelegatedAdmin = "delegated_admin"
 	AuthzRelationshipMemberOf       = "member_of"
+
+	AuthzPolicyRolloutModeDisabled = "disabled"
+	AuthzPolicyRolloutModeShadow   = "shadow"
+	AuthzPolicyRolloutModeEnforce  = "enforce"
 )
 
 var validAuthzEntityKinds = map[string]struct{}{
@@ -91,6 +98,12 @@ var validAuthzRelationships = map[string]struct{}{
 	AuthzRelationshipManages:        {},
 	AuthzRelationshipDelegatedAdmin: {},
 	AuthzRelationshipMemberOf:       {},
+}
+
+var validAuthzPolicyRolloutModes = map[string]struct{}{
+	AuthzPolicyRolloutModeDisabled: {},
+	AuthzPolicyRolloutModeShadow:   {},
+	AuthzPolicyRolloutModeEnforce:  {},
 }
 
 // ScanRecord tracks persisted scan execution metadata.
@@ -206,6 +219,57 @@ type AuthzRelationshipFilter struct {
 	IncludeExpired bool
 }
 
+// AuthzPolicySet stores one scoped policy namespace and metadata.
+type AuthzPolicySet struct {
+	TenantID    string    `json:"-"`
+	WorkspaceID string    `json:"-"`
+	PolicySetID string    `json:"policy_set_id"`
+	DisplayName string    `json:"display_name"`
+	Description string    `json:"description,omitempty"`
+	CreatedBy   string    `json:"created_by,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// AuthzPolicyVersion stores one immutable compiled policy bundle.
+type AuthzPolicyVersion struct {
+	TenantID    string    `json:"-"`
+	WorkspaceID string    `json:"-"`
+	PolicySetID string    `json:"policy_set_id"`
+	Version     int       `json:"version"`
+	Bundle      string    `json:"bundle"`
+	Checksum    string    `json:"checksum"`
+	CreatedBy   string    `json:"created_by,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// AuthzPolicyRollout stores one scoped rollout pointer for active/candidate versions.
+type AuthzPolicyRollout struct {
+	TenantID         string    `json:"-"`
+	WorkspaceID      string    `json:"-"`
+	PolicySetID      string    `json:"policy_set_id"`
+	ActiveVersion    *int      `json:"active_version,omitempty"`
+	CandidateVersion *int      `json:"candidate_version,omitempty"`
+	Mode             string    `json:"mode"`
+	UpdatedBy        string    `json:"updated_by,omitempty"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// AuthzPolicyEvent records one immutable policy lifecycle action.
+type AuthzPolicyEvent struct {
+	ID          string         `json:"id"`
+	TenantID    string         `json:"-"`
+	WorkspaceID string         `json:"-"`
+	PolicySetID string         `json:"policy_set_id"`
+	EventType   string         `json:"event_type"`
+	FromVersion *int           `json:"from_version,omitempty"`
+	ToVersion   *int           `json:"to_version,omitempty"`
+	Actor       string         `json:"actor,omitempty"`
+	Message     string         `json:"message,omitempty"`
+	Metadata    map[string]any `json:"metadata,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+}
+
 // NormalizeScanEventLevel validates and normalizes event levels.
 func NormalizeScanEventLevel(level string) (string, error) {
 	switch level {
@@ -305,6 +369,135 @@ func NormalizeAuthzRelationshipForWrite(relationship AuthzRelationship) (AuthzRe
 	return normalized, nil
 }
 
+// NormalizeAuthzPolicySetForWrite validates and canonicalizes one policy-set metadata row.
+func NormalizeAuthzPolicySetForWrite(policySet AuthzPolicySet) (AuthzPolicySet, error) {
+	normalized := policySet
+	policySetID, err := normalizeAuthzPolicySetID(policySet.PolicySetID)
+	if err != nil {
+		return AuthzPolicySet{}, err
+	}
+	normalized.PolicySetID = policySetID
+	normalized.DisplayName = strings.TrimSpace(policySet.DisplayName)
+	if normalized.DisplayName == "" {
+		return AuthzPolicySet{}, fmt.Errorf("display name is required")
+	}
+	normalized.Description = strings.TrimSpace(policySet.Description)
+	normalized.CreatedBy = strings.TrimSpace(policySet.CreatedBy)
+	if normalized.CreatedAt.IsZero() {
+		normalized.CreatedAt = time.Now().UTC()
+	} else {
+		normalized.CreatedAt = normalized.CreatedAt.UTC()
+	}
+	if normalized.UpdatedAt.IsZero() {
+		normalized.UpdatedAt = normalized.CreatedAt
+	} else {
+		normalized.UpdatedAt = normalized.UpdatedAt.UTC()
+	}
+	return normalized, nil
+}
+
+// NormalizeAuthzPolicyVersionForWrite validates and canonicalizes one immutable policy bundle version.
+func NormalizeAuthzPolicyVersionForWrite(version AuthzPolicyVersion) (AuthzPolicyVersion, error) {
+	normalized := version
+	policySetID, err := normalizeAuthzPolicySetID(version.PolicySetID)
+	if err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+	normalized.PolicySetID = policySetID
+	if normalized.Version <= 0 {
+		return AuthzPolicyVersion{}, fmt.Errorf("version must be greater than zero")
+	}
+	normalized.Bundle = strings.TrimSpace(version.Bundle)
+	if normalized.Bundle == "" {
+		return AuthzPolicyVersion{}, fmt.Errorf("policy bundle is required")
+	}
+	if !json.Valid([]byte(normalized.Bundle)) {
+		return AuthzPolicyVersion{}, fmt.Errorf("policy bundle must be valid json")
+	}
+	normalized.Checksum = strings.ToLower(strings.TrimSpace(version.Checksum))
+	if normalized.Checksum == "" {
+		digest := sha256.Sum256([]byte(normalized.Bundle))
+		normalized.Checksum = hex.EncodeToString(digest[:])
+	}
+	normalized.CreatedBy = strings.TrimSpace(version.CreatedBy)
+	if normalized.CreatedAt.IsZero() {
+		normalized.CreatedAt = time.Now().UTC()
+	} else {
+		normalized.CreatedAt = normalized.CreatedAt.UTC()
+	}
+	return normalized, nil
+}
+
+// NormalizeAuthzPolicyRolloutForWrite validates and canonicalizes one rollout pointer row.
+func NormalizeAuthzPolicyRolloutForWrite(rollout AuthzPolicyRollout) (AuthzPolicyRollout, error) {
+	normalized := rollout
+	policySetID, err := normalizeAuthzPolicySetID(rollout.PolicySetID)
+	if err != nil {
+		return AuthzPolicyRollout{}, err
+	}
+	normalized.PolicySetID = policySetID
+	if normalized.ActiveVersion != nil && *normalized.ActiveVersion <= 0 {
+		return AuthzPolicyRollout{}, fmt.Errorf("active version must be greater than zero")
+	}
+	if normalized.CandidateVersion != nil && *normalized.CandidateVersion <= 0 {
+		return AuthzPolicyRollout{}, fmt.Errorf("candidate version must be greater than zero")
+	}
+	normalized.Mode = strings.ToLower(strings.TrimSpace(rollout.Mode))
+	if normalized.Mode == "" {
+		normalized.Mode = AuthzPolicyRolloutModeDisabled
+	}
+	if _, ok := validAuthzPolicyRolloutModes[normalized.Mode]; !ok {
+		return AuthzPolicyRollout{}, fmt.Errorf("invalid rollout mode")
+	}
+	normalized.UpdatedBy = strings.TrimSpace(rollout.UpdatedBy)
+	if normalized.UpdatedAt.IsZero() {
+		normalized.UpdatedAt = time.Now().UTC()
+	} else {
+		normalized.UpdatedAt = normalized.UpdatedAt.UTC()
+	}
+	return normalized, nil
+}
+
+// NormalizeAuthzPolicyEventForWrite validates and canonicalizes one immutable policy event.
+func NormalizeAuthzPolicyEventForWrite(event AuthzPolicyEvent) (AuthzPolicyEvent, error) {
+	normalized := event
+	normalized.ID = strings.TrimSpace(event.ID)
+	policySetID, err := normalizeAuthzPolicySetID(event.PolicySetID)
+	if err != nil {
+		return AuthzPolicyEvent{}, err
+	}
+	normalized.PolicySetID = policySetID
+	normalized.EventType = strings.ToLower(strings.TrimSpace(event.EventType))
+	if normalized.EventType == "" {
+		return AuthzPolicyEvent{}, fmt.Errorf("event type is required")
+	}
+	if normalized.FromVersion != nil && *normalized.FromVersion <= 0 {
+		return AuthzPolicyEvent{}, fmt.Errorf("from version must be greater than zero")
+	}
+	if normalized.ToVersion != nil && *normalized.ToVersion <= 0 {
+		return AuthzPolicyEvent{}, fmt.Errorf("to version must be greater than zero")
+	}
+	normalized.Actor = strings.TrimSpace(event.Actor)
+	normalized.Message = strings.TrimSpace(event.Message)
+	if normalized.CreatedAt.IsZero() {
+		normalized.CreatedAt = time.Now().UTC()
+	} else {
+		normalized.CreatedAt = normalized.CreatedAt.UTC()
+	}
+	return normalized, nil
+}
+
+func normalizeAuthzPolicySetID(value string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	if normalized == "" {
+		return "", fmt.Errorf("policy set id is required")
+	}
+	if !authzOwnerTeamPattern.MatchString(normalized) {
+		return "", fmt.Errorf("invalid policy set id format")
+	}
+	return normalized, nil
+}
+
 // IdentityFilter controls identity list query shape.
 type IdentityFilter struct {
 	ScanID     string
@@ -352,6 +545,15 @@ type Store interface {
 	UpsertAuthzRelationship(ctx context.Context, relationship AuthzRelationship) error
 	DeleteAuthzRelationship(ctx context.Context, relationship AuthzRelationship) error
 	ListAuthzRelationships(ctx context.Context, filter AuthzRelationshipFilter, limit int) ([]AuthzRelationship, error)
+	UpsertAuthzPolicySet(ctx context.Context, policySet AuthzPolicySet) error
+	GetAuthzPolicySet(ctx context.Context, policySetID string) (AuthzPolicySet, error)
+	CreateAuthzPolicyVersion(ctx context.Context, version AuthzPolicyVersion) (AuthzPolicyVersion, error)
+	GetAuthzPolicyVersion(ctx context.Context, policySetID string, version int) (AuthzPolicyVersion, error)
+	ListAuthzPolicyVersions(ctx context.Context, policySetID string, limit int) ([]AuthzPolicyVersion, error)
+	UpsertAuthzPolicyRollout(ctx context.Context, rollout AuthzPolicyRollout) error
+	GetAuthzPolicyRollout(ctx context.Context, policySetID string) (AuthzPolicyRollout, error)
+	AppendAuthzPolicyEvent(ctx context.Context, event AuthzPolicyEvent) error
+	ListAuthzPolicyEvents(ctx context.Context, policySetID string, limit int) ([]AuthzPolicyEvent, error)
 	ListIdentities(ctx context.Context, filter IdentityFilter, limit int) ([]domain.Identity, error)
 	ListRelationships(ctx context.Context, filter RelationshipFilter, limit int) ([]domain.Relationship, error)
 	AppendScanEvent(ctx context.Context, scanID string, level string, message string, metadata map[string]any) error

@@ -139,3 +139,120 @@ func TestNormalizeAuthzRelationshipForWrite(t *testing.T) {
 		t.Fatalf("expected default source manual, got %q", defaultSource.Source)
 	}
 }
+
+func TestNormalizeAuthzPolicySetForWrite(t *testing.T) {
+	normalized, err := NormalizeAuthzPolicySetForWrite(AuthzPolicySet{
+		PolicySetID: " CORE_POLICY ",
+		DisplayName: " Core Policy ",
+		Description: " baseline policy ",
+		CreatedBy:   " owner ",
+		CreatedAt:   time.Date(2026, 4, 8, 18, 0, 0, 0, time.FixedZone("WAT", 1*60*60)),
+	})
+	if err != nil {
+		t.Fatalf("normalize policy set: %v", err)
+	}
+	if normalized.PolicySetID != "core_policy" {
+		t.Fatalf("expected normalized policy_set_id, got %q", normalized.PolicySetID)
+	}
+	if normalized.DisplayName != "Core Policy" {
+		t.Fatalf("expected trimmed display name, got %q", normalized.DisplayName)
+	}
+	if normalized.CreatedAt.Location() != time.UTC || normalized.UpdatedAt.Location() != time.UTC {
+		t.Fatalf("expected UTC timestamps, got created=%v updated=%v", normalized.CreatedAt.Location(), normalized.UpdatedAt.Location())
+	}
+	if normalized.CreatedBy != "owner" {
+		t.Fatalf("expected trimmed created_by, got %q", normalized.CreatedBy)
+	}
+
+	if _, err := NormalizeAuthzPolicySetForWrite(AuthzPolicySet{
+		PolicySetID: "invalid policy",
+		DisplayName: "Core",
+	}); err == nil {
+		t.Fatal("expected invalid policy set id error")
+	}
+}
+
+func TestNormalizeAuthzPolicyVersionForWrite(t *testing.T) {
+	normalized, err := NormalizeAuthzPolicyVersionForWrite(AuthzPolicyVersion{
+		PolicySetID: "core_policy",
+		Version:     1,
+		Bundle:      `{"rules":[{"id":"r1","effect":"allow"}]}`,
+	})
+	if err != nil {
+		t.Fatalf("normalize policy version: %v", err)
+	}
+	if normalized.Checksum == "" {
+		t.Fatal("expected computed checksum")
+	}
+	if normalized.CreatedAt.IsZero() {
+		t.Fatal("expected generated created_at")
+	}
+
+	if _, err := NormalizeAuthzPolicyVersionForWrite(AuthzPolicyVersion{
+		PolicySetID: "core_policy",
+		Version:     1,
+		Bundle:      "not-json",
+	}); err == nil {
+		t.Fatal("expected invalid json bundle error")
+	}
+}
+
+func TestNormalizeAuthzPolicyRolloutForWrite(t *testing.T) {
+	active := 1
+	normalized, err := NormalizeAuthzPolicyRolloutForWrite(AuthzPolicyRollout{
+		PolicySetID:   "core_policy",
+		ActiveVersion: &active,
+		Mode:          "ENFORCE",
+		UpdatedBy:     " owner ",
+	})
+	if err != nil {
+		t.Fatalf("normalize policy rollout: %v", err)
+	}
+	if normalized.Mode != AuthzPolicyRolloutModeEnforce {
+		t.Fatalf("expected enforce mode, got %q", normalized.Mode)
+	}
+	if normalized.UpdatedBy != "owner" {
+		t.Fatalf("expected trimmed updated_by, got %q", normalized.UpdatedBy)
+	}
+
+	if _, err := NormalizeAuthzPolicyRolloutForWrite(AuthzPolicyRollout{
+		PolicySetID: "core_policy",
+		Mode:        "unknown",
+	}); err == nil {
+		t.Fatal("expected invalid rollout mode error")
+	}
+}
+
+func TestNormalizeAuthzPolicyEventForWrite(t *testing.T) {
+	fromVersion := 1
+	toVersion := 2
+	normalized, err := NormalizeAuthzPolicyEventForWrite(AuthzPolicyEvent{
+		PolicySetID: "core_policy",
+		EventType:   "Promote",
+		FromVersion: &fromVersion,
+		ToVersion:   &toVersion,
+		Actor:       " owner ",
+		Message:     " promoted ",
+	})
+	if err != nil {
+		t.Fatalf("normalize policy event: %v", err)
+	}
+	if normalized.EventType != "promote" {
+		t.Fatalf("expected lower-cased event type, got %q", normalized.EventType)
+	}
+	if normalized.Actor != "owner" || normalized.Message != "promoted" {
+		t.Fatalf("expected trimmed actor/message, got actor=%q message=%q", normalized.Actor, normalized.Message)
+	}
+	if normalized.CreatedAt.IsZero() {
+		t.Fatal("expected generated created_at")
+	}
+
+	invalid := 0
+	if _, err := NormalizeAuthzPolicyEventForWrite(AuthzPolicyEvent{
+		PolicySetID: "core_policy",
+		EventType:   "promote",
+		ToVersion:   &invalid,
+	}); err == nil {
+		t.Fatal("expected invalid to_version error")
+	}
+}

@@ -1079,6 +1079,396 @@ func (p *PostgresStore) ListAuthzRelationships(ctx context.Context, filter Authz
 	return result, nil
 }
 
+// UpsertAuthzPolicySet creates or updates one scoped policy set metadata record.
+func (p *PostgresStore) UpsertAuthzPolicySet(ctx context.Context, policySet AuthzPolicySet) error {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+	normalized, err := NormalizeAuthzPolicySetForWrite(policySet)
+	if err != nil {
+		return err
+	}
+	normalized.TenantID = scope.TenantID
+	normalized.WorkspaceID = scope.WorkspaceID
+
+	_, err = p.execContext(
+		ctx,
+		`INSERT INTO authz_policy_sets (
+			tenant_id, workspace_id, policy_set_id, display_name, description, created_by, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), $7, $8)
+		ON CONFLICT (tenant_id, workspace_id, policy_set_id)
+		DO UPDATE SET
+			display_name = EXCLUDED.display_name,
+			description = EXCLUDED.description,
+			updated_at = EXCLUDED.updated_at`,
+		normalized.TenantID,
+		normalized.WorkspaceID,
+		normalized.PolicySetID,
+		normalized.DisplayName,
+		normalized.Description,
+		normalized.CreatedBy,
+		normalized.CreatedAt,
+		normalized.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert authz policy set: %w", err)
+	}
+	return nil
+}
+
+// GetAuthzPolicySet returns one scoped policy set metadata record.
+func (p *PostgresStore) GetAuthzPolicySet(ctx context.Context, policySetID string) (AuthzPolicySet, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return AuthzPolicySet{}, err
+	}
+	normalizedPolicySetID, err := normalizeAuthzPolicySetID(policySetID)
+	if err != nil {
+		return AuthzPolicySet{}, err
+	}
+
+	row := p.queryRowContext(
+		ctx,
+		`SELECT tenant_id, workspace_id, policy_set_id, display_name, COALESCE(description, ''), COALESCE(created_by, ''), created_at, updated_at
+		 FROM authz_policy_sets
+		 WHERE tenant_id = $1
+		   AND workspace_id = $2
+		   AND policy_set_id = $3`,
+		scope.TenantID,
+		scope.WorkspaceID,
+		normalizedPolicySetID,
+	)
+	record, err := scanAuthzPolicySet(row)
+	if err != nil {
+		if errorsIsNoRows(err) {
+			return AuthzPolicySet{}, ErrNotFound
+		}
+		return AuthzPolicySet{}, fmt.Errorf("query authz policy set: %w", err)
+	}
+	return record, nil
+}
+
+// CreateAuthzPolicyVersion persists one immutable policy bundle version.
+func (p *PostgresStore) CreateAuthzPolicyVersion(ctx context.Context, version AuthzPolicyVersion) (AuthzPolicyVersion, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+	normalizedPolicySetID, err := normalizeAuthzPolicySetID(version.PolicySetID)
+	if err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+	if _, err := p.GetAuthzPolicySet(ctx, normalizedPolicySetID); err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+	if version.Version <= 0 {
+		row := p.queryRowContext(
+			ctx,
+			`SELECT COALESCE(MAX(version), 0) + 1
+			 FROM authz_policy_versions
+			 WHERE tenant_id = $1
+			   AND workspace_id = $2
+			   AND policy_set_id = $3`,
+			scope.TenantID,
+			scope.WorkspaceID,
+			normalizedPolicySetID,
+		)
+		if err := row.Scan(&version.Version); err != nil {
+			return AuthzPolicyVersion{}, fmt.Errorf("next authz policy version: %w", err)
+		}
+	}
+	version.PolicySetID = normalizedPolicySetID
+
+	normalized, err := NormalizeAuthzPolicyVersionForWrite(version)
+	if err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+	normalized.TenantID = scope.TenantID
+	normalized.WorkspaceID = scope.WorkspaceID
+
+	row := p.queryRowContext(
+		ctx,
+		`INSERT INTO authz_policy_versions (
+			tenant_id, workspace_id, policy_set_id, version, bundle, checksum, created_by, created_at
+		) VALUES ($1, $2, $3, $4, $5::jsonb, $6, NULLIF($7, ''), $8)
+		RETURNING tenant_id, workspace_id, policy_set_id, version, bundle::text, checksum, COALESCE(created_by, ''), created_at`,
+		normalized.TenantID,
+		normalized.WorkspaceID,
+		normalized.PolicySetID,
+		normalized.Version,
+		normalized.Bundle,
+		normalized.Checksum,
+		normalized.CreatedBy,
+		normalized.CreatedAt,
+	)
+	record, err := scanAuthzPolicyVersion(row)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+			return AuthzPolicyVersion{}, fmt.Errorf("authz policy version already exists")
+		}
+		return AuthzPolicyVersion{}, fmt.Errorf("insert authz policy version: %w", err)
+	}
+	return record, nil
+}
+
+// GetAuthzPolicyVersion returns one immutable bundle version in scope.
+func (p *PostgresStore) GetAuthzPolicyVersion(ctx context.Context, policySetID string, version int) (AuthzPolicyVersion, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+	normalizedPolicySetID, err := normalizeAuthzPolicySetID(policySetID)
+	if err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+	if version <= 0 {
+		return AuthzPolicyVersion{}, fmt.Errorf("version must be greater than zero")
+	}
+
+	row := p.queryRowContext(
+		ctx,
+		`SELECT tenant_id, workspace_id, policy_set_id, version, bundle::text, checksum, COALESCE(created_by, ''), created_at
+		 FROM authz_policy_versions
+		 WHERE tenant_id = $1
+		   AND workspace_id = $2
+		   AND policy_set_id = $3
+		   AND version = $4`,
+		scope.TenantID,
+		scope.WorkspaceID,
+		normalizedPolicySetID,
+		version,
+	)
+	record, err := scanAuthzPolicyVersion(row)
+	if err != nil {
+		if errorsIsNoRows(err) {
+			return AuthzPolicyVersion{}, ErrNotFound
+		}
+		return AuthzPolicyVersion{}, fmt.Errorf("query authz policy version: %w", err)
+	}
+	return record, nil
+}
+
+// ListAuthzPolicyVersions returns policy versions for one policy set ordered by newest first.
+func (p *PostgresStore) ListAuthzPolicyVersions(ctx context.Context, policySetID string, limit int) ([]AuthzPolicyVersion, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	normalizedPolicySetID, err := normalizeAuthzPolicySetID(policySetID)
+	if err != nil {
+		return nil, err
+	}
+	const maxPolicyVersionListLimit = 500
+	if limit <= 0 {
+		limit = 100
+	} else if limit > maxPolicyVersionListLimit {
+		limit = maxPolicyVersionListLimit
+	}
+
+	rows, err := p.queryContext(
+		ctx,
+		`SELECT tenant_id, workspace_id, policy_set_id, version, bundle::text, checksum, COALESCE(created_by, ''), created_at
+		 FROM authz_policy_versions
+		 WHERE tenant_id = $1
+		   AND workspace_id = $2
+		   AND policy_set_id = $3
+		 ORDER BY version DESC
+		 LIMIT $4`,
+		scope.TenantID,
+		scope.WorkspaceID,
+		normalizedPolicySetID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query authz policy versions: %w", err)
+	}
+	defer rows.Close()
+
+	result := []AuthzPolicyVersion{}
+	for rows.Next() {
+		record, scanErr := scanAuthzPolicyVersion(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("authz policy version row: %w", scanErr)
+		}
+		result = append(result, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("authz policy version rows: %w", err)
+	}
+	return result, nil
+}
+
+// UpsertAuthzPolicyRollout creates or updates one scoped rollout pointer row.
+func (p *PostgresStore) UpsertAuthzPolicyRollout(ctx context.Context, rollout AuthzPolicyRollout) error {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+	normalized, err := NormalizeAuthzPolicyRolloutForWrite(rollout)
+	if err != nil {
+		return err
+	}
+	normalized.TenantID = scope.TenantID
+	normalized.WorkspaceID = scope.WorkspaceID
+
+	_, err = p.execContext(
+		ctx,
+		`INSERT INTO authz_policy_rollouts (
+			tenant_id, workspace_id, policy_set_id, active_version, candidate_version, mode, updated_by, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8)
+		ON CONFLICT (tenant_id, workspace_id, policy_set_id)
+		DO UPDATE SET
+			active_version = EXCLUDED.active_version,
+			candidate_version = EXCLUDED.candidate_version,
+			mode = EXCLUDED.mode,
+			updated_by = EXCLUDED.updated_by,
+			updated_at = EXCLUDED.updated_at`,
+		normalized.TenantID,
+		normalized.WorkspaceID,
+		normalized.PolicySetID,
+		normalized.ActiveVersion,
+		normalized.CandidateVersion,
+		normalized.Mode,
+		normalized.UpdatedBy,
+		normalized.UpdatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert authz policy rollout: %w", err)
+	}
+	return nil
+}
+
+// GetAuthzPolicyRollout returns one scoped rollout pointer row.
+func (p *PostgresStore) GetAuthzPolicyRollout(ctx context.Context, policySetID string) (AuthzPolicyRollout, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return AuthzPolicyRollout{}, err
+	}
+	normalizedPolicySetID, err := normalizeAuthzPolicySetID(policySetID)
+	if err != nil {
+		return AuthzPolicyRollout{}, err
+	}
+
+	row := p.queryRowContext(
+		ctx,
+		`SELECT tenant_id, workspace_id, policy_set_id, active_version, candidate_version, mode, COALESCE(updated_by, ''), updated_at
+		 FROM authz_policy_rollouts
+		 WHERE tenant_id = $1
+		   AND workspace_id = $2
+		   AND policy_set_id = $3`,
+		scope.TenantID,
+		scope.WorkspaceID,
+		normalizedPolicySetID,
+	)
+	record, err := scanAuthzPolicyRollout(row)
+	if err != nil {
+		if errorsIsNoRows(err) {
+			return AuthzPolicyRollout{}, ErrNotFound
+		}
+		return AuthzPolicyRollout{}, fmt.Errorf("query authz policy rollout: %w", err)
+	}
+	return record, nil
+}
+
+// AppendAuthzPolicyEvent records one immutable policy lifecycle event.
+func (p *PostgresStore) AppendAuthzPolicyEvent(ctx context.Context, event AuthzPolicyEvent) error {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+	normalized, err := NormalizeAuthzPolicyEventForWrite(event)
+	if err != nil {
+		return err
+	}
+	normalized.TenantID = scope.TenantID
+	normalized.WorkspaceID = scope.WorkspaceID
+	if normalized.ID == "" {
+		normalized.ID = uuid.NewString()
+	}
+
+	var metadataPayload any
+	if normalized.Metadata != nil {
+		payload, err := json.Marshal(normalized.Metadata)
+		if err != nil {
+			return fmt.Errorf("marshal authz policy event metadata: %w", err)
+		}
+		metadataPayload = payload
+	}
+
+	_, err = p.execContext(
+		ctx,
+		`INSERT INTO authz_policy_events (
+			id, tenant_id, workspace_id, policy_set_id, event_type, from_version, to_version, actor, message, metadata, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, NULLIF($8, ''), NULLIF($9, ''), $10::jsonb, $11)`,
+		normalized.ID,
+		normalized.TenantID,
+		normalized.WorkspaceID,
+		normalized.PolicySetID,
+		normalized.EventType,
+		normalized.FromVersion,
+		normalized.ToVersion,
+		normalized.Actor,
+		normalized.Message,
+		metadataPayload,
+		normalized.CreatedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("insert authz policy event: %w", err)
+	}
+	return nil
+}
+
+// ListAuthzPolicyEvents returns lifecycle events for one policy set (newest first).
+func (p *PostgresStore) ListAuthzPolicyEvents(ctx context.Context, policySetID string, limit int) ([]AuthzPolicyEvent, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	normalizedPolicySetID, err := normalizeAuthzPolicySetID(policySetID)
+	if err != nil {
+		return nil, err
+	}
+	const maxPolicyEventListLimit = 500
+	if limit <= 0 {
+		limit = 100
+	} else if limit > maxPolicyEventListLimit {
+		limit = maxPolicyEventListLimit
+	}
+
+	rows, err := p.queryContext(
+		ctx,
+		`SELECT id, tenant_id, workspace_id, policy_set_id, event_type, from_version, to_version, COALESCE(actor, ''), COALESCE(message, ''), COALESCE(metadata, '{}'::jsonb), created_at
+		 FROM authz_policy_events
+		 WHERE tenant_id = $1
+		   AND workspace_id = $2
+		   AND policy_set_id = $3
+		 ORDER BY created_at DESC
+		 LIMIT $4`,
+		scope.TenantID,
+		scope.WorkspaceID,
+		normalizedPolicySetID,
+		limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query authz policy events: %w", err)
+	}
+	defer rows.Close()
+
+	result := []AuthzPolicyEvent{}
+	for rows.Next() {
+		record, scanErr := scanAuthzPolicyEvent(rows)
+		if scanErr != nil {
+			return nil, fmt.Errorf("authz policy event row: %w", scanErr)
+		}
+		result = append(result, record)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("authz policy event rows: %w", err)
+	}
+	return result, nil
+}
+
 // ListIdentities returns identities filtered by scan/provider/type/name prefix.
 func (p *PostgresStore) ListIdentities(ctx context.Context, filter IdentityFilter, limit int) ([]domain.Identity, error) {
 	if limit <= 0 {
@@ -2049,6 +2439,110 @@ func scanAuthzRelationship(scanner scanner) (AuthzRelationship, error) {
 	}
 	record.CreatedAt = record.CreatedAt.UTC()
 	record.UpdatedAt = record.UpdatedAt.UTC()
+	return record, nil
+}
+
+func scanAuthzPolicySet(scanner scanner) (AuthzPolicySet, error) {
+	var record AuthzPolicySet
+	if err := scanner.Scan(
+		&record.TenantID,
+		&record.WorkspaceID,
+		&record.PolicySetID,
+		&record.DisplayName,
+		&record.Description,
+		&record.CreatedBy,
+		&record.CreatedAt,
+		&record.UpdatedAt,
+	); err != nil {
+		return AuthzPolicySet{}, err
+	}
+	record.CreatedAt = record.CreatedAt.UTC()
+	record.UpdatedAt = record.UpdatedAt.UTC()
+	return record, nil
+}
+
+func scanAuthzPolicyVersion(scanner scanner) (AuthzPolicyVersion, error) {
+	var record AuthzPolicyVersion
+	var bundle string
+	if err := scanner.Scan(
+		&record.TenantID,
+		&record.WorkspaceID,
+		&record.PolicySetID,
+		&record.Version,
+		&bundle,
+		&record.Checksum,
+		&record.CreatedBy,
+		&record.CreatedAt,
+	); err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+	record.Bundle = strings.TrimSpace(bundle)
+	record.CreatedAt = record.CreatedAt.UTC()
+	return record, nil
+}
+
+func scanAuthzPolicyRollout(scanner scanner) (AuthzPolicyRollout, error) {
+	var record AuthzPolicyRollout
+	var activeVersion sql.NullInt64
+	var candidateVersion sql.NullInt64
+	if err := scanner.Scan(
+		&record.TenantID,
+		&record.WorkspaceID,
+		&record.PolicySetID,
+		&activeVersion,
+		&candidateVersion,
+		&record.Mode,
+		&record.UpdatedBy,
+		&record.UpdatedAt,
+	); err != nil {
+		return AuthzPolicyRollout{}, err
+	}
+	if activeVersion.Valid {
+		value := int(activeVersion.Int64)
+		record.ActiveVersion = &value
+	}
+	if candidateVersion.Valid {
+		value := int(candidateVersion.Int64)
+		record.CandidateVersion = &value
+	}
+	record.UpdatedAt = record.UpdatedAt.UTC()
+	return record, nil
+}
+
+func scanAuthzPolicyEvent(scanner scanner) (AuthzPolicyEvent, error) {
+	var record AuthzPolicyEvent
+	var fromVersion sql.NullInt64
+	var toVersion sql.NullInt64
+	var metadata []byte
+	if err := scanner.Scan(
+		&record.ID,
+		&record.TenantID,
+		&record.WorkspaceID,
+		&record.PolicySetID,
+		&record.EventType,
+		&fromVersion,
+		&toVersion,
+		&record.Actor,
+		&record.Message,
+		&metadata,
+		&record.CreatedAt,
+	); err != nil {
+		return AuthzPolicyEvent{}, err
+	}
+	if fromVersion.Valid {
+		value := int(fromVersion.Int64)
+		record.FromVersion = &value
+	}
+	if toVersion.Valid {
+		value := int(toVersion.Int64)
+		record.ToVersion = &value
+	}
+	if len(metadata) > 0 {
+		if err := json.Unmarshal(metadata, &record.Metadata); err != nil {
+			return AuthzPolicyEvent{}, fmt.Errorf("decode authz policy event metadata: %w", err)
+		}
+	}
+	record.CreatedAt = record.CreatedAt.UTC()
 	return record, nil
 }
 
