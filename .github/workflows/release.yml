@@ -14,6 +14,11 @@ on:
         description: "Public HTTPS API URL for the web image build (for example https://api.identrail.io)"
         required: false
         type: string
+      publish_images:
+        description: "Publish container images (true/false). Push-tag releases always publish images."
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -27,6 +32,7 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       prerelease: ${{ steps.meta.outputs.prerelease }}
       publish_latest: ${{ steps.meta.outputs.publish_latest }}
+      publish_images: ${{ steps.meta.outputs.publish_images }}
 
     steps:
       - name: Resolve release metadata
@@ -48,15 +54,21 @@ jobs:
 
           prerelease="false"
           publish_latest="true"
+          publish_images="true"
           tag_without_build="${tag%%+*}"
           if [[ "${tag_without_build}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+- ]]; then
             prerelease="true"
             publish_latest="false"
           fi
 
+          if [ "${GITHUB_EVENT_NAME}" != "push" ] && [ "${{ github.event.inputs.publish_images }}" != "true" ]; then
+            publish_images="false"
+          fi
+
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
           echo "prerelease=${prerelease}" >> "${GITHUB_OUTPUT}"
           echo "publish_latest=${publish_latest}" >> "${GITHUB_OUTPUT}"
+          echo "publish_images=${publish_images}" >> "${GITHUB_OUTPUT}"
 
   build-binaries:
     name: Build Release Binaries
@@ -136,6 +148,7 @@ jobs:
   publish-images:
     name: Build and Publish Images
     needs: prepare
+    if: needs.prepare.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -218,7 +231,31 @@ jobs:
 
   publish-release:
     name: Publish GitHub Release
+    needs: [prepare, build-binaries]
+    if: needs.prepare.outputs.publish_images != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Download release binaries
+        uses: actions/download-artifact@v8
+        with:
+          name: release-binaries
+          path: dist
+
+      - name: Publish release with generated notes
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          generate_release_notes: true
+          prerelease: ${{ needs.prepare.outputs.prerelease == 'true' }}
+          files: |
+            dist/*
+
+  publish-release-with-images:
+    name: Publish GitHub Release (With Images)
     needs: [prepare, build-binaries, publish-images]
+    if: needs.prepare.outputs.publish_images == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
