@@ -383,6 +383,9 @@ func localRepository(target string) (repositoryLocation, bool) {
 	if !isGitBareRepository(path) {
 		return repositoryLocation{}, false
 	}
+	if _, err := os.Stat(filepath.Join(path, "objects")); err != nil {
+		return repositoryLocation{}, false
+	}
 	absolute, absErr := filepath.Abs(path)
 	if absErr != nil {
 		absolute = path
