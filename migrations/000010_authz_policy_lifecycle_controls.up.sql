@@ -80,9 +80,13 @@ CREATE INDEX IF NOT EXISTS idx_authz_policy_events_scope_set_created
     ON authz_policy_events (tenant_id, workspace_id, policy_set_id, created_at DESC);
 
 ALTER TABLE authz_policy_sets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_policy_sets FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_policy_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_policy_versions FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_policy_rollouts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_policy_rollouts FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_policy_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_policy_events FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY authz_policy_sets_scope_isolation ON authz_policy_sets
     USING (identrail_rls_scope_matches(tenant_id, workspace_id))
