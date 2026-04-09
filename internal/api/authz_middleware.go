@@ -246,6 +246,15 @@ func defaultRouteActionReBACPolicies() map[string]rebacActionPolicy {
 		},
 		{
 			Source:   abacAttributeSourceResource,
+			Key:      policyAttributeRiskTier,
+			Operator: abacOperatorOneOf,
+			Values: []string{
+				db.AuthzAttributeRiskTierHigh,
+				db.AuthzAttributeRiskTierCritical,
+			},
+		},
+		{
+			Source:   abacAttributeSourceResource,
 			Key:      policyAttributeClassification,
 			Operator: abacOperatorOneOf,
 			Values: []string{
