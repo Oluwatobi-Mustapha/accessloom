@@ -70,9 +70,3 @@ make bootstrap
 make ci
 ```
 
-Coverage policy:
-- Go test coverage gate is enforced in CI at `>= 80%`.
-
-## License
-
-[Apache License 2.0](LICENSE)
