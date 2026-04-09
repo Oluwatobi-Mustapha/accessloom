@@ -1326,17 +1326,25 @@ func TestPostgresStoreAuthzPolicyRolloutLifecycle(t *testing.T) {
 			sqlmock.AnyArg(),
 			sqlmock.AnyArg(),
 			AuthzPolicyRolloutModeShadow,
+			sqlmock.AnyArg(),
+			sqlmock.AnyArg(),
+			35,
+			sqlmock.AnyArg(),
 			"owner",
 			sqlmock.AnyArg(),
 		).
 		WillReturnResult(sqlmock.NewResult(1, 1))
 
 	if err := store.UpsertAuthzPolicyRollout(defaultScopeContext(), AuthzPolicyRollout{
-		PolicySetID:      "core_policy",
-		ActiveVersion:    &active,
-		CandidateVersion: &candidate,
-		Mode:             AuthzPolicyRolloutModeShadow,
-		UpdatedBy:        "owner",
+		PolicySetID:        "core_policy",
+		ActiveVersion:      &active,
+		CandidateVersion:   &candidate,
+		Mode:               AuthzPolicyRolloutModeShadow,
+		TenantAllowlist:    []string{"tenant-a"},
+		WorkspaceAllowlist: []string{"workspace-a"},
+		CanaryPercentage:   35,
+		ValidatedVersions:  []int{1, 2},
+		UpdatedBy:          "owner",
 	}); err != nil {
 		t.Fatalf("upsert authz policy rollout: %v", err)
 	}
@@ -1349,10 +1357,14 @@ func TestPostgresStoreAuthzPolicyRolloutLifecycle(t *testing.T) {
 		"active_version",
 		"candidate_version",
 		"mode",
+		"tenant_allowlist",
+		"workspace_allowlist",
+		"canary_percentage",
+		"validated_versions",
 		"updated_by",
 		"updated_at",
-	}).AddRow("default", "default", "core_policy", int64(1), int64(2), AuthzPolicyRolloutModeShadow, "owner", now)
-	mock.ExpectQuery("SELECT tenant_id, workspace_id, policy_set_id, active_version, candidate_version, mode, COALESCE\\(updated_by, ''\\), updated_at").
+	}).AddRow("default", "default", "core_policy", int64(1), int64(2), AuthzPolicyRolloutModeShadow, `["tenant-a"]`, `["workspace-a"]`, 35, `[1,2]`, "owner", now)
+	mock.ExpectQuery("SELECT tenant_id, workspace_id, policy_set_id, active_version, candidate_version, mode,\\s+COALESCE\\(tenant_allowlist, '\\[\\]'::jsonb\\)::text,\\s+COALESCE\\(workspace_allowlist, '\\[\\]'::jsonb\\)::text,\\s+canary_percentage,\\s+COALESCE\\(validated_versions, '\\[\\]'::jsonb\\)::text,\\s+COALESCE\\(updated_by, ''\\), updated_at").
 		WithArgs("default", "default", "core_policy").
 		WillReturnRows(rows)
 
@@ -1365,6 +1377,15 @@ func TestPostgresStoreAuthzPolicyRolloutLifecycle(t *testing.T) {
 	}
 	if *rollout.ActiveVersion != 1 || *rollout.CandidateVersion != 2 {
 		t.Fatalf("unexpected rollout versions: %+v", rollout)
+	}
+	if rollout.CanaryPercentage != 35 {
+		t.Fatalf("expected canary percentage 35, got %d", rollout.CanaryPercentage)
+	}
+	if len(rollout.TenantAllowlist) != 1 || rollout.TenantAllowlist[0] != "tenant-a" {
+		t.Fatalf("unexpected tenant allowlist: %+v", rollout.TenantAllowlist)
+	}
+	if len(rollout.ValidatedVersions) != 2 || rollout.ValidatedVersions[0] != 1 || rollout.ValidatedVersions[1] != 2 {
+		t.Fatalf("unexpected validated versions: %+v", rollout.ValidatedVersions)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

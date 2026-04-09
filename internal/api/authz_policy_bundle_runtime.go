@@ -43,12 +43,16 @@ type compiledRouteAuthorizationPolicy struct {
 }
 
 type resolvedCentralPolicyRuntime struct {
-	Engine      *PolicyEngine
-	Registry    routePolicyRegistry
-	Source      string
-	PolicySetID string
-	Version     int
-	RolloutMode string
+	Engine           *PolicyEngine
+	Registry         routePolicyRegistry
+	Source           string
+	PolicySetID      string
+	Version          int
+	RolloutMode      string
+	Rollout          db.AuthzPolicyRollout
+	CandidateEngine  *PolicyEngine
+	CandidateSource  string
+	CandidateVersion int
 }
 
 type centralPolicyRuntimeResolver interface {
@@ -94,6 +98,12 @@ func (r *storeBackedCentralPolicyRuntimeResolver) Resolve(ctx context.Context) (
 			Source:      "built_in_default",
 			PolicySetID: defaultCentralPolicySetID,
 			RolloutMode: db.AuthzPolicyRolloutModeDisabled,
+			Rollout: db.AuthzPolicyRollout{
+				PolicySetID:       defaultCentralPolicySetID,
+				Mode:              db.AuthzPolicyRolloutModeDisabled,
+				CanaryPercentage:  100,
+				ValidatedVersions: nil,
+			},
 		}, nil
 	}
 	fallback := r.fallbackRuntime()
@@ -108,30 +118,43 @@ func (r *storeBackedCentralPolicyRuntimeResolver) Resolve(ctx context.Context) (
 		}
 		return resolvedCentralPolicyRuntime{}, fmt.Errorf("resolve policy rollout: %w", err)
 	}
-	if rollout.Mode != db.AuthzPolicyRolloutModeEnforce || rollout.ActiveVersion == nil || *rollout.ActiveVersion <= 0 {
-		fallback.RolloutMode = strings.TrimSpace(rollout.Mode)
-		return fallback, nil
+	fallback.Rollout = normalizeRuntimeRollout(rollout, r.policySet)
+	fallback.RolloutMode = fallback.Rollout.Mode
+
+	resolved := fallback
+	if fallback.Rollout.ActiveVersion != nil && *fallback.Rollout.ActiveVersion > 0 {
+		version, err := r.store.GetAuthzPolicyVersion(ctx, r.policySet, *fallback.Rollout.ActiveVersion)
+		if err != nil {
+			if !errors.Is(err, db.ErrNotFound) {
+				return resolvedCentralPolicyRuntime{}, fmt.Errorf("resolve active policy version: %w", err)
+			}
+		} else {
+			compiled, err := r.compiledVersion(version)
+			if err == nil {
+				resolved.Engine = newCentralPolicyEngineFromCompiled(r.store, compiled)
+				resolved.Registry = compiled.RouteRegistry
+				resolved.Source = "persisted_active_version"
+				resolved.Version = version.Version
+			}
+		}
 	}
 
-	version, err := r.store.GetAuthzPolicyVersion(ctx, r.policySet, *rollout.ActiveVersion)
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return fallback, nil
+	if fallback.Rollout.CandidateVersion != nil && *fallback.Rollout.CandidateVersion > 0 {
+		version, err := r.store.GetAuthzPolicyVersion(ctx, r.policySet, *fallback.Rollout.CandidateVersion)
+		if err != nil {
+			if !errors.Is(err, db.ErrNotFound) {
+				return resolvedCentralPolicyRuntime{}, fmt.Errorf("resolve candidate policy version: %w", err)
+			}
+		} else {
+			compiled, err := r.compiledVersion(version)
+			if err == nil {
+				resolved.CandidateEngine = newCentralPolicyEngineFromCompiled(r.store, compiled)
+				resolved.CandidateSource = "persisted_candidate_version"
+				resolved.CandidateVersion = version.Version
+			}
 		}
-		return resolvedCentralPolicyRuntime{}, fmt.Errorf("resolve active policy version: %w", err)
 	}
-	compiled, err := r.compiledVersion(version)
-	if err != nil {
-		return resolvedCentralPolicyRuntime{}, err
-	}
-	return resolvedCentralPolicyRuntime{
-		Engine:      newCentralPolicyEngineFromCompiled(r.store, compiled),
-		Registry:    compiled.RouteRegistry,
-		Source:      "persisted_active_version",
-		PolicySetID: r.policySet,
-		Version:     version.Version,
-		RolloutMode: rollout.Mode,
-	}, nil
+	return resolved, nil
 }
 
 func (r *storeBackedCentralPolicyRuntimeResolver) fallbackRuntime() resolvedCentralPolicyRuntime {
@@ -141,7 +164,89 @@ func (r *storeBackedCentralPolicyRuntimeResolver) fallbackRuntime() resolvedCent
 		Source:      "built_in_default",
 		PolicySetID: r.policySet,
 		RolloutMode: db.AuthzPolicyRolloutModeDisabled,
+		Rollout: db.AuthzPolicyRollout{
+			PolicySetID:      r.policySet,
+			Mode:             db.AuthzPolicyRolloutModeDisabled,
+			CanaryPercentage: 100,
+		},
 	}
+}
+
+func normalizeRuntimeRollout(rollout db.AuthzPolicyRollout, policySetID string) db.AuthzPolicyRollout {
+	normalized := rollout
+	normalized.PolicySetID = strings.ToLower(strings.TrimSpace(policySetID))
+	if normalized.PolicySetID == "" {
+		normalized.PolicySetID = defaultCentralPolicySetID
+	}
+	normalized.Mode = strings.ToLower(strings.TrimSpace(rollout.Mode))
+	if normalized.Mode == "" {
+		normalized.Mode = db.AuthzPolicyRolloutModeDisabled
+	}
+	if _, ok := map[string]struct{}{
+		db.AuthzPolicyRolloutModeDisabled: {},
+		db.AuthzPolicyRolloutModeShadow:   {},
+		db.AuthzPolicyRolloutModeEnforce:  {},
+	}[normalized.Mode]; !ok {
+		normalized.Mode = db.AuthzPolicyRolloutModeDisabled
+	}
+	normalized.TenantAllowlist = normalizeRuntimeAllowlist(rollout.TenantAllowlist)
+	normalized.WorkspaceAllowlist = normalizeRuntimeAllowlist(rollout.WorkspaceAllowlist)
+	normalized.ValidatedVersions = normalizeRuntimeValidatedVersions(rollout.ValidatedVersions)
+	normalized.CanaryPercentage = rollout.CanaryPercentage
+	if normalized.CanaryPercentage <= 0 {
+		normalized.CanaryPercentage = 100
+	}
+	if normalized.CanaryPercentage > 100 {
+		normalized.CanaryPercentage = 100
+	}
+	return normalized
+}
+
+func normalizeRuntimeAllowlist(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		item := strings.TrimSpace(value)
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		normalized = append(normalized, item)
+	}
+	sort.Strings(normalized)
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func normalizeRuntimeValidatedVersions(values []int) []int {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[int]struct{}{}
+	normalized := make([]int, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	sort.Ints(normalized)
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }
 
 func (r *storeBackedCentralPolicyRuntimeResolver) compiledVersion(version db.AuthzPolicyVersion) (compiledRouteAuthorizationPolicy, error) {
@@ -465,6 +570,15 @@ func validateAuthzPolicyRolloutActivation(ctx context.Context, store db.Store, p
 			return fmt.Errorf("candidate version validation failed: %w", err)
 		}
 	}
+	rolloutMode := strings.ToLower(strings.TrimSpace(rollout.Mode))
+	if rolloutMode == db.AuthzPolicyRolloutModeEnforce {
+		if rollout.ActiveVersion != nil && !hasValidatedVersion(rollout.ValidatedVersions, *rollout.ActiveVersion) {
+			return fmt.Errorf("active version must exist in validated_versions for enforce mode")
+		}
+		if rollout.CandidateVersion != nil && !hasValidatedVersion(rollout.ValidatedVersions, *rollout.CandidateVersion) {
+			return fmt.Errorf("candidate version must exist in validated_versions for enforce mode")
+		}
+	}
 	return nil
 }
 
@@ -480,6 +594,15 @@ func validateAuthzPolicyVersionBundle(ctx context.Context, store db.Store, polic
 		return err
 	}
 	return nil
+}
+
+func hasValidatedVersion(values []int, version int) bool {
+	for _, candidate := range values {
+		if candidate == version {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultBuiltInRouteAuthorizationPolicyBundle() routeAuthorizationPolicyBundle {

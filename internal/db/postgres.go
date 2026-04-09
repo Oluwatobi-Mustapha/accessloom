@@ -1343,17 +1343,34 @@ func (p *PostgresStore) UpsertAuthzPolicyRollout(ctx context.Context, rollout Au
 	}
 	normalized.TenantID = scope.TenantID
 	normalized.WorkspaceID = scope.WorkspaceID
+	tenantAllowlistPayload, err := json.Marshal(normalized.TenantAllowlist)
+	if err != nil {
+		return fmt.Errorf("marshal tenant allowlist: %w", err)
+	}
+	workspaceAllowlistPayload, err := json.Marshal(normalized.WorkspaceAllowlist)
+	if err != nil {
+		return fmt.Errorf("marshal workspace allowlist: %w", err)
+	}
+	validatedVersionsPayload, err := json.Marshal(normalized.ValidatedVersions)
+	if err != nil {
+		return fmt.Errorf("marshal validated versions: %w", err)
+	}
 
 	_, err = p.execContext(
 		ctx,
 		`INSERT INTO authz_policy_rollouts (
-			tenant_id, workspace_id, policy_set_id, active_version, candidate_version, mode, updated_by, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, NULLIF($7, ''), $8)
+			tenant_id, workspace_id, policy_set_id, active_version, candidate_version, mode,
+			tenant_allowlist, workspace_allowlist, canary_percentage, validated_versions, updated_by, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10::jsonb, NULLIF($11, ''), $12)
 		ON CONFLICT (tenant_id, workspace_id, policy_set_id)
 		DO UPDATE SET
 			active_version = EXCLUDED.active_version,
 			candidate_version = EXCLUDED.candidate_version,
 			mode = EXCLUDED.mode,
+			tenant_allowlist = EXCLUDED.tenant_allowlist,
+			workspace_allowlist = EXCLUDED.workspace_allowlist,
+			canary_percentage = EXCLUDED.canary_percentage,
+			validated_versions = EXCLUDED.validated_versions,
 			updated_by = EXCLUDED.updated_by,
 			updated_at = EXCLUDED.updated_at`,
 		normalized.TenantID,
@@ -1362,6 +1379,10 @@ func (p *PostgresStore) UpsertAuthzPolicyRollout(ctx context.Context, rollout Au
 		normalized.ActiveVersion,
 		normalized.CandidateVersion,
 		normalized.Mode,
+		tenantAllowlistPayload,
+		workspaceAllowlistPayload,
+		normalized.CanaryPercentage,
+		validatedVersionsPayload,
 		normalized.UpdatedBy,
 		normalized.UpdatedAt,
 	)
@@ -1384,7 +1405,12 @@ func (p *PostgresStore) GetAuthzPolicyRollout(ctx context.Context, policySetID s
 
 	row := p.queryRowContext(
 		ctx,
-		`SELECT tenant_id, workspace_id, policy_set_id, active_version, candidate_version, mode, COALESCE(updated_by, ''), updated_at
+		`SELECT tenant_id, workspace_id, policy_set_id, active_version, candidate_version, mode,
+			COALESCE(tenant_allowlist, '[]'::jsonb)::text,
+			COALESCE(workspace_allowlist, '[]'::jsonb)::text,
+			canary_percentage,
+			COALESCE(validated_versions, '[]'::jsonb)::text,
+			COALESCE(updated_by, ''), updated_at
 		 FROM authz_policy_rollouts
 		 WHERE tenant_id = $1
 		   AND workspace_id = $2
@@ -2517,6 +2543,9 @@ func scanAuthzPolicyRollout(scanner scanner) (AuthzPolicyRollout, error) {
 	var record AuthzPolicyRollout
 	var activeVersion sql.NullInt64
 	var candidateVersion sql.NullInt64
+	var tenantAllowlistJSON string
+	var workspaceAllowlistJSON string
+	var validatedVersionsJSON string
 	if err := scanner.Scan(
 		&record.TenantID,
 		&record.WorkspaceID,
@@ -2524,6 +2553,10 @@ func scanAuthzPolicyRollout(scanner scanner) (AuthzPolicyRollout, error) {
 		&activeVersion,
 		&candidateVersion,
 		&record.Mode,
+		&tenantAllowlistJSON,
+		&workspaceAllowlistJSON,
+		&record.CanaryPercentage,
+		&validatedVersionsJSON,
 		&record.UpdatedBy,
 		&record.UpdatedAt,
 	); err != nil {
@@ -2536,6 +2569,21 @@ func scanAuthzPolicyRollout(scanner scanner) (AuthzPolicyRollout, error) {
 	if candidateVersion.Valid {
 		value := int(candidateVersion.Int64)
 		record.CandidateVersion = &value
+	}
+	if strings.TrimSpace(tenantAllowlistJSON) != "" {
+		if err := json.Unmarshal([]byte(tenantAllowlistJSON), &record.TenantAllowlist); err != nil {
+			return AuthzPolicyRollout{}, fmt.Errorf("decode tenant allowlist: %w", err)
+		}
+	}
+	if strings.TrimSpace(workspaceAllowlistJSON) != "" {
+		if err := json.Unmarshal([]byte(workspaceAllowlistJSON), &record.WorkspaceAllowlist); err != nil {
+			return AuthzPolicyRollout{}, fmt.Errorf("decode workspace allowlist: %w", err)
+		}
+	}
+	if strings.TrimSpace(validatedVersionsJSON) != "" {
+		if err := json.Unmarshal([]byte(validatedVersionsJSON), &record.ValidatedVersions); err != nil {
+			return AuthzPolicyRollout{}, fmt.Errorf("decode validated versions: %w", err)
+		}
 	}
 	record.UpdatedAt = record.UpdatedAt.UTC()
 	return record, nil

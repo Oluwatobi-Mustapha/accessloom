@@ -224,11 +224,17 @@ func TestNormalizeAuthzPolicyVersionForWrite(t *testing.T) {
 
 func TestNormalizeAuthzPolicyRolloutForWrite(t *testing.T) {
 	active := 1
+	candidate := 2
 	normalized, err := NormalizeAuthzPolicyRolloutForWrite(AuthzPolicyRollout{
-		PolicySetID:   "core_policy",
-		ActiveVersion: &active,
-		Mode:          "ENFORCE",
-		UpdatedBy:     " owner ",
+		PolicySetID:        "core_policy",
+		ActiveVersion:      &active,
+		CandidateVersion:   &candidate,
+		Mode:               "ENFORCE",
+		TenantAllowlist:    []string{" tenant-a ", "tenant-a", "tenant-b"},
+		WorkspaceAllowlist: []string{"workspace-a", "workspace-a"},
+		CanaryPercentage:   25,
+		ValidatedVersions:  []int{2, 1, 2},
+		UpdatedBy:          " owner ",
 	})
 	if err != nil {
 		t.Fatalf("normalize policy rollout: %v", err)
@@ -238,6 +244,18 @@ func TestNormalizeAuthzPolicyRolloutForWrite(t *testing.T) {
 	}
 	if normalized.UpdatedBy != "owner" {
 		t.Fatalf("expected trimmed updated_by, got %q", normalized.UpdatedBy)
+	}
+	if normalized.CanaryPercentage != 25 {
+		t.Fatalf("expected canary percentage 25, got %d", normalized.CanaryPercentage)
+	}
+	if len(normalized.TenantAllowlist) != 2 {
+		t.Fatalf("expected normalized tenant allowlist, got %+v", normalized.TenantAllowlist)
+	}
+	if len(normalized.WorkspaceAllowlist) != 1 || normalized.WorkspaceAllowlist[0] != "workspace-a" {
+		t.Fatalf("expected normalized workspace allowlist, got %+v", normalized.WorkspaceAllowlist)
+	}
+	if len(normalized.ValidatedVersions) != 2 || normalized.ValidatedVersions[0] != 1 || normalized.ValidatedVersions[1] != 2 {
+		t.Fatalf("expected sorted validated versions [1 2], got %+v", normalized.ValidatedVersions)
 	}
 
 	if _, err := NormalizeAuthzPolicyRolloutForWrite(AuthzPolicyRollout{
@@ -264,6 +282,38 @@ func TestNormalizeAuthzPolicyRolloutForWrite(t *testing.T) {
 	}
 	if defaulted.Mode != AuthzPolicyRolloutModeDisabled {
 		t.Fatalf("expected disabled default rollout mode, got %q", defaulted.Mode)
+	}
+	if defaulted.CanaryPercentage != 100 {
+		t.Fatalf("expected default canary percentage 100, got %d", defaulted.CanaryPercentage)
+	}
+
+	if _, err := NormalizeAuthzPolicyRolloutForWrite(AuthzPolicyRollout{
+		PolicySetID:      "core_policy",
+		Mode:             AuthzPolicyRolloutModeEnforce,
+		ActiveVersion:    &active,
+		CandidateVersion: &candidate,
+		ValidatedVersions: []int{
+			active,
+		},
+	}); err == nil {
+		t.Fatal("expected enforce rollout missing validated candidate to fail")
+	}
+
+	invalidValidatedVersion := 0
+	if _, err := NormalizeAuthzPolicyRolloutForWrite(AuthzPolicyRollout{
+		PolicySetID:       "core_policy",
+		Mode:              AuthzPolicyRolloutModeShadow,
+		ValidatedVersions: []int{invalidValidatedVersion},
+	}); err == nil {
+		t.Fatal("expected invalid validated version to fail")
+	}
+
+	if _, err := NormalizeAuthzPolicyRolloutForWrite(AuthzPolicyRollout{
+		PolicySetID:      "core_policy",
+		Mode:             AuthzPolicyRolloutModeShadow,
+		CanaryPercentage: 101,
+	}); err == nil {
+		t.Fatal("expected invalid canary percentage to fail")
 	}
 }
 

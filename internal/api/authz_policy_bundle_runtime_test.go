@@ -140,10 +140,12 @@ func TestCentralPolicyRuntimeResolverUsesPersistedActiveVersion(t *testing.T) {
 	}
 
 	if err := store.UpsertAuthzPolicyRollout(ctx, db.AuthzPolicyRollout{
-		PolicySetID:   defaultCentralPolicySetID,
-		ActiveVersion: &createdVersion.Version,
-		Mode:          db.AuthzPolicyRolloutModeEnforce,
-		UpdatedBy:     "test",
+		PolicySetID:       defaultCentralPolicySetID,
+		ActiveVersion:     &createdVersion.Version,
+		Mode:              db.AuthzPolicyRolloutModeEnforce,
+		ValidatedVersions: []int{createdVersion.Version},
+		CanaryPercentage:  100,
+		UpdatedBy:         "test",
 	}); err != nil {
 		t.Fatalf("upsert policy rollout: %v", err)
 	}
@@ -167,7 +169,7 @@ func TestCentralPolicyRuntimeResolverUsesPersistedActiveVersion(t *testing.T) {
 	}
 }
 
-func TestCentralPolicyRuntimeResolverFallsBackWhenRolloutIsShadow(t *testing.T) {
+func TestCentralPolicyRuntimeResolverUsesActiveVersionWhenRolloutIsShadow(t *testing.T) {
 	store := db.NewMemoryStore()
 	ctx := testAuthzPolicyScopeContext()
 	resolver := newCentralPolicyRuntimeResolverWithPolicySet(store, defaultCentralPolicySetID)
@@ -211,10 +213,14 @@ func TestCentralPolicyRuntimeResolverFallsBackWhenRolloutIsShadow(t *testing.T) 
 		t.Fatalf("create policy version: %v", err)
 	}
 	if err := store.UpsertAuthzPolicyRollout(ctx, db.AuthzPolicyRollout{
-		PolicySetID:   defaultCentralPolicySetID,
-		ActiveVersion: &createdVersion.Version,
-		Mode:          db.AuthzPolicyRolloutModeShadow,
-		UpdatedBy:     "test",
+		PolicySetID:        defaultCentralPolicySetID,
+		ActiveVersion:      &createdVersion.Version,
+		Mode:               db.AuthzPolicyRolloutModeShadow,
+		CanaryPercentage:   50,
+		ValidatedVersions:  []int{createdVersion.Version},
+		TenantAllowlist:    []string{"tenant-a"},
+		WorkspaceAllowlist: []string{"workspace-a"},
+		UpdatedBy:          "test",
 	}); err != nil {
 		t.Fatalf("upsert policy rollout: %v", err)
 	}
@@ -223,14 +229,20 @@ func TestCentralPolicyRuntimeResolverFallsBackWhenRolloutIsShadow(t *testing.T) 
 	if err != nil {
 		t.Fatalf("resolve runtime policy for shadow mode: %v", err)
 	}
-	if runtimePolicy.Source != "built_in_default" {
-		t.Fatalf("expected built-in fallback source for shadow mode, got %q", runtimePolicy.Source)
+	if runtimePolicy.Source != "persisted_active_version" {
+		t.Fatalf("expected active-version source for shadow mode, got %q", runtimePolicy.Source)
 	}
 	if runtimePolicy.RolloutMode != db.AuthzPolicyRolloutModeShadow {
 		t.Fatalf("expected shadow rollout mode, got %q", runtimePolicy.RolloutMode)
 	}
-	if runtimePolicy.Version != 0 {
-		t.Fatalf("expected no enforced version in shadow fallback, got %d", runtimePolicy.Version)
+	if runtimePolicy.Version != createdVersion.Version {
+		t.Fatalf("expected current version %d, got %d", createdVersion.Version, runtimePolicy.Version)
+	}
+	if runtimePolicy.Rollout.CanaryPercentage != 50 {
+		t.Fatalf("expected rollout canary percentage 50, got %d", runtimePolicy.Rollout.CanaryPercentage)
+	}
+	if len(runtimePolicy.Rollout.TenantAllowlist) != 1 || runtimePolicy.Rollout.TenantAllowlist[0] != "tenant-a" {
+		t.Fatalf("unexpected rollout tenant allowlist: %+v", runtimePolicy.Rollout.TenantAllowlist)
 	}
 }
 
@@ -436,6 +448,31 @@ func TestPolicyBundleCompilerValidationBranches(t *testing.T) {
 }
 
 func TestPolicyBundleValidationHelpersRejectInvalidInputs(t *testing.T) {
+	store := db.NewMemoryStore()
+	ctx := testAuthzPolicyScopeContext()
+
+	if err := store.UpsertAuthzPolicySet(ctx, db.AuthzPolicySet{
+		PolicySetID: defaultCentralPolicySetID,
+		DisplayName: "Central Authorization",
+		CreatedBy:   "test",
+	}); err != nil {
+		t.Fatalf("upsert policy set: %v", err)
+	}
+	versionBundle := defaultBuiltInRouteAuthorizationPolicyBundle()
+	versionBundleBytes, err := json.Marshal(versionBundle)
+	if err != nil {
+		t.Fatalf("marshal default bundle: %v", err)
+	}
+	version, err := store.CreateAuthzPolicyVersion(ctx, db.AuthzPolicyVersion{
+		PolicySetID: defaultCentralPolicySetID,
+		Version:     1,
+		Bundle:      string(versionBundleBytes),
+		CreatedBy:   "test",
+	})
+	if err != nil {
+		t.Fatalf("create policy version: %v", err)
+	}
+
 	if err := validateABACActionPolicy(abacActionPolicy{
 		OnNoMatch: "unsupported",
 	}, "abac_policies.findings_read"); err == nil {
@@ -477,6 +514,14 @@ func TestPolicyBundleValidationHelpersRejectInvalidInputs(t *testing.T) {
 	}
 	if err := validateAuthzPolicyRolloutActivation(context.Background(), db.NewMemoryStore(), "   ", db.AuthzPolicyRollout{}); err == nil {
 		t.Fatal("expected empty policy set id rollout validation to fail")
+	}
+	if err := validateAuthzPolicyRolloutActivation(ctx, store, defaultCentralPolicySetID, db.AuthzPolicyRollout{
+		PolicySetID:       defaultCentralPolicySetID,
+		Mode:              db.AuthzPolicyRolloutModeEnforce,
+		ActiveVersion:     &version.Version,
+		ValidatedVersions: []int{},
+	}); err == nil {
+		t.Fatal("expected enforce activation without validated version to fail")
 	}
 	if err := validateAuthzPolicyVersionBundle(context.Background(), db.NewMemoryStore(), defaultCentralPolicySetID, 0); err == nil {
 		t.Fatal("expected non-positive version validation to fail")

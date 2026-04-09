@@ -838,6 +838,9 @@ func (m *MemoryStore) UpsertAuthzPolicyRollout(ctx context.Context, rollout Auth
 
 	normalized.TenantID = scoped.TenantID
 	normalized.WorkspaceID = scoped.WorkspaceID
+	normalized.TenantAllowlist = append([]string(nil), normalized.TenantAllowlist...)
+	normalized.WorkspaceAllowlist = append([]string(nil), normalized.WorkspaceAllowlist...)
+	normalized.ValidatedVersions = append([]int(nil), normalized.ValidatedVersions...)
 	m.authzRollouts[authzPolicySetScopeKey(scoped, normalized.PolicySetID)] = normalized
 	return nil
 }
@@ -861,6 +864,9 @@ func (m *MemoryStore) GetAuthzPolicyRollout(ctx context.Context, policySetID str
 	if !exists {
 		return AuthzPolicyRollout{}, ErrNotFound
 	}
+	record.TenantAllowlist = append([]string(nil), record.TenantAllowlist...)
+	record.WorkspaceAllowlist = append([]string(nil), record.WorkspaceAllowlist...)
+	record.ValidatedVersions = append([]int(nil), record.ValidatedVersions...)
 	return record, nil
 }
 

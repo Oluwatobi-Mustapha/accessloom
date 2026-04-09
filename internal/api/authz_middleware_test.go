@@ -11,6 +11,7 @@ import (
 	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/telemetry"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"go.uber.org/zap"
 )
 
@@ -484,7 +485,193 @@ func TestTrustedAttributesFromStoreNormalizesEnumCasing(t *testing.T) {
 	}
 }
 
+func TestShouldTargetRolloutRequestDeterministicCanary(t *testing.T) {
+	rollout := db.AuthzPolicyRollout{
+		PolicySetID:        defaultCentralPolicySetID,
+		Mode:               db.AuthzPolicyRolloutModeEnforce,
+		CanaryPercentage:   25,
+		TenantAllowlist:    []string{"tenant-a"},
+		WorkspaceAllowlist: []string{"workspace-a"},
+	}
+	input := PolicyInput{
+		Subject: PolicySubject{
+			Type:        "subject",
+			ID:          "principal-1",
+			TenantID:    "tenant-a",
+			WorkspaceID: "workspace-a",
+		},
+		Action: "scans.run",
+		Resource: PolicyResource{
+			Type:        "scan",
+			ID:          "scan-1",
+			TenantID:    "tenant-a",
+			WorkspaceID: "workspace-a",
+		},
+		Context: PolicyContext{
+			Attributes: map[string]string{
+				policyContextTenantIDKey:    "tenant-a",
+				policyContextWorkspaceIDKey: "workspace-a",
+			},
+		},
+	}
+	first := shouldTargetRolloutRequest(rollout, input)
+	second := shouldTargetRolloutRequest(rollout, input)
+	if first != second {
+		t.Fatal("expected deterministic rollout targeting result")
+	}
+	input.Subject.TenantID = "tenant-b"
+	if shouldTargetRolloutRequest(rollout, input) {
+		t.Fatal("expected tenant allowlist mismatch to skip rollout targeting")
+	}
+}
+
+func TestRequireCentralPolicyMiddlewareShadowEvaluatesCandidateAndTracksDivergence(t *testing.T) {
+	currentCompiled, err := compileRouteAuthorizationPolicyBundle(defaultBuiltInRouteAuthorizationPolicyBundle())
+	if err != nil {
+		t.Fatalf("compile current policy bundle: %v", err)
+	}
+	candidateBundle := defaultBuiltInRouteAuthorizationPolicyBundle()
+	candidateBundle.RBACActionRole[policyActionScansRun] = []string{scopeAdmin}
+	candidateCompiled, err := compileRouteAuthorizationPolicyBundle(candidateBundle)
+	if err != nil {
+		t.Fatalf("compile candidate policy bundle: %v", err)
+	}
+
+	activeVersion := 1
+	candidateVersion := 2
+	runtime := resolvedCentralPolicyRuntime{
+		Engine:      newCentralPolicyEngineFromCompiled(nil, currentCompiled),
+		Registry:    currentCompiled.RouteRegistry,
+		Source:      "persisted_active_version",
+		PolicySetID: defaultCentralPolicySetID,
+		Version:     activeVersion,
+		RolloutMode: db.AuthzPolicyRolloutModeShadow,
+		Rollout: db.AuthzPolicyRollout{
+			PolicySetID:        defaultCentralPolicySetID,
+			ActiveVersion:      &activeVersion,
+			CandidateVersion:   &candidateVersion,
+			Mode:               db.AuthzPolicyRolloutModeShadow,
+			CanaryPercentage:   100,
+			TenantAllowlist:    []string{"tenant-a"},
+			WorkspaceAllowlist: []string{"workspace-a"},
+			ValidatedVersions:  []int{activeVersion, candidateVersion},
+		},
+		CandidateEngine:  newCentralPolicyEngineFromCompiled(nil, candidateCompiled),
+		CandidateSource:  "persisted_candidate_version",
+		CandidateVersion: candidateVersion,
+	}
+	metrics := telemetry.NewMetrics()
+	router := newPolicyTestRouterWithResolver(newScopeSet([]string{scopeWrite}), true, staticPolicyRuntimeResolver{runtime: runtime}, metrics)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+	if got := testutil.ToFloat64(metrics.AuthzPolicyShadowEvaluationsTotal); got != 1 {
+		t.Fatalf("expected one shadow evaluation, got %v", got)
+	}
+	if got := testutil.ToFloat64(metrics.AuthzPolicyShadowDivergencesTotal); got != 1 {
+		t.Fatalf("expected one shadow divergence, got %v", got)
+	}
+}
+
+func TestRequireCentralPolicyMiddlewareEnforceUsesCandidateWhenTargeted(t *testing.T) {
+	currentCompiled, err := compileRouteAuthorizationPolicyBundle(defaultBuiltInRouteAuthorizationPolicyBundle())
+	if err != nil {
+		t.Fatalf("compile current policy bundle: %v", err)
+	}
+	candidateBundle := defaultBuiltInRouteAuthorizationPolicyBundle()
+	candidateBundle.RBACActionRole[policyActionScansRun] = []string{scopeAdmin}
+	candidateCompiled, err := compileRouteAuthorizationPolicyBundle(candidateBundle)
+	if err != nil {
+		t.Fatalf("compile candidate policy bundle: %v", err)
+	}
+
+	activeVersion := 1
+	candidateVersion := 2
+	runtime := resolvedCentralPolicyRuntime{
+		Engine:      newCentralPolicyEngineFromCompiled(nil, currentCompiled),
+		Registry:    currentCompiled.RouteRegistry,
+		Source:      "persisted_active_version",
+		PolicySetID: defaultCentralPolicySetID,
+		Version:     activeVersion,
+		RolloutMode: db.AuthzPolicyRolloutModeEnforce,
+		Rollout: db.AuthzPolicyRollout{
+			PolicySetID:        defaultCentralPolicySetID,
+			ActiveVersion:      &activeVersion,
+			CandidateVersion:   &candidateVersion,
+			Mode:               db.AuthzPolicyRolloutModeEnforce,
+			CanaryPercentage:   100,
+			TenantAllowlist:    []string{"tenant-a"},
+			WorkspaceAllowlist: []string{"workspace-a"},
+			ValidatedVersions:  []int{activeVersion, candidateVersion},
+		},
+		CandidateEngine:  newCentralPolicyEngineFromCompiled(nil, candidateCompiled),
+		CandidateSource:  "persisted_candidate_version",
+		CandidateVersion: candidateVersion,
+	}
+	router := newPolicyTestRouterWithResolver(newScopeSet([]string{scopeWrite}), true, staticPolicyRuntimeResolver{runtime: runtime}, telemetry.NewMetrics())
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when candidate policy is enforced, got %d", w.Code)
+	}
+}
+
+func TestRequireCentralPolicyMiddlewareEnforceFallsBackWhenCandidateNotValidated(t *testing.T) {
+	currentCompiled, err := compileRouteAuthorizationPolicyBundle(defaultBuiltInRouteAuthorizationPolicyBundle())
+	if err != nil {
+		t.Fatalf("compile current policy bundle: %v", err)
+	}
+	candidateBundle := defaultBuiltInRouteAuthorizationPolicyBundle()
+	candidateBundle.RBACActionRole[policyActionScansRun] = []string{scopeAdmin}
+	candidateCompiled, err := compileRouteAuthorizationPolicyBundle(candidateBundle)
+	if err != nil {
+		t.Fatalf("compile candidate policy bundle: %v", err)
+	}
+
+	activeVersion := 1
+	candidateVersion := 2
+	runtime := resolvedCentralPolicyRuntime{
+		Engine:      newCentralPolicyEngineFromCompiled(nil, currentCompiled),
+		Registry:    currentCompiled.RouteRegistry,
+		Source:      "persisted_active_version",
+		PolicySetID: defaultCentralPolicySetID,
+		Version:     activeVersion,
+		RolloutMode: db.AuthzPolicyRolloutModeEnforce,
+		Rollout: db.AuthzPolicyRollout{
+			PolicySetID:        defaultCentralPolicySetID,
+			ActiveVersion:      &activeVersion,
+			CandidateVersion:   &candidateVersion,
+			Mode:               db.AuthzPolicyRolloutModeEnforce,
+			CanaryPercentage:   100,
+			TenantAllowlist:    []string{"tenant-a"},
+			WorkspaceAllowlist: []string{"workspace-a"},
+			ValidatedVersions:  []int{activeVersion},
+		},
+		CandidateEngine:  newCentralPolicyEngineFromCompiled(nil, candidateCompiled),
+		CandidateSource:  "persisted_candidate_version",
+		CandidateVersion: candidateVersion,
+	}
+	router := newPolicyTestRouterWithResolver(newScopeSet([]string{scopeWrite}), true, staticPolicyRuntimeResolver{runtime: runtime}, telemetry.NewMetrics())
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204 when unvalidated candidate cannot be enforced, got %d", w.Code)
+	}
+}
+
 func newPolicyTestRouter(scopes scopeSet, setPrincipal bool, store db.Store) *gin.Engine {
+	return newPolicyTestRouterWithResolver(scopes, setPrincipal, newCentralPolicyRuntimeResolver(store), telemetry.NewMetrics())
+}
+
+func newPolicyTestRouterWithResolver(scopes scopeSet, setPrincipal bool, resolver centralPolicyRuntimeResolver, metrics *telemetry.Metrics) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.Use(func(c *gin.Context) {
@@ -498,7 +685,7 @@ func newPolicyTestRouter(scopes scopeSet, setPrincipal bool, store db.Store) *gi
 		}
 		c.Next()
 	})
-	r.Use(requireCentralPolicyMiddleware(newCentralPolicyRuntimeResolver(store), nil, nil, store))
+	r.Use(requireCentralPolicyMiddleware(resolver, nil, nil, nil, metrics))
 	r.POST("/v1/scans", func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
@@ -519,7 +706,7 @@ func newPolicyTriageRouter(scopes scopeSet, setPrincipal bool, store db.Store) *
 		}
 		c.Next()
 	})
-	r.Use(requireCentralPolicyMiddleware(newCentralPolicyRuntimeResolver(store), nil, nil, store))
+	r.Use(requireCentralPolicyMiddleware(newCentralPolicyRuntimeResolver(store), nil, nil, store, telemetry.NewMetrics()))
 	r.PATCH("/v1/findings/:finding_id/triage", func(c *gin.Context) {
 		c.Status(http.StatusNoContent)
 	})
@@ -533,6 +720,15 @@ func policyTestScopeContext() context.Context {
 type authzOverrideStore struct {
 	db.Store
 	records map[string]db.AuthzEntityAttributes
+}
+
+type staticPolicyRuntimeResolver struct {
+	runtime resolvedCentralPolicyRuntime
+	err     error
+}
+
+func (s staticPolicyRuntimeResolver) Resolve(_ context.Context) (resolvedCentralPolicyRuntime, error) {
+	return s.runtime, s.err
 }
 
 func (s authzOverrideStore) GetAuthzEntityAttributes(_ context.Context, entityKind string, entityType string, entityID string) (db.AuthzEntityAttributes, error) {

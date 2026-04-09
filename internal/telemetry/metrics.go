@@ -4,16 +4,19 @@ import "github.com/prometheus/client_golang/prometheus"
 
 // Metrics bundles Prometheus instruments used by API and workers.
 type Metrics struct {
-	ScanRunsTotal        prometheus.Counter
-	ScanSuccessTotal     prometheus.Counter
-	ScanFailureTotal     prometheus.Counter
-	ScanPartialTotal     prometheus.Counter
-	ScanInFlight         prometheus.Gauge
-	ScanDurationMS       prometheus.Histogram
-	FindingsGenerated    prometheus.Counter
-	RepoScanRunsTotal    prometheus.Counter
-	RepoScanFailureTotal prometheus.Counter
-	RepoScanDurationMS   prometheus.Histogram
+	ScanRunsTotal                          prometheus.Counter
+	ScanSuccessTotal                       prometheus.Counter
+	ScanFailureTotal                       prometheus.Counter
+	ScanPartialTotal                       prometheus.Counter
+	ScanInFlight                           prometheus.Gauge
+	ScanDurationMS                         prometheus.Histogram
+	FindingsGenerated                      prometheus.Counter
+	RepoScanRunsTotal                      prometheus.Counter
+	RepoScanFailureTotal                   prometheus.Counter
+	RepoScanDurationMS                     prometheus.Histogram
+	AuthzPolicyShadowEvaluationsTotal      prometheus.Counter
+	AuthzPolicyShadowDivergencesTotal      prometheus.Counter
+	AuthzPolicyShadowEvaluationErrorsTotal prometheus.Counter
 }
 
 // NewMetrics initializes a dedicated registry-safe instrument set.
@@ -80,6 +83,24 @@ func NewMetrics() *Metrics {
 			Name:      "duration_milliseconds",
 			Help:      "Duration of repository exposure scans in milliseconds.",
 			Buckets:   []float64{100, 250, 500, 1000, 2000, 5000, 10000, 30000, 60000},
+		}),
+		AuthzPolicyShadowEvaluationsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "identrail",
+			Subsystem: "authz_policy_rollout",
+			Name:      "shadow_evaluations_total",
+			Help:      "Total number of shadow candidate policy evaluations.",
+		}),
+		AuthzPolicyShadowDivergencesTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "identrail",
+			Subsystem: "authz_policy_rollout",
+			Name:      "shadow_divergences_total",
+			Help:      "Total number of shadow evaluations where candidate decision diverged from enforced decision.",
+		}),
+		AuthzPolicyShadowEvaluationErrorsTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "identrail",
+			Subsystem: "authz_policy_rollout",
+			Name:      "shadow_evaluation_errors_total",
+			Help:      "Total number of shadow candidate evaluations that failed.",
 		}),
 	}
 }

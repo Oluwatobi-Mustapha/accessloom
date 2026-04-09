@@ -721,11 +721,15 @@ func TestMemoryStoreAuthzPolicyLifecycle(t *testing.T) {
 	activeVersion := 1
 	candidateVersion := 2
 	if err := store.UpsertAuthzPolicyRollout(ctx, AuthzPolicyRollout{
-		PolicySetID:      "core_policy",
-		ActiveVersion:    &activeVersion,
-		CandidateVersion: &candidateVersion,
-		Mode:             AuthzPolicyRolloutModeShadow,
-		UpdatedBy:        "owner",
+		PolicySetID:        "core_policy",
+		ActiveVersion:      &activeVersion,
+		CandidateVersion:   &candidateVersion,
+		Mode:               AuthzPolicyRolloutModeShadow,
+		TenantAllowlist:    []string{"tenant-a"},
+		WorkspaceAllowlist: []string{"workspace-a"},
+		CanaryPercentage:   40,
+		ValidatedVersions:  []int{1, 2},
+		UpdatedBy:          "owner",
 	}); err != nil {
 		t.Fatalf("upsert policy rollout: %v", err)
 	}
@@ -736,6 +740,15 @@ func TestMemoryStoreAuthzPolicyLifecycle(t *testing.T) {
 	}
 	if rollout.Mode != AuthzPolicyRolloutModeShadow || rollout.ActiveVersion == nil || *rollout.ActiveVersion != 1 {
 		t.Fatalf("unexpected policy rollout: %+v", rollout)
+	}
+	if rollout.CanaryPercentage != 40 {
+		t.Fatalf("expected canary percentage 40, got %d", rollout.CanaryPercentage)
+	}
+	if len(rollout.TenantAllowlist) != 1 || rollout.TenantAllowlist[0] != "tenant-a" {
+		t.Fatalf("unexpected tenant allowlist: %+v", rollout.TenantAllowlist)
+	}
+	if len(rollout.ValidatedVersions) != 2 || rollout.ValidatedVersions[0] != 1 || rollout.ValidatedVersions[1] != 2 {
+		t.Fatalf("unexpected validated versions: %+v", rollout.ValidatedVersions)
 	}
 
 	if err := store.AppendAuthzPolicyEvent(ctx, AuthzPolicyEvent{
@@ -837,6 +850,19 @@ func TestMemoryStoreAuthzPolicyLifecycleReadAndErrorPaths(t *testing.T) {
 		UpdatedBy:        "owner",
 	}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected rollout with missing candidate version to fail with ErrNotFound, got %v", err)
+	}
+
+	if err := store.UpsertAuthzPolicyRollout(ctx, AuthzPolicyRollout{
+		PolicySetID:      "core_policy",
+		ActiveVersion:    &createdVersion.Version,
+		CandidateVersion: &createdVersion.Version,
+		Mode:             AuthzPolicyRolloutModeEnforce,
+		ValidatedVersions: []int{
+			createdVersion.Version,
+		},
+		UpdatedBy: "owner",
+	}); err != nil {
+		t.Fatalf("expected enforce rollout with validated versions to succeed, got %v", err)
 	}
 
 	if err := store.AppendAuthzPolicyEvent(ctx, AuthzPolicyEvent{

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -245,14 +246,18 @@ type AuthzPolicyVersion struct {
 
 // AuthzPolicyRollout stores one scoped rollout pointer for active/candidate versions.
 type AuthzPolicyRollout struct {
-	TenantID         string    `json:"-"`
-	WorkspaceID      string    `json:"-"`
-	PolicySetID      string    `json:"policy_set_id"`
-	ActiveVersion    *int      `json:"active_version,omitempty"`
-	CandidateVersion *int      `json:"candidate_version,omitempty"`
-	Mode             string    `json:"mode"`
-	UpdatedBy        string    `json:"updated_by,omitempty"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	TenantID           string    `json:"-"`
+	WorkspaceID        string    `json:"-"`
+	PolicySetID        string    `json:"policy_set_id"`
+	ActiveVersion      *int      `json:"active_version,omitempty"`
+	CandidateVersion   *int      `json:"candidate_version,omitempty"`
+	Mode               string    `json:"mode"`
+	TenantAllowlist    []string  `json:"tenant_allowlist,omitempty"`
+	WorkspaceAllowlist []string  `json:"workspace_allowlist,omitempty"`
+	CanaryPercentage   int       `json:"canary_percentage"`
+	ValidatedVersions  []int     `json:"validated_versions,omitempty"`
+	UpdatedBy          string    `json:"updated_by,omitempty"`
+	UpdatedAt          time.Time `json:"updated_at"`
 }
 
 // AuthzPolicyEvent records one immutable policy lifecycle action.
@@ -449,6 +454,27 @@ func NormalizeAuthzPolicyRolloutForWrite(rollout AuthzPolicyRollout) (AuthzPolic
 	if _, ok := validAuthzPolicyRolloutModes[normalized.Mode]; !ok {
 		return AuthzPolicyRollout{}, fmt.Errorf("invalid rollout mode")
 	}
+	normalized.TenantAllowlist = normalizeAuthzRolloutAllowlist(rollout.TenantAllowlist)
+	normalized.WorkspaceAllowlist = normalizeAuthzRolloutAllowlist(rollout.WorkspaceAllowlist)
+	normalized.CanaryPercentage = rollout.CanaryPercentage
+	if normalized.CanaryPercentage == 0 {
+		normalized.CanaryPercentage = 100
+	}
+	if normalized.CanaryPercentage < 0 || normalized.CanaryPercentage > 100 {
+		return AuthzPolicyRollout{}, fmt.Errorf("canary percentage must be between 0 and 100")
+	}
+	normalized.ValidatedVersions, err = normalizeAuthzRolloutValidatedVersions(rollout.ValidatedVersions)
+	if err != nil {
+		return AuthzPolicyRollout{}, err
+	}
+	if normalized.Mode == AuthzPolicyRolloutModeEnforce {
+		if normalized.ActiveVersion != nil && !containsInt(normalized.ValidatedVersions, *normalized.ActiveVersion) {
+			return AuthzPolicyRollout{}, fmt.Errorf("active version must exist in validated_versions when mode is enforce")
+		}
+		if normalized.CandidateVersion != nil && !containsInt(normalized.ValidatedVersions, *normalized.CandidateVersion) {
+			return AuthzPolicyRollout{}, fmt.Errorf("candidate version must exist in validated_versions when mode is enforce")
+		}
+	}
 	normalized.UpdatedBy = strings.TrimSpace(rollout.UpdatedBy)
 	if normalized.UpdatedAt.IsZero() {
 		normalized.UpdatedAt = time.Now().UTC()
@@ -456,6 +482,59 @@ func NormalizeAuthzPolicyRolloutForWrite(rollout AuthzPolicyRollout) (AuthzPolic
 		normalized.UpdatedAt = normalized.UpdatedAt.UTC()
 	}
 	return normalized, nil
+}
+
+func normalizeAuthzRolloutAllowlist(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		item := strings.TrimSpace(value)
+		if item == "" {
+			continue
+		}
+		if _, exists := seen[item]; exists {
+			continue
+		}
+		seen[item] = struct{}{}
+		normalized = append(normalized, item)
+	}
+	sort.Strings(normalized)
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func normalizeAuthzRolloutValidatedVersions(versions []int) ([]int, error) {
+	if len(versions) == 0 {
+		return nil, nil
+	}
+	seen := map[int]struct{}{}
+	normalized := make([]int, 0, len(versions))
+	for _, version := range versions {
+		if version <= 0 {
+			return nil, fmt.Errorf("validated versions must be greater than zero")
+		}
+		if _, exists := seen[version]; exists {
+			continue
+		}
+		seen[version] = struct{}{}
+		normalized = append(normalized, version)
+	}
+	sort.Ints(normalized)
+	return normalized, nil
+}
+
+func containsInt(values []int, value int) bool {
+	for _, candidate := range values {
+		if candidate == value {
+			return true
+		}
+	}
+	return false
 }
 
 // NormalizeAuthzPolicyEventForWrite validates and canonicalizes one immutable policy event.

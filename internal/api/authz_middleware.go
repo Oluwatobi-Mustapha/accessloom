@@ -3,12 +3,14 @@ package api
 import (
 	"context"
 	"errors"
+	"hash/fnv"
 	"net/http"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
+	"github.com/Oluwatobi-Mustapha/identrail/internal/telemetry"
 	"github.com/gin-gonic/gin"
 )
 
@@ -212,7 +214,7 @@ func defaultRouteActionReBACPolicies() map[string]rebacActionPolicy {
 	}
 }
 
-func requireCentralPolicyMiddleware(resolver centralPolicyRuntimeResolver, writeKeys []string, scopedKeys map[string][]string, store db.Store) gin.HandlerFunc {
+func requireCentralPolicyMiddleware(resolver centralPolicyRuntimeResolver, writeKeys []string, scopedKeys map[string][]string, store db.Store, metrics *telemetry.Metrics) gin.HandlerFunc {
 	normalizedWriteKeys := normalizeKeyList(writeKeys)
 	if resolver == nil {
 		resolver = newCentralPolicyRuntimeResolver(store)
@@ -247,25 +249,130 @@ func requireCentralPolicyMiddleware(resolver centralPolicyRuntimeResolver, write
 			return
 		}
 
-		decision, err := runtimePolicy.Engine.Decide(c.Request.Context(), input)
+		targeted := shouldTargetRolloutRequest(runtimePolicy.Rollout, input)
+		enforceCandidate := runtimePolicy.Rollout.Mode == db.AuthzPolicyRolloutModeEnforce &&
+			targeted &&
+			runtimePolicy.CandidateEngine != nil &&
+			rolloutVersionValidated(runtimePolicy.Rollout, runtimePolicy.CandidateVersion)
+
+		decisionEngine := runtimePolicy.Engine
+		decisionSource := runtimePolicy.Source
+		decisionVersion := runtimePolicy.Version
+		if enforceCandidate {
+			decisionEngine = runtimePolicy.CandidateEngine
+			decisionSource = runtimePolicy.CandidateSource
+			decisionVersion = runtimePolicy.CandidateVersion
+		}
+
+		decision, err := decisionEngine.Decide(c.Request.Context(), input)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "authorization failed"})
 			return
 		}
+
+		if runtimePolicy.Rollout.Mode == db.AuthzPolicyRolloutModeShadow &&
+			targeted &&
+			runtimePolicy.CandidateEngine != nil &&
+			rolloutVersionValidated(runtimePolicy.Rollout, runtimePolicy.CandidateVersion) {
+			if metrics != nil && metrics.AuthzPolicyShadowEvaluationsTotal != nil {
+				metrics.AuthzPolicyShadowEvaluationsTotal.Inc()
+			}
+			candidateDecision, err := runtimePolicy.CandidateEngine.Decide(c.Request.Context(), input)
+			if err != nil {
+				if metrics != nil && metrics.AuthzPolicyShadowEvaluationErrorsTotal != nil {
+					metrics.AuthzPolicyShadowEvaluationErrorsTotal.Inc()
+				}
+			} else if policyDecisionsDiverge(decision, candidateDecision) {
+				if metrics != nil && metrics.AuthzPolicyShadowDivergencesTotal != nil {
+					metrics.AuthzPolicyShadowDivergencesTotal.Inc()
+				}
+			}
+		}
+
 		if !decision.Allowed {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
 
 		c.Set("authz.stage", string(decision.Stage))
-		c.Set("authz.policy_source", runtimePolicy.Source)
+		c.Set("authz.policy_source", decisionSource)
 		c.Set("authz.policy_set_id", runtimePolicy.PolicySetID)
 		c.Set("authz.rollout_mode", runtimePolicy.RolloutMode)
-		if runtimePolicy.Version > 0 {
-			c.Set("authz.policy_version", runtimePolicy.Version)
+		if decisionVersion > 0 {
+			c.Set("authz.policy_version", decisionVersion)
 		}
 		c.Next()
 	}
+}
+
+func shouldTargetRolloutRequest(rollout db.AuthzPolicyRollout, input PolicyInput) bool {
+	canary := rollout.CanaryPercentage
+	if canary <= 0 {
+		return false
+	}
+	if canary > 100 {
+		canary = 100
+	}
+	tenantID := firstNonEmpty(
+		input.Resource.TenantID,
+		firstNonEmpty(input.Subject.TenantID, strings.TrimSpace(input.Context.Attributes[policyContextTenantIDKey])),
+	)
+	workspaceID := firstNonEmpty(
+		input.Resource.WorkspaceID,
+		firstNonEmpty(input.Subject.WorkspaceID, strings.TrimSpace(input.Context.Attributes[policyContextWorkspaceIDKey])),
+	)
+
+	if len(rollout.TenantAllowlist) > 0 && !containsStringExact(rollout.TenantAllowlist, tenantID) {
+		return false
+	}
+	if len(rollout.WorkspaceAllowlist) > 0 && !containsStringExact(rollout.WorkspaceAllowlist, workspaceID) {
+		return false
+	}
+	if canary >= 100 {
+		return true
+	}
+	bucket := deterministicCanaryBucket(strings.Join([]string{
+		strings.TrimSpace(rollout.PolicySetID),
+		tenantID,
+		workspaceID,
+		strings.TrimSpace(input.Subject.Type),
+		strings.TrimSpace(input.Subject.ID),
+		strings.TrimSpace(input.Action),
+		strings.TrimSpace(input.Resource.Type),
+		strings.TrimSpace(input.Resource.ID),
+	}, "|"))
+	return bucket < canary
+}
+
+func deterministicCanaryBucket(seed string) int {
+	hasher := fnv.New64a()
+	_, _ = hasher.Write([]byte(strings.TrimSpace(seed)))
+	return int(hasher.Sum64() % 100)
+}
+
+func containsStringExact(values []string, target string) bool {
+	for _, candidate := range values {
+		if strings.TrimSpace(candidate) == strings.TrimSpace(target) {
+			return true
+		}
+	}
+	return false
+}
+
+func rolloutVersionValidated(rollout db.AuthzPolicyRollout, version int) bool {
+	if version <= 0 {
+		return false
+	}
+	for _, validated := range rollout.ValidatedVersions {
+		if validated == version {
+			return true
+		}
+	}
+	return false
+}
+
+func policyDecisionsDiverge(current PolicyDecision, candidate PolicyDecision) bool {
+	return current.Allowed != candidate.Allowed || current.Stage != candidate.Stage
 }
 
 func buildPolicyInputFromGinContext(c *gin.Context, policy routePolicy, writeKeys []string, scopedKeys map[string][]string, store db.Store) (PolicyInput, error) {
