@@ -663,3 +663,222 @@ func TestMemoryStoreAuthzRelationshipLifecycle(t *testing.T) {
 		t.Fatalf("unexpected remaining relationships: %+v", remaining)
 	}
 }
+
+func TestMemoryStoreAuthzPolicyLifecycle(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := defaultScopeContext()
+
+	if err := store.UpsertAuthzPolicySet(ctx, AuthzPolicySet{
+		PolicySetID: "core_policy",
+		DisplayName: "Core Policy",
+		Description: "workspace baseline",
+		CreatedBy:   "owner",
+	}); err != nil {
+		t.Fatalf("upsert authz policy set: %v", err)
+	}
+
+	set, err := store.GetAuthzPolicySet(ctx, "core_policy")
+	if err != nil {
+		t.Fatalf("get authz policy set: %v", err)
+	}
+	if set.DisplayName != "Core Policy" {
+		t.Fatalf("unexpected policy set: %+v", set)
+	}
+
+	firstVersion, err := store.CreateAuthzPolicyVersion(ctx, AuthzPolicyVersion{
+		PolicySetID: "core_policy",
+		Version:     1,
+		Bundle:      `{"rules":[{"id":"allow-read","effect":"allow"}]}`,
+		CreatedBy:   "owner",
+	})
+	if err != nil {
+		t.Fatalf("create first policy version: %v", err)
+	}
+
+	secondVersion, err := store.CreateAuthzPolicyVersion(ctx, AuthzPolicyVersion{
+		PolicySetID: "core_policy",
+		Bundle:      `{"rules":[{"id":"allow-read","effect":"allow"},{"id":"allow-write","effect":"allow"}]}`,
+		CreatedBy:   "owner",
+	})
+	if err != nil {
+		t.Fatalf("create second policy version with auto-increment: %v", err)
+	}
+	if secondVersion.Version != firstVersion.Version+1 {
+		t.Fatalf("expected auto-incremented version %d, got %d", firstVersion.Version+1, secondVersion.Version)
+	}
+
+	versions, err := store.ListAuthzPolicyVersions(ctx, "core_policy", 10)
+	if err != nil {
+		t.Fatalf("list policy versions: %v", err)
+	}
+	if len(versions) != 2 {
+		t.Fatalf("expected 2 versions, got %d", len(versions))
+	}
+	if versions[0].Version != 2 || versions[1].Version != 1 {
+		t.Fatalf("expected versions sorted newest-first, got %+v", versions)
+	}
+
+	activeVersion := 1
+	candidateVersion := 2
+	if err := store.UpsertAuthzPolicyRollout(ctx, AuthzPolicyRollout{
+		PolicySetID:      "core_policy",
+		ActiveVersion:    &activeVersion,
+		CandidateVersion: &candidateVersion,
+		Mode:             AuthzPolicyRolloutModeShadow,
+		UpdatedBy:        "owner",
+	}); err != nil {
+		t.Fatalf("upsert policy rollout: %v", err)
+	}
+
+	rollout, err := store.GetAuthzPolicyRollout(ctx, "core_policy")
+	if err != nil {
+		t.Fatalf("get policy rollout: %v", err)
+	}
+	if rollout.Mode != AuthzPolicyRolloutModeShadow || rollout.ActiveVersion == nil || *rollout.ActiveVersion != 1 {
+		t.Fatalf("unexpected policy rollout: %+v", rollout)
+	}
+
+	if err := store.AppendAuthzPolicyEvent(ctx, AuthzPolicyEvent{
+		PolicySetID: "core_policy",
+		EventType:   "publish",
+		ToVersion:   &activeVersion,
+		Actor:       "owner",
+		Message:     "published baseline",
+		Metadata:    map[string]any{"source": "test"},
+	}); err != nil {
+		t.Fatalf("append policy event publish: %v", err)
+	}
+	if err := store.AppendAuthzPolicyEvent(ctx, AuthzPolicyEvent{
+		PolicySetID: "core_policy",
+		EventType:   "promote",
+		FromVersion: &activeVersion,
+		ToVersion:   &candidateVersion,
+		Actor:       "owner",
+		Message:     "promoted candidate",
+	}); err != nil {
+		t.Fatalf("append policy event promote: %v", err)
+	}
+
+	events, err := store.ListAuthzPolicyEvents(ctx, "core_policy", 10)
+	if err != nil {
+		t.Fatalf("list policy events: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected 2 policy events, got %d", len(events))
+	}
+	if events[0].CreatedAt.Before(events[1].CreatedAt) {
+		t.Fatalf("expected events sorted newest-first, got %+v", events)
+	}
+
+	otherScope := WithScope(ctx, Scope{TenantID: "tenant-b", WorkspaceID: "workspace-b"})
+	if _, err := store.GetAuthzPolicySet(otherScope, "core_policy"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected scoped policy set isolation, got %v", err)
+	}
+	if _, err := store.GetAuthzPolicyRollout(otherScope, "core_policy"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected scoped policy rollout isolation, got %v", err)
+	}
+}
+
+func TestMemoryStoreAuthzPolicyLifecycleReadAndErrorPaths(t *testing.T) {
+	store := NewMemoryStore()
+	ctx := defaultScopeContext()
+
+	if err := store.UpsertAuthzPolicySet(ctx, AuthzPolicySet{
+		PolicySetID: "core_policy",
+		DisplayName: "Core Policy",
+		CreatedBy:   "owner",
+	}); err != nil {
+		t.Fatalf("upsert authz policy set: %v", err)
+	}
+
+	createdVersion, err := store.CreateAuthzPolicyVersion(ctx, AuthzPolicyVersion{
+		PolicySetID: "core_policy",
+		Version:     1,
+		Bundle:      `{"rules":[{"id":"allow-read","effect":"allow"}]}`,
+		CreatedBy:   "owner",
+	})
+	if err != nil {
+		t.Fatalf("create policy version: %v", err)
+	}
+
+	fetchedVersion, err := store.GetAuthzPolicyVersion(ctx, "core_policy", 1)
+	if err != nil {
+		t.Fatalf("get existing policy version: %v", err)
+	}
+	if fetchedVersion.Version != 1 || fetchedVersion.Checksum == "" {
+		t.Fatalf("unexpected fetched policy version: %+v", fetchedVersion)
+	}
+
+	if _, err := store.GetAuthzPolicyVersion(ctx, "core_policy", 0); err == nil {
+		t.Fatal("expected invalid policy version lookup to fail")
+	}
+	if _, err := store.GetAuthzPolicyVersion(ctx, "core_policy", 2); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected missing policy version to return ErrNotFound, got %v", err)
+	}
+	if _, err := store.GetAuthzPolicySet(ctx, "invalid policy set"); err == nil {
+		t.Fatal("expected invalid policy set id lookup to fail")
+	}
+
+	if _, err := store.CreateAuthzPolicyVersion(ctx, AuthzPolicyVersion{
+		PolicySetID: "core_policy",
+		Version:     1,
+		Bundle:      `{"rules":[{"id":"allow-write","effect":"allow"}]}`,
+		CreatedBy:   "owner",
+	}); err == nil {
+		t.Fatal("expected duplicate policy version to fail")
+	}
+
+	missingVersion := createdVersion.Version + 1
+	if err := store.UpsertAuthzPolicyRollout(ctx, AuthzPolicyRollout{
+		PolicySetID:      "core_policy",
+		ActiveVersion:    &createdVersion.Version,
+		CandidateVersion: &missingVersion,
+		Mode:             AuthzPolicyRolloutModeShadow,
+		UpdatedBy:        "owner",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected rollout with missing candidate version to fail with ErrNotFound, got %v", err)
+	}
+
+	if err := store.AppendAuthzPolicyEvent(ctx, AuthzPolicyEvent{
+		ID:          "event-1",
+		PolicySetID: "core_policy",
+		EventType:   "publish",
+		ToVersion:   &createdVersion.Version,
+		Actor:       "owner",
+	}); err != nil {
+		t.Fatalf("append first policy event: %v", err)
+	}
+	if err := store.AppendAuthzPolicyEvent(ctx, AuthzPolicyEvent{
+		ID:          "event-1",
+		PolicySetID: "core_policy",
+		EventType:   "publish",
+		ToVersion:   &createdVersion.Version,
+		Actor:       "owner",
+	}); err == nil {
+		t.Fatal("expected duplicate policy event id to fail")
+	}
+	if err := store.AppendAuthzPolicyEvent(ctx, AuthzPolicyEvent{
+		PolicySetID: "missing_policy_set",
+		EventType:   "publish",
+		ToVersion:   &createdVersion.Version,
+		Actor:       "owner",
+	}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected event append for missing policy set to return ErrNotFound, got %v", err)
+	}
+
+	versions, err := store.ListAuthzPolicyVersions(ctx, "core_policy", 1)
+	if err != nil {
+		t.Fatalf("list policy versions with limit: %v", err)
+	}
+	if len(versions) != 1 || versions[0].Version != 1 {
+		t.Fatalf("unexpected limited policy versions: %+v", versions)
+	}
+
+	events, err := store.ListAuthzPolicyEvents(ctx, "core_policy", 1)
+	if err != nil {
+		t.Fatalf("list policy events with limit: %v", err)
+	}
+	if len(events) != 1 || events[0].ID != "event-1" {
+		t.Fatalf("unexpected limited policy events: %+v", events)
+	}
+}

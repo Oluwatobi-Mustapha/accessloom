@@ -29,6 +29,11 @@ type MemoryStore struct {
 	rawAssets     map[string]providers.RawAsset
 	authzAttrs    map[string]AuthzEntityAttributes
 	authzRels     map[string]AuthzRelationship
+	authzSets     map[string]AuthzPolicySet
+	authzVersions map[string]AuthzPolicyVersion
+	authzRollouts map[string]AuthzPolicyRollout
+	authzEvents   map[string][]AuthzPolicyEvent
+	authzEventIDs map[string]struct{}
 	identities    map[string]domain.Identity
 	policies      map[string]domain.Policy
 	relationships map[string]domain.Relationship
@@ -51,6 +56,11 @@ func NewMemoryStore() *MemoryStore {
 		rawAssets:     map[string]providers.RawAsset{},
 		authzAttrs:    map[string]AuthzEntityAttributes{},
 		authzRels:     map[string]AuthzRelationship{},
+		authzSets:     map[string]AuthzPolicySet{},
+		authzVersions: map[string]AuthzPolicyVersion{},
+		authzRollouts: map[string]AuthzPolicyRollout{},
+		authzEvents:   map[string][]AuthzPolicyEvent{},
+		authzEventIDs: map[string]struct{}{},
 		identities:    map[string]domain.Identity{},
 		policies:      map[string]domain.Policy{},
 		relationships: map[string]domain.Relationship{},
@@ -638,6 +648,280 @@ func (m *MemoryStore) ListAuthzRelationships(ctx context.Context, filter AuthzRe
 	return records, nil
 }
 
+// UpsertAuthzPolicySet creates or updates one scoped policy set metadata record.
+func (m *MemoryStore) UpsertAuthzPolicySet(ctx context.Context, policySet AuthzPolicySet) error {
+	normalized, err := NormalizeAuthzPolicySetForWrite(policySet)
+	if err != nil {
+		return err
+	}
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	scoped := scope.Normalize()
+	normalized.TenantID = scoped.TenantID
+	normalized.WorkspaceID = scoped.WorkspaceID
+	key := authzPolicySetScopeKey(scoped, normalized.PolicySetID)
+	if existing, exists := m.authzSets[key]; exists {
+		normalized.CreatedAt = existing.CreatedAt
+		normalized.CreatedBy = existing.CreatedBy
+	}
+	m.authzSets[key] = normalized
+	return nil
+}
+
+// GetAuthzPolicySet returns one scoped policy set metadata record.
+func (m *MemoryStore) GetAuthzPolicySet(ctx context.Context, policySetID string) (AuthzPolicySet, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return AuthzPolicySet{}, err
+	}
+	normalizedPolicySetID, err := normalizeAuthzPolicySetID(policySetID)
+	if err != nil {
+		return AuthzPolicySet{}, err
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	scoped := scope.Normalize()
+	record, exists := m.authzSets[authzPolicySetScopeKey(scoped, normalizedPolicySetID)]
+	if !exists {
+		return AuthzPolicySet{}, ErrNotFound
+	}
+	return record, nil
+}
+
+// CreateAuthzPolicyVersion persists one immutable policy bundle version.
+func (m *MemoryStore) CreateAuthzPolicyVersion(ctx context.Context, version AuthzPolicyVersion) (AuthzPolicyVersion, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+	scoped := scope.Normalize()
+	policySetID, err := normalizeAuthzPolicySetID(version.PolicySetID)
+	if err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, exists := m.authzSets[authzPolicySetScopeKey(scoped, policySetID)]; !exists {
+		return AuthzPolicyVersion{}, ErrNotFound
+	}
+	if version.Version <= 0 {
+		nextVersion := 1
+		for _, candidate := range m.authzVersions {
+			if !MatchScope(scoped, candidate.TenantID, candidate.WorkspaceID) {
+				continue
+			}
+			if candidate.PolicySetID != policySetID {
+				continue
+			}
+			if candidate.Version >= nextVersion {
+				nextVersion = candidate.Version + 1
+			}
+		}
+		version.Version = nextVersion
+	}
+
+	normalized, err := NormalizeAuthzPolicyVersionForWrite(version)
+	if err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+	normalized.TenantID = scoped.TenantID
+	normalized.WorkspaceID = scoped.WorkspaceID
+
+	key := authzPolicyVersionScopeKey(scoped, normalized.PolicySetID, normalized.Version)
+	if _, exists := m.authzVersions[key]; exists {
+		return AuthzPolicyVersion{}, fmt.Errorf("authz policy version already exists")
+	}
+	m.authzVersions[key] = normalized
+	return normalized, nil
+}
+
+// GetAuthzPolicyVersion returns one scoped immutable policy bundle version.
+func (m *MemoryStore) GetAuthzPolicyVersion(ctx context.Context, policySetID string, version int) (AuthzPolicyVersion, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+	normalizedPolicySetID, err := normalizeAuthzPolicySetID(policySetID)
+	if err != nil {
+		return AuthzPolicyVersion{}, err
+	}
+	if version <= 0 {
+		return AuthzPolicyVersion{}, fmt.Errorf("version must be greater than zero")
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	scoped := scope.Normalize()
+	record, exists := m.authzVersions[authzPolicyVersionScopeKey(scoped, normalizedPolicySetID, version)]
+	if !exists {
+		return AuthzPolicyVersion{}, ErrNotFound
+	}
+	return record, nil
+}
+
+// ListAuthzPolicyVersions returns policy bundle versions for one policy set (newest first).
+func (m *MemoryStore) ListAuthzPolicyVersions(ctx context.Context, policySetID string, limit int) ([]AuthzPolicyVersion, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	normalizedPolicySetID, err := normalizeAuthzPolicySetID(policySetID)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	scoped := scope.Normalize()
+	records := make([]AuthzPolicyVersion, 0)
+	for _, version := range m.authzVersions {
+		if !MatchScope(scoped, version.TenantID, version.WorkspaceID) {
+			continue
+		}
+		if version.PolicySetID != normalizedPolicySetID {
+			continue
+		}
+		records = append(records, version)
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].Version != records[j].Version {
+			return records[i].Version > records[j].Version
+		}
+		return records[i].CreatedAt.After(records[j].CreatedAt)
+	})
+	if limit > 0 && len(records) > limit {
+		records = records[:limit]
+	}
+	return records, nil
+}
+
+// UpsertAuthzPolicyRollout creates or updates one scoped rollout pointer row.
+func (m *MemoryStore) UpsertAuthzPolicyRollout(ctx context.Context, rollout AuthzPolicyRollout) error {
+	normalized, err := NormalizeAuthzPolicyRolloutForWrite(rollout)
+	if err != nil {
+		return err
+	}
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	scoped := scope.Normalize()
+	if _, exists := m.authzSets[authzPolicySetScopeKey(scoped, normalized.PolicySetID)]; !exists {
+		return ErrNotFound
+	}
+	if normalized.ActiveVersion != nil {
+		if _, exists := m.authzVersions[authzPolicyVersionScopeKey(scoped, normalized.PolicySetID, *normalized.ActiveVersion)]; !exists {
+			return ErrNotFound
+		}
+	}
+	if normalized.CandidateVersion != nil {
+		if _, exists := m.authzVersions[authzPolicyVersionScopeKey(scoped, normalized.PolicySetID, *normalized.CandidateVersion)]; !exists {
+			return ErrNotFound
+		}
+	}
+
+	normalized.TenantID = scoped.TenantID
+	normalized.WorkspaceID = scoped.WorkspaceID
+	m.authzRollouts[authzPolicySetScopeKey(scoped, normalized.PolicySetID)] = normalized
+	return nil
+}
+
+// GetAuthzPolicyRollout returns one scoped rollout pointer row.
+func (m *MemoryStore) GetAuthzPolicyRollout(ctx context.Context, policySetID string) (AuthzPolicyRollout, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return AuthzPolicyRollout{}, err
+	}
+	normalizedPolicySetID, err := normalizeAuthzPolicySetID(policySetID)
+	if err != nil {
+		return AuthzPolicyRollout{}, err
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	scoped := scope.Normalize()
+	record, exists := m.authzRollouts[authzPolicySetScopeKey(scoped, normalizedPolicySetID)]
+	if !exists {
+		return AuthzPolicyRollout{}, ErrNotFound
+	}
+	return record, nil
+}
+
+// AppendAuthzPolicyEvent records one immutable policy lifecycle event.
+func (m *MemoryStore) AppendAuthzPolicyEvent(ctx context.Context, event AuthzPolicyEvent) error {
+	normalized, err := NormalizeAuthzPolicyEventForWrite(event)
+	if err != nil {
+		return err
+	}
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	scoped := scope.Normalize()
+	if _, exists := m.authzSets[authzPolicySetScopeKey(scoped, normalized.PolicySetID)]; !exists {
+		return ErrNotFound
+	}
+	if normalized.ID == "" {
+		normalized.ID = uuid.NewString()
+	}
+	if _, exists := m.authzEventIDs[normalized.ID]; exists {
+		return fmt.Errorf("authz policy event already exists")
+	}
+
+	normalized.TenantID = scoped.TenantID
+	normalized.WorkspaceID = scoped.WorkspaceID
+	key := authzPolicyEventsScopeKey(scoped, normalized.PolicySetID)
+	m.authzEvents[key] = append(m.authzEvents[key], normalized)
+	m.authzEventIDs[normalized.ID] = struct{}{}
+	return nil
+}
+
+// ListAuthzPolicyEvents returns immutable lifecycle events for one policy set (newest first).
+func (m *MemoryStore) ListAuthzPolicyEvents(ctx context.Context, policySetID string, limit int) ([]AuthzPolicyEvent, error) {
+	scope, err := RequireScope(ctx)
+	if err != nil {
+		return nil, err
+	}
+	normalizedPolicySetID, err := normalizeAuthzPolicySetID(policySetID)
+	if err != nil {
+		return nil, err
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	scoped := scope.Normalize()
+	events := append([]AuthzPolicyEvent(nil), m.authzEvents[authzPolicyEventsScopeKey(scoped, normalizedPolicySetID)]...)
+	sort.Slice(events, func(i, j int) bool {
+		return events[i].CreatedAt.After(events[j].CreatedAt)
+	})
+	if limit > 0 && len(events) > limit {
+		events = events[:limit]
+	}
+	return events, nil
+}
+
 // ListIdentities returns identities filtered by scan/provider/type/name.
 func (m *MemoryStore) ListIdentities(ctx context.Context, filter IdentityFilter, limit int) ([]domain.Identity, error) {
 	m.mu.RLock()
@@ -806,6 +1090,19 @@ func authzEntityScopeKey(scope Scope, entityKind string, entityType string, enti
 func authzRelationshipScopeKey(scope Scope, subjectType string, subjectID string, relation string, objectType string, objectID string) string {
 	normalized := scope.Normalize()
 	return normalized.TenantID + "|" + normalized.WorkspaceID + "|" + strings.ToLower(strings.TrimSpace(subjectType)) + "|" + strings.TrimSpace(subjectID) + "|" + strings.ToLower(strings.TrimSpace(relation)) + "|" + strings.ToLower(strings.TrimSpace(objectType)) + "|" + strings.TrimSpace(objectID)
+}
+
+func authzPolicySetScopeKey(scope Scope, policySetID string) string {
+	normalized := scope.Normalize()
+	return normalized.TenantID + "|" + normalized.WorkspaceID + "|" + strings.ToLower(strings.TrimSpace(policySetID))
+}
+
+func authzPolicyVersionScopeKey(scope Scope, policySetID string, version int) string {
+	return fmt.Sprintf("%s|%d", authzPolicySetScopeKey(scope, policySetID), version)
+}
+
+func authzPolicyEventsScopeKey(scope Scope, policySetID string) string {
+	return authzPolicySetScopeKey(scope, policySetID)
 }
 
 func normalizeFindingTriageStateForWrite(state FindingTriageState) (FindingTriageState, error) {

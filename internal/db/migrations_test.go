@@ -181,3 +181,35 @@ func TestNinthMigrationContainsAuthzABACAndReBACDataTables(t *testing.T) {
 		}
 	}
 }
+
+func TestTenthMigrationContainsAuthzPolicyLifecycleTables(t *testing.T) {
+	path := filepath.Join("..", "..", "migrations", "000010_authz_policy_lifecycle_controls.up.sql")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read migration: %v", err)
+	}
+	text := string(content)
+	required := []string{
+		"CREATE TABLE IF NOT EXISTS authz_policy_sets",
+		"CREATE TABLE IF NOT EXISTS authz_policy_versions",
+		"CREATE TABLE IF NOT EXISTS authz_policy_rollouts",
+		"CREATE TABLE IF NOT EXISTS authz_policy_events",
+		"idx_authz_policy_versions_scope_set_created",
+		"idx_authz_policy_rollouts_scope_mode",
+		"idx_authz_policy_events_scope_set_created",
+		"FORCE ROW LEVEL SECURITY",
+		"DROP POLICY IF EXISTS authz_policy_sets_scope_isolation",
+		"DROP POLICY IF EXISTS authz_policy_versions_scope_isolation",
+		"DROP POLICY IF EXISTS authz_policy_rollouts_scope_isolation",
+		"DROP POLICY IF EXISTS authz_policy_events_scope_isolation",
+		"CREATE POLICY authz_policy_sets_scope_isolation",
+		"CREATE POLICY authz_policy_versions_scope_isolation",
+		"CREATE POLICY authz_policy_rollouts_scope_isolation",
+		"CREATE POLICY authz_policy_events_scope_isolation",
+	}
+	for _, item := range required {
+		if !strings.Contains(text, item) {
+			t.Fatalf("expected authz policy lifecycle migration item %q", item)
+		}
+	}
+}

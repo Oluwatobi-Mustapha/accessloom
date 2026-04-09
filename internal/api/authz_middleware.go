@@ -34,87 +34,11 @@ type routePolicy struct {
 type routePolicyRegistry map[string]routePolicy
 
 func newRoutePolicyRegistry() routePolicyRegistry {
-	return routePolicyRegistry{
-		routePolicyKey(http.MethodGet, "/v1/findings"): {
-			Action:       policyActionFindingsRead,
-			ResourceType: "finding",
-		},
-		routePolicyKey(http.MethodGet, "/v1/findings/:finding_id"): {
-			Action:          policyActionFindingsRead,
-			ResourceType:    "finding",
-			ResourceIDParam: "finding_id",
-		},
-		routePolicyKey(http.MethodGet, "/v1/findings/:finding_id/history"): {
-			Action:          policyActionFindingsRead,
-			ResourceType:    "finding_history",
-			ResourceIDParam: "finding_id",
-		},
-		routePolicyKey(http.MethodGet, "/v1/findings/:finding_id/exports"): {
-			Action:          policyActionFindingsRead,
-			ResourceType:    "finding_export",
-			ResourceIDParam: "finding_id",
-		},
-		routePolicyKey(http.MethodGet, "/v1/findings/trends"): {
-			Action:       policyActionFindingsRead,
-			ResourceType: "finding_trend",
-		},
-		routePolicyKey(http.MethodGet, "/v1/findings/summary"): {
-			Action:       policyActionFindingsRead,
-			ResourceType: "finding_summary",
-		},
-		routePolicyKey(http.MethodPatch, "/v1/findings/:finding_id/triage"): {
-			Action:          policyActionFindingsTriage,
-			ResourceType:    "finding",
-			ResourceIDParam: "finding_id",
-		},
-		routePolicyKey(http.MethodGet, "/v1/identities"): {
-			Action:       policyActionGraphRead,
-			ResourceType: "identity",
-		},
-		routePolicyKey(http.MethodGet, "/v1/relationships"): {
-			Action:       policyActionGraphRead,
-			ResourceType: "relationship",
-		},
-		routePolicyKey(http.MethodGet, "/v1/ownership/signals"): {
-			Action:       policyActionGraphRead,
-			ResourceType: "ownership_signal",
-		},
-		routePolicyKey(http.MethodGet, "/v1/scans"): {
-			Action:       policyActionScansRead,
-			ResourceType: "scan",
-		},
-		routePolicyKey(http.MethodGet, "/v1/scans/:scan_id/diff"): {
-			Action:          policyActionScansRead,
-			ResourceType:    "scan_diff",
-			ResourceIDParam: "scan_id",
-		},
-		routePolicyKey(http.MethodGet, "/v1/scans/:scan_id/events"): {
-			Action:          policyActionScansRead,
-			ResourceType:    "scan_event",
-			ResourceIDParam: "scan_id",
-		},
-		routePolicyKey(http.MethodPost, "/v1/scans"): {
-			Action:       policyActionScansRun,
-			ResourceType: "scan",
-		},
-		routePolicyKey(http.MethodGet, "/v1/repo-scans"): {
-			Action:       policyActionRepoScansRead,
-			ResourceType: "repo_scan",
-		},
-		routePolicyKey(http.MethodGet, "/v1/repo-scans/:repo_scan_id"): {
-			Action:          policyActionRepoScansRead,
-			ResourceType:    "repo_scan",
-			ResourceIDParam: "repo_scan_id",
-		},
-		routePolicyKey(http.MethodGet, "/v1/repo-findings"): {
-			Action:       policyActionRepoScansRead,
-			ResourceType: "repo_finding",
-		},
-		routePolicyKey(http.MethodPost, "/v1/repo-scans"): {
-			Action:       policyActionRepoScansRun,
-			ResourceType: "repo_scan",
-		},
+	compiled, err := compileRouteAuthorizationPolicyBundle(defaultBuiltInRouteAuthorizationPolicyBundle())
+	if err != nil {
+		panic("compile built-in route policy registry: " + err.Error())
 	}
+	return compiled.RouteRegistry
 }
 
 func (r routePolicyRegistry) lookup(method string, fullPath string) (routePolicy, bool) {
@@ -141,12 +65,11 @@ func defaultRouteActionRoleGrants() map[string][]string {
 }
 
 func newCentralPolicyEngine(store db.Store) *PolicyEngine {
-	return NewPolicyEngine(
-		newTenantIsolationEvaluator(),
-		newRBACRequirementEvaluator(defaultRouteActionRoleGrants()),
-		newABACPolicyEvaluator(defaultRouteActionABACPolicies()),
-		newReBACPolicyEvaluator(store, defaultRouteActionReBACPolicies()),
-	)
+	compiled, err := compileRouteAuthorizationPolicyBundle(defaultBuiltInRouteAuthorizationPolicyBundle())
+	if err != nil {
+		panic("compile built-in central policy engine: " + err.Error())
+	}
+	return newCentralPolicyEngineFromCompiled(store, compiled)
 }
 
 func defaultRouteActionABACPolicies() map[string]abacActionPolicy {
@@ -286,16 +209,14 @@ func defaultRouteActionReBACPolicies() map[string]rebacActionPolicy {
 	}
 }
 
-func requireCentralPolicyMiddleware(engine *PolicyEngine, registry routePolicyRegistry, writeKeys []string, scopedKeys map[string][]string, store db.Store) gin.HandlerFunc {
+func requireCentralPolicyMiddleware(resolver centralPolicyRuntimeResolver, writeKeys []string, scopedKeys map[string][]string, store db.Store) gin.HandlerFunc {
 	normalizedWriteKeys := normalizeKeyList(writeKeys)
+	if resolver == nil {
+		resolver = newCentralPolicyRuntimeResolver(store)
+	}
 	return func(c *gin.Context) {
 		fullPath := strings.TrimSpace(c.FullPath())
 		if fullPath == "" {
-			c.Next()
-			return
-		}
-		policy, exists := registry.lookup(c.Request.Method, fullPath)
-		if !exists {
 			c.Next()
 			return
 		}
@@ -306,13 +227,24 @@ func requireCentralPolicyMiddleware(engine *PolicyEngine, registry routePolicyRe
 			return
 		}
 
+		runtimePolicy, err := resolver.Resolve(c.Request.Context())
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "authorization failed"})
+			return
+		}
+		policy, exists := runtimePolicy.Registry.lookup(c.Request.Method, fullPath)
+		if !exists {
+			c.Next()
+			return
+		}
+
 		input, err := buildPolicyInputFromGinContext(c, policy, normalizedWriteKeys, scopedKeys, store)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "authorization failed"})
 			return
 		}
 
-		decision, err := engine.Decide(c.Request.Context(), input)
+		decision, err := runtimePolicy.Engine.Decide(c.Request.Context(), input)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "authorization failed"})
 			return
@@ -323,6 +255,12 @@ func requireCentralPolicyMiddleware(engine *PolicyEngine, registry routePolicyRe
 		}
 
 		c.Set("authz.stage", string(decision.Stage))
+		c.Set("authz.policy_source", runtimePolicy.Source)
+		c.Set("authz.policy_set_id", runtimePolicy.PolicySetID)
+		c.Set("authz.rollout_mode", runtimePolicy.RolloutMode)
+		if runtimePolicy.Version > 0 {
+			c.Set("authz.policy_version", runtimePolicy.Version)
+		}
 		c.Next()
 	}
 }
