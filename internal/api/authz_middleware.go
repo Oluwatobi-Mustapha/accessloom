@@ -303,18 +303,13 @@ func requireCentralPolicyMiddleware(resolver centralPolicyRuntimeResolver, write
 			}
 		}
 
+		setAuthzDecisionContext(c, runtimePolicy.PolicySetID, decisionVersion, decisionSource, runtimePolicy.RolloutMode, decision, input)
+
 		if !decision.Allowed {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "forbidden"})
 			return
 		}
 
-		c.Set("authz.stage", string(decision.Stage))
-		c.Set("authz.policy_source", decisionSource)
-		c.Set("authz.policy_set_id", runtimePolicy.PolicySetID)
-		c.Set("authz.rollout_mode", runtimePolicy.RolloutMode)
-		if decisionVersion > 0 {
-			c.Set("authz.policy_version", decisionVersion)
-		}
 		c.Next()
 	}
 }
@@ -415,6 +410,65 @@ func recordPolicyDecisionMetric(metrics *telemetry.Metrics, policySetID string, 
 	}
 	metrics.AuthzPolicyDecisionsByVersionTotal.WithLabelValues(set, versionLabel, sourceLabel, modeLabel, allowedLabel).Inc()
 }
+
+func setAuthzDecisionContext(c *gin.Context, policySetID string, policyVersion int, policySource string, rolloutMode string, decision PolicyDecision, input PolicyInput) {
+	if c == nil {
+		return
+	}
+
+	normalizedPolicySetID := strings.TrimSpace(policySetID)
+	if normalizedPolicySetID == "" {
+		normalizedPolicySetID = defaultCentralPolicySetID
+	}
+	normalizedPolicySource := strings.TrimSpace(policySource)
+	if normalizedPolicySource == "" {
+		normalizedPolicySource = "unknown"
+	}
+	normalizedRolloutMode := strings.TrimSpace(rolloutMode)
+	if normalizedRolloutMode == "" {
+		normalizedRolloutMode = db.AuthzPolicyRolloutModeDisabled
+	}
+	tenantID := firstNonEmpty(
+		input.Resource.TenantID,
+		firstNonEmpty(input.Subject.TenantID, strings.TrimSpace(input.Context.Attributes[policyContextTenantIDKey])),
+	)
+	workspaceID := firstNonEmpty(
+		input.Resource.WorkspaceID,
+		firstNonEmpty(input.Subject.WorkspaceID, strings.TrimSpace(input.Context.Attributes[policyContextWorkspaceIDKey])),
+	)
+
+	auditDecision := AuditAuthzDecision{
+		PolicySetID:  normalizedPolicySetID,
+		PolicySource: normalizedPolicySource,
+		RolloutMode:  normalizedRolloutMode,
+		Allowed:      decision.Allowed,
+		Stage:        strings.TrimSpace(string(decision.Stage)),
+		Reason:       strings.TrimSpace(decision.Reason),
+		Input: AuditAuthzInputSummary{
+			SubjectType:    strings.TrimSpace(input.Subject.Type),
+			SubjectIDHash:  fingerprintAuditIdentifier(input.Subject.ID),
+			Action:         strings.TrimSpace(input.Action),
+			ResourceType:   strings.TrimSpace(input.Resource.Type),
+			ResourceIDHash: fingerprintAuditIdentifier(input.Resource.ID),
+			TenantID:       tenantID,
+			WorkspaceID:    workspaceID,
+		},
+	}
+	if policyVersion > 0 {
+		version := policyVersion
+		auditDecision.PolicyVersion = &version
+	}
+
+	c.Set("authz.stage", auditDecision.Stage)
+	c.Set("authz.policy_source", auditDecision.PolicySource)
+	c.Set("authz.policy_set_id", auditDecision.PolicySetID)
+	c.Set("authz.rollout_mode", auditDecision.RolloutMode)
+	if auditDecision.PolicyVersion != nil {
+		c.Set("authz.policy_version", *auditDecision.PolicyVersion)
+	}
+	c.Set("authz.audit_decision", auditDecision)
+}
+
 func buildPolicyInputFromGinContext(c *gin.Context, policy routePolicy, writeKeys []string, scopedKeys map[string][]string, store db.Store) (PolicyInput, error) {
 	scope := db.ScopeFromContext(c.Request.Context())
 	resourceID := ""

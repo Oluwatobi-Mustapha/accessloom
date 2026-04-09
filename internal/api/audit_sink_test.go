@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
 )
 
 type testRecordingAuditSink struct {
@@ -42,6 +44,23 @@ func TestFileAuditSinkWritesJSONL(t *testing.T) {
 		DurationMS: 4,
 		UserAgent:  "test",
 		APIKeyID:   fingerprintAPIKey("reader-key"),
+		Authz: &AuditAuthzDecision{
+			PolicySetID:  defaultCentralPolicySetID,
+			PolicySource: "persisted_active_version",
+			RolloutMode:  db.AuthzPolicyRolloutModeDisabled,
+			Allowed:      true,
+			Stage:        string(PolicyStageRBAC),
+			Reason:       "rbac policy granted action",
+			Input: AuditAuthzInputSummary{
+				SubjectType:    "subject",
+				SubjectIDHash:  fingerprintAuditIdentifier("principal-1"),
+				Action:         "scans.read",
+				ResourceType:   "scan",
+				ResourceIDHash: fingerprintAuditIdentifier("scan-1"),
+				TenantID:       "tenant-a",
+				WorkspaceID:    "workspace-a",
+			},
+		},
 	}
 	if err := sink.Write(event); err != nil {
 		t.Fatalf("write audit event: %v", err)
@@ -60,6 +79,15 @@ func TestFileAuditSinkWritesJSONL(t *testing.T) {
 	}
 	if got.Path != event.Path || got.Method != event.Method || got.Status != event.Status {
 		t.Fatalf("unexpected event payload: %+v", got)
+	}
+	if got.Authz == nil {
+		t.Fatal("expected authz audit payload")
+	}
+	if got.Authz.Input.SubjectIDHash == "principal-1" {
+		t.Fatal("expected subject_id_hash to be sanitized")
+	}
+	if got.Authz.Input.ResourceIDHash == "scan-1" {
+		t.Fatal("expected resource_id_hash to be sanitized")
 	}
 }
 
@@ -174,5 +202,23 @@ func TestFingerprintAPIKey(t *testing.T) {
 	}
 	if a == "secret-key" {
 		t.Fatal("fingerprint should not equal raw key")
+	}
+}
+
+func TestFingerprintAuditIdentifier(t *testing.T) {
+	a := fingerprintAuditIdentifier("principal-1")
+	b := fingerprintAuditIdentifier("principal-1")
+	c := fingerprintAuditIdentifier("principal-2")
+	if a == "" {
+		t.Fatal("expected fingerprint")
+	}
+	if a != b {
+		t.Fatalf("expected deterministic fingerprint, got %q vs %q", a, b)
+	}
+	if a == c {
+		t.Fatalf("expected different fingerprints, got %q and %q", a, c)
+	}
+	if a == "principal-1" {
+		t.Fatal("fingerprint should not equal raw identifier")
 	}
 }

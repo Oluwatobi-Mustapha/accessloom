@@ -1468,10 +1468,12 @@ func TestRouterWritesAuditSink(t *testing.T) {
 		APIKeyScopes: map[string][]string{"reader-key": {"read"}},
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/scans", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/scans/scan-1/events", nil)
 	req.RemoteAddr = "127.0.0.1:34567"
 	req.Header.Set("User-Agent", "router-test")
 	req.Header.Set("X-API-Key", "reader-key")
+	req.Header.Set(scopeHeaderTenantID, "tenant-a")
+	req.Header.Set(scopeHeaderWorkspaceID, "workspace-a")
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
 
@@ -1481,7 +1483,7 @@ func TestRouterWritesAuditSink(t *testing.T) {
 		t.Fatal("expected sink to capture at least one event")
 	}
 	event := sink.events[len(sink.events)-1]
-	if event.Path != "/v1/scans" || event.Method != http.MethodGet {
+	if event.Path != "/v1/scans/scan-1/events" || event.Method != http.MethodGet {
 		t.Fatalf("unexpected sink event: %+v", event)
 	}
 	if event.UserAgent != "router-test" {
@@ -1492,6 +1494,67 @@ func TestRouterWritesAuditSink(t *testing.T) {
 	}
 	if event.APIKeyID == "reader-key" {
 		t.Fatal("expected fingerprint instead of raw api key")
+	}
+	if event.Authz == nil {
+		t.Fatal("expected authz decision in audit event")
+	}
+	if !event.Authz.Allowed {
+		t.Fatalf("expected allowed authz decision, got %+v", event.Authz)
+	}
+	if event.Authz.Input.SubjectIDHash == "reader-key" {
+		t.Fatal("expected subject_id_hash instead of raw principal identifier")
+	}
+	if event.Authz.Input.ResourceIDHash == "" {
+		t.Fatal("expected resource_id_hash in authz input summary")
+	}
+	if event.Authz.Input.ResourceIDHash == "scan-1" {
+		t.Fatal("expected sanitized resource_id_hash instead of raw resource id")
+	}
+	if event.Authz.PolicySetID != defaultCentralPolicySetID {
+		t.Fatalf("expected policy set %q, got %q", defaultCentralPolicySetID, event.Authz.PolicySetID)
+	}
+}
+
+func TestRouterWritesAuditSinkForDeniedAuthzDecision(t *testing.T) {
+	logger, _ := zap.NewDevelopment()
+	metrics := telemetry.NewMetrics()
+	sink := &recordingAuditSink{}
+	r := NewRouter(logger, metrics, nil, RouterOptions{
+		AuditSink: sink,
+		APIKeyScopes: map[string][]string{
+			"read-key": {scopeRead},
+		},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	req.RemoteAddr = "127.0.0.1:34567"
+	req.Header.Set("User-Agent", "router-test-deny")
+	req.Header.Set("X-API-Key", "read-key")
+	req.Header.Set(scopeHeaderTenantID, "tenant-a")
+	req.Header.Set(scopeHeaderWorkspaceID, "workspace-a")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected denied request status 403, got %d body=%s", w.Code, w.Body.String())
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.events) == 0 {
+		t.Fatal("expected sink to capture denied event")
+	}
+	event := sink.events[len(sink.events)-1]
+	if event.Authz == nil {
+		t.Fatal("expected authz decision in denied audit event")
+	}
+	if event.Authz.Allowed {
+		t.Fatalf("expected denied authz decision, got %+v", event.Authz)
+	}
+	if event.Authz.Input.SubjectIDHash == "read-key" {
+		t.Fatal("expected subject_id_hash instead of raw principal identifier")
+	}
+	if event.Authz.Input.Action != policyActionScansRun {
+		t.Fatalf("expected action %q, got %q", policyActionScansRun, event.Authz.Input.Action)
 	}
 }
 

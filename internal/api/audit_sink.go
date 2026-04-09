@@ -17,14 +17,38 @@ import (
 
 // AuditEvent captures one API request for external audit export.
 type AuditEvent struct {
-	Timestamp  time.Time `json:"timestamp"`
-	Method     string    `json:"method"`
-	Path       string    `json:"path"`
-	Status     int       `json:"status"`
-	ClientIP   string    `json:"client_ip"`
-	DurationMS int64     `json:"duration_ms"`
-	UserAgent  string    `json:"user_agent"`
-	APIKeyID   string    `json:"api_key_id,omitempty"`
+	Timestamp  time.Time           `json:"timestamp"`
+	Method     string              `json:"method"`
+	Path       string              `json:"path"`
+	Status     int                 `json:"status"`
+	ClientIP   string              `json:"client_ip"`
+	DurationMS int64               `json:"duration_ms"`
+	UserAgent  string              `json:"user_agent"`
+	APIKeyID   string              `json:"api_key_id,omitempty"`
+	Authz      *AuditAuthzDecision `json:"authz,omitempty"`
+}
+
+// AuditAuthzInputSummary captures one sanitized authorization decision input.
+type AuditAuthzInputSummary struct {
+	SubjectType    string `json:"subject_type,omitempty"`
+	SubjectIDHash  string `json:"subject_id_hash,omitempty"`
+	Action         string `json:"action,omitempty"`
+	ResourceType   string `json:"resource_type,omitempty"`
+	ResourceIDHash string `json:"resource_id_hash,omitempty"`
+	TenantID       string `json:"tenant_id,omitempty"`
+	WorkspaceID    string `json:"workspace_id,omitempty"`
+}
+
+// AuditAuthzDecision captures one centralized authorization decision.
+type AuditAuthzDecision struct {
+	PolicySetID   string                 `json:"policy_set_id,omitempty"`
+	PolicyVersion *int                   `json:"policy_version,omitempty"`
+	PolicySource  string                 `json:"policy_source,omitempty"`
+	RolloutMode   string                 `json:"rollout_mode,omitempty"`
+	Allowed       bool                   `json:"allowed"`
+	Stage         string                 `json:"stage,omitempty"`
+	Reason        string                 `json:"reason,omitempty"`
+	Input         AuditAuthzInputSummary `json:"input"`
 }
 
 // AuditSink defines the export target for API audit events.
@@ -175,6 +199,10 @@ func (m *MultiAuditSink) Close() error {
 }
 
 func fingerprintAPIKey(raw string) string {
+	return fingerprintAuditIdentifier(raw)
+}
+
+func fingerprintAuditIdentifier(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return ""

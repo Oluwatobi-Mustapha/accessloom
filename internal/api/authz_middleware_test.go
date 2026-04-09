@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -73,6 +74,71 @@ func TestRequireCentralPolicyMiddlewareBypassWhenAuthDisabled(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("expected 204 when auth is disabled, got %d", w.Code)
+	}
+}
+
+func TestRequireCentralPolicyMiddlewareSetsAuditDecisionContextOnDeny(t *testing.T) {
+	sink := &middlewareRecordingAuditSink{}
+	router := newPolicyAuditTestRouter(newScopeSet([]string{scopeRead}), true, newCentralPolicyRuntimeResolver(nil), telemetry.NewMetrics(), sink)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/scans", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", w.Code)
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.events) == 0 {
+		t.Fatal("expected denied request to be audited")
+	}
+	event := sink.events[len(sink.events)-1]
+	if event.Authz == nil {
+		t.Fatal("expected authz decision in audit event")
+	}
+	if event.Authz.Allowed {
+		t.Fatalf("expected denied decision, got %+v", event.Authz)
+	}
+	if event.Authz.Reason == "" || event.Authz.Stage == "" {
+		t.Fatalf("expected decision reason and stage, got %+v", event.Authz)
+	}
+	if event.Authz.Input.SubjectIDHash == "" {
+		t.Fatal("expected subject_id_hash in authz input summary")
+	}
+	if event.Authz.Input.SubjectIDHash == "principal-1" {
+		t.Fatal("expected subject identifier to be hashed")
+	}
+}
+
+func TestRequireCentralPolicyMiddlewareSetsAuditDecisionContextOnAllow(t *testing.T) {
+	sink := &middlewareRecordingAuditSink{}
+	router := newPolicyAuditTestRouter(newScopeSet([]string{scopeRead}), true, newCentralPolicyRuntimeResolver(nil), telemetry.NewMetrics(), sink)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/v1/scans/scan-1/events", nil)
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d", w.Code)
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	if len(sink.events) == 0 {
+		t.Fatal("expected allowed request to be audited")
+	}
+	event := sink.events[len(sink.events)-1]
+	if event.Authz == nil {
+		t.Fatal("expected authz decision in audit event")
+	}
+	if !event.Authz.Allowed {
+		t.Fatalf("expected allowed decision, got %+v", event.Authz)
+	}
+	if event.Authz.Input.ResourceIDHash == "" {
+		t.Fatal("expected resource_id_hash in authz input summary")
+	}
+	if event.Authz.Input.ResourceIDHash == "scan-1" {
+		t.Fatal("expected resource identifier to be hashed")
 	}
 }
 
@@ -713,6 +779,31 @@ func newPolicyTriageRouter(scopes scopeSet, setPrincipal bool, store db.Store) *
 	return r
 }
 
+func newPolicyAuditTestRouter(scopes scopeSet, setPrincipal bool, resolver centralPolicyRuntimeResolver, metrics *telemetry.Metrics, sink AuditSink) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		c.Request = c.Request.WithContext(db.WithScope(c.Request.Context(), db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"}))
+		if scopes != nil {
+			c.Set("auth.scope_set", scopes)
+		}
+		if setPrincipal {
+			c.Set("auth.principal_type", "subject")
+			c.Set("auth.principal_id", "principal-1")
+		}
+		c.Next()
+	})
+	r.Use(auditLogMiddleware(zap.NewNop(), sink))
+	r.Use(requireCentralPolicyMiddleware(resolver, nil, nil, nil, metrics))
+	r.POST("/v1/scans", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	r.GET("/v1/scans/:scan_id/events", func(c *gin.Context) {
+		c.Status(http.StatusNoContent)
+	})
+	return r
+}
+
 func policyTestScopeContext() context.Context {
 	return db.WithScope(context.Background(), db.Scope{TenantID: "tenant-a", WorkspaceID: "workspace-a"})
 }
@@ -726,6 +817,20 @@ type staticPolicyRuntimeResolver struct {
 	runtime resolvedCentralPolicyRuntime
 	err     error
 }
+
+type middlewareRecordingAuditSink struct {
+	mu     sync.Mutex
+	events []AuditEvent
+}
+
+func (s *middlewareRecordingAuditSink) Write(event AuditEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, event)
+	return nil
+}
+
+func (*middlewareRecordingAuditSink) Close() error { return nil }
 
 func (s staticPolicyRuntimeResolver) Resolve(_ context.Context) (resolvedCentralPolicyRuntime, error) {
 	return s.runtime, s.err
