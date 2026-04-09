@@ -18,4 +18,10 @@ It helps teams:
 
 Business outcome: fewer identity-driven incidents, faster remediation cycles, and stronger security posture at lower operational cost.
 
+Operational docs:
+- `docs/enterprise-quickstart.md`
+- `docs/operator-readiness.md`
+- `docs/authz-operator-runbook.md`
+- `docs/authz-policy-rollout-runbook.md`
+
 **...will update the README once I'm done building the first version and stress test it. Thanks!**

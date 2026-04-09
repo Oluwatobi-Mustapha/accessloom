@@ -15,6 +15,9 @@ Primary docs:
 - `docs/deploy-runbook.md`
 - `docs/security-hardening.md`
 - `docs/observability.md`
+- `docs/enterprise-quickstart.md`
+- `docs/authz-operator-runbook.md`
+- `docs/authz-policy-rollout-runbook.md`
 
 ## Minimum Production Checklist
 
@@ -32,3 +35,4 @@ Primary docs:
 3. CI gates passing (quality, tests, coverage, integration, web build).
 4. Threat model and ADR up to date.
 5. Runbooks available to on-call team.
+6. AuthZ decision audit logging verified (`authz.stage`, `authz.reason`, policy metadata).

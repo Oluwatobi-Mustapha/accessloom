@@ -27,6 +27,14 @@ Repository scan metrics:
 - `identrail_repo_scan_failure_total`
 - `identrail_repo_scan_duration_milliseconds`
 
+Authorization policy lifecycle metrics:
+- `identrail_authz_policy_decisions_by_version_total`
+- `identrail_authz_policy_rollout_shadow_evaluations_total`
+- `identrail_authz_policy_rollout_shadow_divergences_total`
+- `identrail_authz_policy_rollout_shadow_divergence_rate`
+- `identrail_authz_policy_rollout_shadow_evaluation_errors_total`
+- `identrail_authz_policy_rollout_rollbacks_total`
+
 ## Tracing
 
 - Scanner pipeline emits OpenTelemetry spans:
