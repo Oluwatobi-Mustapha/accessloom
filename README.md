@@ -2,6 +2,10 @@
     <a href="https://github.com/Oluwatobi-Mustapha/identrail"><img src="./docs/static/images/identrail-wordmark.svg" height="100" /></a>
 </p>
 
+[![Coverage](https://img.shields.io/badge/coverage-80.2%25-brightgreen?style=for-the-badge)](https://github.com/Oluwatobi-Mustapha/identrail/actions/workflows/ci.yml)
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Oluwatobi-Mustapha/identrail/ci.yml?branch=main&label=tests&style=for-the-badge)](https://github.com/Oluwatobi-Mustapha/identrail/actions/workflows/ci.yml)
+![Latest version](https://img.shields.io/github/v/tag/Oluwatobi-Mustapha/identrail?sort=semver&style=for-the-badge&label=Latest%20version)
+
 - Website: https://github.com/Oluwatobi-Mustapha/identrail
 - Discussions: https://github.com/Oluwatobi-Mustapha/identrail/discussions
 - Documentation Index: [docs/README.md](docs/README.md)
@@ -9,12 +13,6 @@
 - Enterprise Quickstart: [docs/enterprise-quickstart.md](docs/enterprise-quickstart.md)
 - Security Policy: [SECURITY.md](SECURITY.md)
 
-[![CI](https://img.shields.io/github/actions/workflow/status/Oluwatobi-Mustapha/identrail/ci.yml?branch=main&label=ci)](https://github.com/Oluwatobi-Mustapha/identrail/actions/workflows/ci.yml)
-[![CodeQL](https://img.shields.io/github/actions/workflow/status/Oluwatobi-Mustapha/identrail/codeql.yml?branch=main&label=codeql)](https://github.com/Oluwatobi-Mustapha/identrail/actions/workflows/codeql.yml)
-[![Release](https://img.shields.io/github/v/tag/Oluwatobi-Mustapha/identrail?sort=semver&label=release)](https://github.com/Oluwatobi-Mustapha/identrail/releases)
-[![Coverage](https://img.shields.io/badge/coverage-80.2%25-brightgreen?style=for-the-badge)](https://github.com/Oluwatobi-Mustapha/identrail/actions/workflows/ci.yml)
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Oluwatobi-Mustapha/identrail/ci.yml?branch=main&label=tests&style=for-the-badge)](https://github.com/Oluwatobi-Mustapha/identrail/actions/workflows/ci.yml)
-![Latest version](https://img.shields.io/github/v/tag/Oluwatobi-Mustapha/identrail?sort=semver&style=for-the-badge&label=Latest%20version)
 
 Machine identity security platform for cloud and Kubernetes workloads.
 
@@ -35,8 +33,6 @@ make bootstrap
 make ci
 ```
 
-Coverage gate: `>= 80%` (currently `80.2%`).
-
 ## Docs and Project Links
 
 - Documentation index: [docs/README.md](docs/README.md)
@@ -46,7 +42,3 @@ Coverage gate: `>= 80%` (currently `80.2%`).
 - Security policy: [SECURITY.md](SECURITY.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Discussions: https://github.com/Oluwatobi-Mustapha/identrail/discussions
-
-## License
-
-[Apache License 2.0](LICENSE)
