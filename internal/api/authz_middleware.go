@@ -7,7 +7,9 @@ import (
 	"errors"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/db"
@@ -24,6 +26,7 @@ const (
 	policyActionRepoScansRead  = "repo_scans.read"
 	policyActionRepoScansRun   = "repo_scans.run"
 	policyActionAuthzSimulate  = "authz.policies.simulate"
+	policyActionAuthzRollback  = "authz.policies.rollback"
 
 	policyContextABACSubjectAttrsLoadedKey  = "abac.subject_attributes_loaded"
 	policyContextABACResourceAttrsLoadedKey = "abac.resource_attributes_loaded"
@@ -66,6 +69,7 @@ func defaultRouteActionRoleGrants() map[string][]string {
 		policyActionRepoScansRead:  readRoles,
 		policyActionRepoScansRun:   writeRoles,
 		policyActionAuthzSimulate:  {scopeAdmin},
+		policyActionAuthzRollback:  {scopeAdmin},
 	}
 }
 
@@ -89,6 +93,7 @@ func defaultRouteActionABACPolicies() map[string]abacActionPolicy {
 		policyActionRepoScansRead: passThroughPolicy,
 		policyActionRepoScansRun:  passThroughPolicy,
 		policyActionAuthzSimulate: passThroughPolicy,
+		policyActionAuthzRollback: passThroughPolicy,
 		policyActionFindingsTriage: {
 			OnNoMatch: PolicyOutcomeNoOpinion,
 			AnyOf: []abacClause{
@@ -220,6 +225,8 @@ func requireCentralPolicyMiddleware(resolver centralPolicyRuntimeResolver, write
 	if resolver == nil {
 		resolver = newCentralPolicyRuntimeResolver(store)
 	}
+	var shadowEvalCount uint64
+	var shadowDivergenceCount uint64
 	return func(c *gin.Context) {
 		fullPath := strings.TrimSpace(c.FullPath())
 		if fullPath == "" {
@@ -270,6 +277,7 @@ func requireCentralPolicyMiddleware(resolver centralPolicyRuntimeResolver, write
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "authorization failed"})
 			return
 		}
+		recordPolicyDecisionMetric(metrics, runtimePolicy.PolicySetID, decisionVersion, decisionSource, runtimePolicy.RolloutMode, decision.Allowed)
 
 		if runtimePolicy.Rollout.Mode == db.AuthzPolicyRolloutModeShadow &&
 			targeted &&
@@ -278,6 +286,7 @@ func requireCentralPolicyMiddleware(resolver centralPolicyRuntimeResolver, write
 			if metrics != nil && metrics.AuthzPolicyShadowEvaluationsTotal != nil {
 				metrics.AuthzPolicyShadowEvaluationsTotal.Inc()
 			}
+			totalEvaluations := atomic.AddUint64(&shadowEvalCount, 1)
 			candidateDecision, err := runtimePolicy.CandidateEngine.Decide(c.Request.Context(), input)
 			if err != nil {
 				if metrics != nil && metrics.AuthzPolicyShadowEvaluationErrorsTotal != nil {
@@ -287,6 +296,11 @@ func requireCentralPolicyMiddleware(resolver centralPolicyRuntimeResolver, write
 				if metrics != nil && metrics.AuthzPolicyShadowDivergencesTotal != nil {
 					metrics.AuthzPolicyShadowDivergencesTotal.Inc()
 				}
+				atomic.AddUint64(&shadowDivergenceCount, 1)
+			}
+			if metrics != nil && metrics.AuthzPolicyShadowDivergenceRate != nil && totalEvaluations > 0 {
+				divergences := atomic.LoadUint64(&shadowDivergenceCount)
+				metrics.AuthzPolicyShadowDivergenceRate.Set(float64(divergences) / float64(totalEvaluations))
 			}
 		}
 
@@ -373,6 +387,33 @@ func rolloutVersionValidated(rollout db.AuthzPolicyRollout, version int) bool {
 
 func policyDecisionsDiverge(current PolicyDecision, candidate PolicyDecision) bool {
 	return current.Allowed != candidate.Allowed || current.Stage != candidate.Stage
+}
+
+func recordPolicyDecisionMetric(metrics *telemetry.Metrics, policySetID string, version int, source string, rolloutMode string, allowed bool) {
+	if metrics == nil || metrics.AuthzPolicyDecisionsByVersionTotal == nil {
+		return
+	}
+	set := strings.TrimSpace(policySetID)
+	if set == "" {
+		set = defaultCentralPolicySetID
+	}
+	versionLabel := "built_in"
+	if version > 0 {
+		versionLabel = strconv.Itoa(version)
+	}
+	sourceLabel := strings.TrimSpace(source)
+	if sourceLabel == "" {
+		sourceLabel = "unknown"
+	}
+	modeLabel := strings.TrimSpace(rolloutMode)
+	if modeLabel == "" {
+		modeLabel = db.AuthzPolicyRolloutModeDisabled
+	}
+	allowedLabel := "false"
+	if allowed {
+		allowedLabel = "true"
+	}
+	metrics.AuthzPolicyDecisionsByVersionTotal.WithLabelValues(set, versionLabel, sourceLabel, modeLabel, allowedLabel).Inc()
 }
 
 func buildPolicyInputFromGinContext(c *gin.Context, policy routePolicy, writeKeys []string, scopedKeys map[string][]string, store db.Store) (PolicyInput, error) {

@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -25,6 +27,8 @@ const (
 	defaultStateFile = ".identrail/last-findings.json"
 	formatTable      = "table"
 	formatJSON       = "json"
+	defaultAPIURL    = "http://127.0.0.1:8080"
+	defaultPolicySet = "central_authorization"
 )
 
 var defaultAWSFixturePaths = []string{
@@ -56,6 +60,7 @@ func BuildRootCmd(cfg config.Config, out io.Writer) *cobra.Command {
 	root.AddCommand(buildScanCmd(cfg, out, &stateFile))
 	root.AddCommand(buildFindingsCmd(out, &stateFile))
 	root.AddCommand(buildRepoScanCmd(out))
+	root.AddCommand(buildAuthzCmd(cfg, out))
 
 	return root
 }
@@ -214,6 +219,167 @@ func buildRepoScanCmd(out io.Writer) *cobra.Command {
 	cmd.Flags().IntVar(&historyLimit, "history-limit", 500, "Maximum number of commits to inspect for history secret exposure")
 	cmd.Flags().IntVar(&maxFindings, "max-findings", 200, "Maximum findings to emit before truncating scan output")
 	return cmd
+}
+
+func buildAuthzCmd(cfg config.Config, out io.Writer) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "authz",
+		Short: "Authorization policy lifecycle operations",
+	}
+	cmd.AddCommand(buildAuthzRollbackCmd(cfg, out))
+	return cmd
+}
+
+func buildAuthzRollbackCmd(cfg config.Config, out io.Writer) *cobra.Command {
+	var (
+		apiURL        string
+		apiKey        string
+		tenantID      string
+		workspaceID   string
+		policySetID   string
+		targetVersion int
+		actor         string
+		timeout       time.Duration
+		outputFormat  string
+	)
+
+	cmd := &cobra.Command{
+		Use:   "rollback",
+		Short: "Rollback active authorization policy version immediately",
+		Long:  "Issues one rollback API request that resets rollout mode to disabled and switches active policy version immediately.",
+		RunE: func(_ *cobra.Command, _ []string) error {
+			if targetVersion <= 0 {
+				return fmt.Errorf("--target-version must be greater than zero")
+			}
+			formatter, err := parseOutputFormat(outputFormat)
+			if err != nil {
+				return err
+			}
+			rollbackURL := strings.TrimRight(strings.TrimSpace(apiURL), "/") + "/v1/authz/policies/rollback"
+			if strings.TrimSpace(apiURL) == "" {
+				return fmt.Errorf("--api-url is required")
+			}
+			requestBody := authzPolicyRollbackCLIRequest{
+				PolicySetID:   strings.TrimSpace(policySetID),
+				TargetVersion: targetVersion,
+				Actor:         strings.TrimSpace(actor),
+			}
+			payload, err := json.Marshal(requestBody)
+			if err != nil {
+				return fmt.Errorf("encode rollback request: %w", err)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			defer cancel()
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, rollbackURL, bytes.NewReader(payload))
+			if err != nil {
+				return fmt.Errorf("build rollback request: %w", err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			if normalizedKey := strings.TrimSpace(apiKey); normalizedKey != "" {
+				req.Header.Set("X-API-Key", normalizedKey)
+			}
+			if normalizedTenant := strings.TrimSpace(tenantID); normalizedTenant != "" {
+				req.Header.Set("X-Identrail-Tenant-ID", normalizedTenant)
+			}
+			if normalizedWorkspace := strings.TrimSpace(workspaceID); normalizedWorkspace != "" {
+				req.Header.Set("X-Identrail-Workspace-ID", normalizedWorkspace)
+			}
+
+			resp, err := (&http.Client{Timeout: timeout}).Do(req)
+			if err != nil {
+				return fmt.Errorf("rollback request failed: %w", err)
+			}
+			defer resp.Body.Close()
+
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				var apiErr authzPolicyRollbackCLIErrorResponse
+				if err := json.NewDecoder(resp.Body).Decode(&apiErr); err == nil && strings.TrimSpace(apiErr.Error) != "" {
+					return fmt.Errorf("rollback request failed: %s (status %d)", strings.TrimSpace(apiErr.Error), resp.StatusCode)
+				}
+				return fmt.Errorf("rollback request failed with status %d", resp.StatusCode)
+			}
+
+			var response authzPolicyRollbackCLIResponse
+			if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+				return fmt.Errorf("decode rollback response: %w", err)
+			}
+			switch formatter {
+			case outputJSON:
+				return writeJSON(out, response)
+			default:
+				return renderAuthzRollbackOutput(out, response)
+			}
+		},
+	}
+
+	cmd.Flags().StringVar(&apiURL, "api-url", defaultCLIAPIURL(), "Identrail API base URL")
+	cmd.Flags().StringVar(&apiKey, "api-key", strings.TrimSpace(os.Getenv("IDENTRAIL_API_KEY")), "API key used for rollback request")
+	cmd.Flags().StringVar(&tenantID, "tenant-id", strings.TrimSpace(cfg.DefaultTenantID), "Tenant scope header for rollback request")
+	cmd.Flags().StringVar(&workspaceID, "workspace-id", strings.TrimSpace(cfg.DefaultWorkspaceID), "Workspace scope header for rollback request")
+	cmd.Flags().StringVar(&policySetID, "policy-set-id", defaultPolicySet, "Policy set to rollback")
+	cmd.Flags().IntVar(&targetVersion, "target-version", 0, "Target policy version to make active")
+	cmd.Flags().StringVar(&actor, "actor", "", "Actor identifier recorded in rollback lifecycle event")
+	cmd.Flags().DurationVar(&timeout, "timeout", 10*time.Second, "HTTP timeout for rollback request")
+	cmd.Flags().StringVar(&outputFormat, "output", formatTable, "Output format: table|json")
+	return cmd
+}
+
+func defaultCLIAPIURL() string {
+	if configured := strings.TrimSpace(os.Getenv("IDENTRAIL_API_URL")); configured != "" {
+		return configured
+	}
+	return defaultAPIURL
+}
+
+func renderAuthzRollbackOutput(out io.Writer, response authzPolicyRollbackCLIResponse) error {
+	_, err := fmt.Fprintf(
+		out,
+		"Rollback applied: policy_set=%s active_version=%d mode=%s previous_effective=%s\n",
+		strings.TrimSpace(response.PolicySetID),
+		response.ActiveVersion,
+		strings.TrimSpace(response.RolloutMode),
+		formatOptionalInt(response.PreviousEffective),
+	)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(
+		out,
+		"Previous active=%s candidate=%s updated_at=%s\n",
+		formatOptionalInt(response.PreviousActiveVersion),
+		formatOptionalInt(response.PreviousCandidateVersion),
+		response.UpdatedAt.Format(time.RFC3339),
+	)
+	return err
+}
+
+type authzPolicyRollbackCLIRequest struct {
+	PolicySetID   string `json:"policy_set_id"`
+	TargetVersion int    `json:"target_version"`
+	Actor         string `json:"actor,omitempty"`
+}
+
+type authzPolicyRollbackCLIResponse struct {
+	PolicySetID              string    `json:"policy_set_id"`
+	PreviousEffective        *int      `json:"previous_effective_version,omitempty"`
+	PreviousActiveVersion    *int      `json:"previous_active_version,omitempty"`
+	PreviousCandidateVersion *int      `json:"previous_candidate_version,omitempty"`
+	ActiveVersion            int       `json:"active_version"`
+	RolloutMode              string    `json:"rollout_mode"`
+	UpdatedAt                time.Time `json:"updated_at"`
+}
+
+type authzPolicyRollbackCLIErrorResponse struct {
+	Error string `json:"error"`
+}
+
+func formatOptionalInt(value *int) string {
+	if value == nil {
+		return "none"
+	}
+	return fmt.Sprintf("%d", *value)
 }
 
 // Execute runs the root command with externalized args for testability.

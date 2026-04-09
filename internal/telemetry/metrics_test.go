@@ -25,6 +25,9 @@ func TestNewMetricsCountersAndHistogram(t *testing.T) {
 	m.AuthzPolicyShadowEvaluationsTotal.Add(2)
 	m.AuthzPolicyShadowDivergencesTotal.Add(1)
 	m.AuthzPolicyShadowEvaluationErrorsTotal.Add(1)
+	m.AuthzPolicyShadowDivergenceRate.Set(0.5)
+	m.AuthzPolicyRollbacksTotal.Add(1)
+	m.AuthzPolicyDecisionsByVersionTotal.WithLabelValues("central_authorization", "1", "persisted_active_version", "disabled", "true").Add(3)
 
 	if got := testutil.ToFloat64(m.ScanRunsTotal); got != 1 {
 		t.Fatalf("expected scan runs 1, got %v", got)
@@ -55,5 +58,14 @@ func TestNewMetricsCountersAndHistogram(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(m.AuthzPolicyShadowEvaluationErrorsTotal); got != 1 {
 		t.Fatalf("expected shadow evaluation errors 1, got %v", got)
+	}
+	if got := testutil.ToFloat64(m.AuthzPolicyShadowDivergenceRate); got != 0.5 {
+		t.Fatalf("expected shadow divergence rate 0.5, got %v", got)
+	}
+	if got := testutil.ToFloat64(m.AuthzPolicyRollbacksTotal); got != 1 {
+		t.Fatalf("expected rollback count 1, got %v", got)
+	}
+	if got := testutil.ToFloat64(m.AuthzPolicyDecisionsByVersionTotal.WithLabelValues("central_authorization", "1", "persisted_active_version", "disabled", "true")); got != 3 {
+		t.Fatalf("expected decisions-by-version count 3, got %v", got)
 	}
 }

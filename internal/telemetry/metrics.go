@@ -17,6 +17,9 @@ type Metrics struct {
 	AuthzPolicyShadowEvaluationsTotal      prometheus.Counter
 	AuthzPolicyShadowDivergencesTotal      prometheus.Counter
 	AuthzPolicyShadowEvaluationErrorsTotal prometheus.Counter
+	AuthzPolicyShadowDivergenceRate        prometheus.Gauge
+	AuthzPolicyRollbacksTotal              prometheus.Counter
+	AuthzPolicyDecisionsByVersionTotal     *prometheus.CounterVec
 }
 
 // NewMetrics initializes a dedicated registry-safe instrument set.
@@ -102,5 +105,23 @@ func NewMetrics() *Metrics {
 			Name:      "shadow_evaluation_errors_total",
 			Help:      "Total number of shadow candidate evaluations that failed.",
 		}),
+		AuthzPolicyShadowDivergenceRate: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "identrail",
+			Subsystem: "authz_policy_rollout",
+			Name:      "shadow_divergence_rate",
+			Help:      "Observed shadow divergence rate (divergences/evaluations).",
+		}),
+		AuthzPolicyRollbacksTotal: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "identrail",
+			Subsystem: "authz_policy_rollout",
+			Name:      "rollbacks_total",
+			Help:      "Total number of explicit policy rollback operations.",
+		}),
+		AuthzPolicyDecisionsByVersionTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "identrail",
+			Subsystem: "authz_policy",
+			Name:      "decisions_by_version_total",
+			Help:      "Total policy decisions grouped by policy version and decision metadata.",
+		}, []string{"policy_set_id", "policy_version", "policy_source", "rollout_mode", "allowed"}),
 	}
 }

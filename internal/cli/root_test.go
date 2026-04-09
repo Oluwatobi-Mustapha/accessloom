@@ -2,12 +2,16 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Oluwatobi-Mustapha/identrail/internal/config"
 	"github.com/Oluwatobi-Mustapha/identrail/internal/domain"
@@ -179,6 +183,72 @@ func TestExecuteRepoScanValidationErrors(t *testing.T) {
 	}
 }
 
+func TestExecuteAuthzRollbackJSON(t *testing.T) {
+	cfg := config.Config{DefaultTenantID: "default", DefaultWorkspaceID: "default"}
+	targetVersion := 3
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("expected POST request, got %s", r.Method)
+		}
+		if r.URL.Path != "/v1/authz/policies/rollback" {
+			t.Fatalf("unexpected path %s", r.URL.Path)
+		}
+		if got := strings.TrimSpace(r.Header.Get("X-API-Key")); got != "admin-key" {
+			t.Fatalf("expected api key header, got %q", got)
+		}
+		if got := strings.TrimSpace(r.Header.Get("X-Identrail-Tenant-ID")); got != "tenant-a" {
+			t.Fatalf("expected tenant header, got %q", got)
+		}
+		if got := strings.TrimSpace(r.Header.Get("X-Identrail-Workspace-ID")); got != "workspace-a" {
+			t.Fatalf("expected workspace header, got %q", got)
+		}
+		var request authzPolicyRollbackCLIRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if request.TargetVersion != targetVersion {
+			t.Fatalf("expected target version %d, got %d", targetVersion, request.TargetVersion)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(authzPolicyRollbackCLIResponse{
+			PolicySetID:              "central_authorization",
+			PreviousEffective:        intPointerForCLITest(2),
+			PreviousActiveVersion:    intPointerForCLITest(1),
+			PreviousCandidateVersion: intPointerForCLITest(2),
+			ActiveVersion:            targetVersion,
+			RolloutMode:              "disabled",
+			UpdatedAt:                time.Date(2026, 4, 9, 13, 0, 0, 0, time.UTC),
+		})
+	}))
+	defer server.Close()
+
+	var out bytes.Buffer
+	err := Execute(cfg, []string{
+		"authz", "rollback",
+		"--api-url", server.URL,
+		"--api-key", "admin-key",
+		"--tenant-id", "tenant-a",
+		"--workspace-id", "workspace-a",
+		"--policy-set-id", "central_authorization",
+		"--target-version", "3",
+		"--output", "json",
+	}, &out)
+	if err != nil {
+		t.Fatalf("authz rollback failed: %v", err)
+	}
+	if !strings.Contains(out.String(), "\"active_version\": 3") {
+		t.Fatalf("expected rollback json output, got %q", out.String())
+	}
+}
+
+func TestExecuteAuthzRollbackValidation(t *testing.T) {
+	cfg := config.Config{}
+	var out bytes.Buffer
+	if err := Execute(cfg, []string{"authz", "rollback", "--target-version", "0"}, &out); err == nil {
+		t.Fatal("expected target-version validation error")
+	}
+}
+
 func initCLITestRepoWithSecret(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
@@ -344,6 +414,11 @@ func TestSeveritySortRank(t *testing.T) {
 
 func compareSeverityForTest(left domain.FindingSeverity, right domain.FindingSeverity) int {
 	return severitySortRank(left) - severitySortRank(right)
+}
+
+func intPointerForCLITest(value int) *int {
+	result := value
+	return &result
 }
 
 func repoFixturePath(t *testing.T, name string) string {
