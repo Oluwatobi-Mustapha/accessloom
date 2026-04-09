@@ -394,6 +394,7 @@ func lookupPolicyAttribute(attributes map[string]string, key string) (string, bo
 
 type rebacRelationPath struct {
 	Relations []string
+	AllOf     []abacPredicate
 }
 
 type rebacActionPolicy struct {
@@ -445,13 +446,19 @@ func normalizeReBACPolicies(policies map[string]rebacActionPolicy) map[string]re
 }
 
 func normalizeReBACPath(path rebacRelationPath) rebacRelationPath {
-	normalized := rebacRelationPath{Relations: make([]string, 0, len(path.Relations))}
+	normalized := rebacRelationPath{
+		Relations: make([]string, 0, len(path.Relations)),
+		AllOf:     make([]abacPredicate, 0, len(path.AllOf)),
+	}
 	for _, relation := range path.Relations {
 		normalizedRelation := strings.ToLower(strings.TrimSpace(relation))
 		if !isSupportedReBACRelation(normalizedRelation) {
 			return rebacRelationPath{}
 		}
 		normalized.Relations = append(normalized.Relations, normalizedRelation)
+	}
+	for _, predicate := range path.AllOf {
+		normalized.AllOf = append(normalized.AllOf, normalizeABACPredicate(predicate))
 	}
 	return normalized
 }
@@ -490,7 +497,19 @@ func (e *rebacPolicyEvaluator) Evaluate(ctx context.Context, input PolicyInput) 
 	}
 
 	start := rebacNode{SubjectType: subjectType, SubjectID: subjectID}
+	denyReason := "rebac relationship does not grant action"
 	for _, path := range policy.AnyOf {
+		matchesConditions, reason := evaluateReBACPathConditions(input, path.AllOf)
+		if !matchesConditions {
+			if strings.TrimSpace(reason) != "" {
+				denyReason = reason
+			}
+			continue
+		}
+		// This path is eligible for relationship checks. Reset to the default
+		// relationship-deny reason so stale condition failures from earlier paths
+		// do not mask the actual deny cause.
+		denyReason = "rebac relationship does not grant action"
 		matches, err := e.evaluateReBACPath(ctx, start, objectType, objectID, path)
 		if err != nil {
 			return PolicyOutcomeNoOpinion, "", err
@@ -499,7 +518,7 @@ func (e *rebacPolicyEvaluator) Evaluate(ctx context.Context, input PolicyInput) 
 			return PolicyOutcomeAllow, "rebac relationship grants action", nil
 		}
 	}
-	return PolicyOutcomeDeny, "rebac relationship does not grant action", nil
+	return PolicyOutcomeDeny, denyReason, nil
 }
 
 func (e *rebacPolicyEvaluator) evaluateReBACPath(ctx context.Context, start rebacNode, objectType string, objectID string, path rebacRelationPath) (bool, error) {
@@ -559,4 +578,21 @@ func (e *rebacPolicyEvaluator) evaluateReBACPath(ctx context.Context, start reba
 	}
 
 	return false, nil
+}
+
+func evaluateReBACPathConditions(input PolicyInput, conditions []abacPredicate) (bool, string) {
+	if len(conditions) == 0 {
+		return true, ""
+	}
+	for _, condition := range conditions {
+		matches, reason := evaluateABACPredicate(input, condition)
+		if matches {
+			continue
+		}
+		if strings.TrimSpace(reason) == "" {
+			return false, "rebac condition failed"
+		}
+		return false, fmt.Sprintf("rebac condition failed: %s", reason)
+	}
+	return true, ""
 }

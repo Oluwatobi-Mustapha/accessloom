@@ -234,15 +234,44 @@ func defaultRouteActionABACPolicies() map[string]abacActionPolicy {
 }
 
 func defaultRouteActionReBACPolicies() map[string]rebacActionPolicy {
+	memberDelegationConditions := []abacPredicate{
+		{
+			Source:   abacAttributeSourceResource,
+			Key:      policyAttributeEnvironment,
+			Operator: abacOperatorOneOf,
+			Values: []string{
+				db.AuthzAttributeEnvProd,
+				db.AuthzAttributeEnvStaging,
+			},
+		},
+		{
+			Source:   abacAttributeSourceResource,
+			Key:      policyAttributeClassification,
+			Operator: abacOperatorOneOf,
+			Values: []string{
+				db.AuthzAttributeClassificationConfidential,
+				db.AuthzAttributeClassificationRestricted,
+			},
+		},
+	}
 	return map[string]rebacActionPolicy{
 		policyActionFindingsTriage: {
 			AnyOf: []rebacRelationPath{
 				{Relations: []string{db.AuthzRelationshipOwns}},
 				{Relations: []string{db.AuthzRelationshipManages}},
 				{Relations: []string{db.AuthzRelationshipDelegatedAdmin}},
-				{Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipOwns}},
-				{Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipManages}},
-				{Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipDelegatedAdmin}},
+				{
+					Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipOwns},
+					AllOf:     memberDelegationConditions,
+				},
+				{
+					Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipManages},
+					AllOf:     memberDelegationConditions,
+				},
+				{
+					Relations: []string{db.AuthzRelationshipMemberOf, db.AuthzRelationshipDelegatedAdmin},
+					AllOf:     memberDelegationConditions,
+				},
 			},
 		},
 	}
