@@ -230,7 +230,7 @@ jobs:
           read_key="$(openssl rand -hex 24)"
           write_key="$(openssl rand -hex 24)"
           pg_password="$(openssl rand -hex 24)"
-          pg_password_urlencoded="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=\"\"))' "${pg_password}")"
+          pg_password_urlencoded="$(python3 -c 'import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=""))' "${pg_password}")"
           cat > deploy/docker/.env <<EOF
           IDENTRAIL_SERVICE_NAME=identrail
           IDENTRAIL_LOG_LEVEL=info
