@@ -6,7 +6,7 @@
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/Oluwatobi-Mustapha/identrail/ci.yml?branch=main&label=tests&style=for-the-badge)](https://github.com/Oluwatobi-Mustapha/identrail/actions/workflows/ci.yml)
 ![Latest version](https://img.shields.io/github/v/tag/Oluwatobi-Mustapha/identrail?sort=semver&style=for-the-badge&label=Latest%20version)
 
-- Website:[ https://github.com/Oluwatobi-Mustapha/identrail](https://identrail.vercel.app/)
+- Website: https://identrail.vercel.app
 - Discussions: https://github.com/Oluwatobi-Mustapha/identrail/discussions
 - Documentation Index: [docs/README.md](docs/README.md)
 - API Contract: [docs/openapi-v1.yaml](docs/openapi-v1.yaml)
