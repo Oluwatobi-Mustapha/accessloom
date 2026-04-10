@@ -368,9 +368,31 @@ func parseDiffPath(line string) string {
 	return strings.TrimPrefix(path, "b/")
 }
 
+func looksLikeLocalPath(target string) bool {
+	trimmed := strings.TrimSpace(target)
+	if trimmed == "" {
+		return false
+	}
+	lower := strings.ToLower(trimmed)
+	if strings.Contains(lower, "://") || strings.HasPrefix(lower, "git@") {
+		return false
+	}
+	if strings.Count(trimmed, "/") == 1 &&
+		!strings.HasPrefix(trimmed, "/") &&
+		!strings.HasPrefix(trimmed, ".") &&
+		!strings.HasPrefix(trimmed, "~") &&
+		!strings.Contains(trimmed, "\\") {
+		return false
+	}
+	return true
+}
+
 func localRepository(target string) (repositoryLocation, bool) {
 	path := strings.TrimSpace(target)
 	if path == "" {
+		return repositoryLocation{}, false
+	}
+	if !looksLikeLocalPath(path) {
 		return repositoryLocation{}, false
 	}
 	if isGitWorktree(path) {
