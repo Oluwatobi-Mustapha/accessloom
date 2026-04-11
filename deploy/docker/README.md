@@ -9,10 +9,15 @@
 
 ## Quick Start
 
+Fastest local onboarding:
+
+1. `make quickstart`
+
+Manual setup:
+
 1. `cp deploy/docker/.env.example deploy/docker/.env`
 2. Edit keys and secrets in `deploy/docker/.env`
    - set `IDENTRAIL_POSTGRES_PASSWORD` to a strong value
-   - set `IDENTRAIL_POSTGRES_PASSWORD_URLENCODED` to the URL-encoded value of `IDENTRAIL_POSTGRES_PASSWORD`
    - local dashboard CORS is enabled by default via `IDENTRAIL_CORS_ALLOWED_ORIGINS=http://localhost:8081`
    - for live k8s collection: set `IDENTRAIL_K8S_SOURCE=kubectl`
    - optional context override: `IDENTRAIL_KUBE_CONTEXT`

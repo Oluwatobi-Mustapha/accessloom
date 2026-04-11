@@ -12,6 +12,9 @@ This guide standardizes deployment for five common targets:
 
 Use this for quick production-like environments on one host.
 
+Fastest local bootstrap:
+- `make quickstart`
+
 1. Copy env template:
    - `cp deploy/docker/.env.example deploy/docker/.env`
 2. Edit strong secrets in `deploy/docker/.env`.

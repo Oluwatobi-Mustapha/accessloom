@@ -1,7 +1,7 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap fmt fmt-check vet test test-integration web-install web-test web-build helm-lint tfmt-check ci pre-commit
+.PHONY: help bootstrap quickstart quickstart-down fmt fmt-check vet test test-integration web-install web-test web-build helm-lint tfmt-check ci pre-commit
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z0-9_-]+:.*##/ {printf "%-18s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -9,6 +9,12 @@ help: ## Show available targets
 bootstrap: ## Install local dependencies for Go and web
 	go mod download
 	npm ci --prefix web
+
+quickstart: ## Bootstrap local Docker stack and run first scan
+	./scripts/quickstart.sh
+
+quickstart-down: ## Stop and remove quickstart Docker stack
+	docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env down
 
 fmt: ## Auto-format Go and Terraform files
 	@if git ls-files '*.go' | grep -q .; then \

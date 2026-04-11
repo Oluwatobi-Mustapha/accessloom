@@ -33,7 +33,7 @@ services:
       - .env
     environment:
       IDENTRAIL_HTTP_ADDR: ":8080"
-      IDENTRAIL_DATABASE_URL: "postgres://identrail:${IDENTRAIL_POSTGRES_PASSWORD_URLENCODED:?set IDENTRAIL_POSTGRES_PASSWORD_URLENCODED in deploy/docker/.env}@postgres:5432/identrail?sslmode=disable"
+      IDENTRAIL_DATABASE_URL: "postgres://identrail:${IDENTRAIL_POSTGRES_PASSWORD:?set IDENTRAIL_POSTGRES_PASSWORD in deploy/docker/.env}@postgres:5432/identrail?sslmode=disable"
       IDENTRAIL_RUN_MIGRATIONS: "true"
       IDENTRAIL_MIGRATIONS_DIR: "/app/migrations"
     ports:
@@ -56,7 +56,7 @@ services:
     env_file:
       - .env
     environment:
-      IDENTRAIL_DATABASE_URL: "postgres://identrail:${IDENTRAIL_POSTGRES_PASSWORD_URLENCODED:?set IDENTRAIL_POSTGRES_PASSWORD_URLENCODED in deploy/docker/.env}@postgres:5432/identrail?sslmode=disable"
+      IDENTRAIL_DATABASE_URL: "postgres://identrail:${IDENTRAIL_POSTGRES_PASSWORD:?set IDENTRAIL_POSTGRES_PASSWORD in deploy/docker/.env}@postgres:5432/identrail?sslmode=disable"
       IDENTRAIL_RUN_MIGRATIONS: "false"
       IDENTRAIL_MIGRATIONS_DIR: "/app/migrations"
 

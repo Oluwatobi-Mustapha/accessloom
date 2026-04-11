@@ -18,6 +18,7 @@ Identrail now provides standardized local developer workflows through:
 ## Common Commands
 
 - `make help`: list available make targets.
+- `make quickstart`: bootstrap local Docker stack and run first scan.
 - `make ci`: run core local CI checks (format checks, vet, Go tests, web tests, web build).
 - `make fmt`: format Go and Terraform files.
 - `make fmt-check`: verify formatting only.

@@ -20,10 +20,21 @@ Identrail discovers machine identities and trust paths across AWS and Kubernetes
 
 ## Getting Started
 
+Fastest path (boots Docker stack, generates local keys/password, runs first scan):
+
+```bash
+make quickstart
+```
+
+Manual path:
+
 ```bash
 cp deploy/docker/.env.example deploy/docker/.env
 docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env up -d --build
 curl -sS http://localhost:8080/healthz
+# trigger first scan and list findings (replace <write-key>/<read-key> with values from deploy/docker/.env)
+curl -sS -X POST http://localhost:8080/v1/scans -H "X-API-Key: <write-key>" -H "Content-Type: application/json"
+curl -sS "http://localhost:8080/v1/findings?limit=5" -H "X-API-Key: <read-key>"
 ```
 
 ## Docs and Project Links

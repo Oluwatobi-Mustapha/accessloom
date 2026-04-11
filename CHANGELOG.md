@@ -1,6 +1,10 @@
 # Changelog
 
 ## Unreleased
+- Improved first-run onboarding flow:
+  - added `make quickstart` with `scripts/quickstart.sh` to bootstrap local Docker, trigger a first scan, and guide findings retrieval
+  - updated README quickstart to include first scan + findings flow (not only `/healthz`)
+  - removed `IDENTRAIL_POSTGRES_PASSWORD_URLENCODED` requirement from Docker Compose local path and related docs
 - Improved Docker Compose out-of-box web/API connectivity:
   - added `IDENTRAIL_CORS_ALLOWED_ORIGINS=http://localhost:8081` to `deploy/docker/.env.example`
   - documented local CORS default in Docker and deployment guides

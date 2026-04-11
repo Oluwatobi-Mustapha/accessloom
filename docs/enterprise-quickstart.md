@@ -18,7 +18,6 @@ Edit `deploy/docker/.env` and set at minimum:
 - `IDENTRAIL_API_KEYS` with strong unique keys
 - `IDENTRAIL_WRITE_API_KEYS` with write-capable keys
 - `IDENTRAIL_POSTGRES_PASSWORD` with a strong database password
-- `IDENTRAIL_POSTGRES_PASSWORD_URLENCODED` as URL-encoded `IDENTRAIL_POSTGRES_PASSWORD`
 - `IDENTRAIL_API_KEY_SCOPES` (required for this quickstart), for example:
   - `IDENTRAIL_API_KEY_SCOPES=<reader-key>:read;<writer-key>:read,write;<admin-key>:read,write,admin`
 - `IDENTRAIL_AUDIT_LOG_FILE=/tmp/identrail-audit.jsonl`
