@@ -240,6 +240,7 @@ export function App() {
       setTriageHistory([]);
       setFindingError(null);
       setHistoryError(null);
+      setLoadingHistory(false);
       return;
     }
     let active = true;
