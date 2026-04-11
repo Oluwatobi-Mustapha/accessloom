@@ -9,16 +9,21 @@ servers:
     description: Local development
 tags:
   - name: Health
+  - name: Authorization
   - name: Findings
   - name: Scans
   - name: Explorer
   - name: RepositoryExposure
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
 paths:
   /healthz:
     get:
       tags: [Health]
       summary: Health check
       operationId: healthCheck
+      security: []
       responses:
         "200":
           description: Service health
@@ -31,6 +36,96 @@ paths:
                     type: string
                   service:
                     type: string
+  /v1/authz/policies/simulate:
+    post:
+      tags: [Authorization]
+      summary: Simulate authorization policy decision
+      operationId: simulateAuthorizationPolicy
+      description: Evaluate one authorization decision with stage-by-stage trace output.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthzPolicySimulationRequest"
+      responses:
+        "200":
+          description: Simulated policy decision and trace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthzPolicySimulationResponse"
+        "400":
+          description: Invalid simulation request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Policy version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Failed to simulate policy decision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /v1/authz/policies/rollback:
+    post:
+      tags: [Authorization]
+      summary: Roll back central authorization policy to a target version
+      operationId: rollbackAuthorizationPolicy
+      description: Set the active policy version and disable rollout to enforce the target immediately.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthzPolicyRollbackRequest"
+      responses:
+        "200":
+          description: Rollback result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthzPolicyRollbackResponse"
+        "400":
+          description: Invalid rollback request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Policy version not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: Policy store unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /v1/findings:
     get:
       tags: [Findings]
@@ -489,6 +584,10 @@ components:
       type: apiKey
       in: header
       name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
   parameters:
     limit:
       in: query
@@ -534,6 +633,156 @@ components:
       properties:
         error:
           type: string
+    PolicyStage:
+      type: string
+      enum: [tenant_isolation, rbac, abac, rebac, default_deny]
+    PolicyOutcome:
+      type: string
+      enum: [no_op, allow, deny, skipped]
+    PolicyDecision:
+      type: object
+      properties:
+        allowed:
+          type: boolean
+        stage:
+          $ref: "#/components/schemas/PolicyStage"
+        reason:
+          type: string
+    PolicyTraceStep:
+      type: object
+      properties:
+        stage:
+          $ref: "#/components/schemas/PolicyStage"
+        outcome:
+          $ref: "#/components/schemas/PolicyOutcome"
+        reason:
+          type: string
+    PolicySimulationSubjectInput:
+      type: object
+      properties:
+        type:
+          type: string
+        id:
+          type: string
+        tenant_id:
+          type: string
+        workspace_id:
+          type: string
+        groups:
+          type: array
+          items:
+            type: string
+        roles:
+          type: array
+          items:
+            type: string
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+    PolicySimulationResourceInput:
+      type: object
+      properties:
+        type:
+          type: string
+        id:
+          type: string
+        tenant_id:
+          type: string
+        workspace_id:
+          type: string
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+    PolicySimulationContextInput:
+      type: object
+      properties:
+        request_path:
+          type: string
+        request_method:
+          type: string
+        attributes:
+          type: object
+          additionalProperties:
+            type: string
+    AuthzPolicySimulationRequest:
+      type: object
+      required: [subject, action, resource, context]
+      properties:
+        subject:
+          $ref: "#/components/schemas/PolicySimulationSubjectInput"
+        action:
+          type: string
+        resource:
+          $ref: "#/components/schemas/PolicySimulationResourceInput"
+        context:
+          $ref: "#/components/schemas/PolicySimulationContextInput"
+        policy_set_id:
+          type: string
+        target_version:
+          type: integer
+          minimum: 1
+          nullable: true
+        audit_event:
+          type: boolean
+    AuthzPolicySimulationPolicyResponse:
+      type: object
+      properties:
+        source:
+          type: string
+        policy_set_id:
+          type: string
+        version:
+          type: integer
+        rollout_mode:
+          type: string
+        target_version:
+          type: integer
+          nullable: true
+    AuthzPolicySimulationResponse:
+      type: object
+      properties:
+        decision:
+          $ref: "#/components/schemas/PolicyDecision"
+        trace:
+          type: array
+          items:
+            $ref: "#/components/schemas/PolicyTraceStep"
+        policy:
+          $ref: "#/components/schemas/AuthzPolicySimulationPolicyResponse"
+    AuthzPolicyRollbackRequest:
+      type: object
+      required: [target_version]
+      properties:
+        policy_set_id:
+          type: string
+        target_version:
+          type: integer
+          minimum: 1
+        actor:
+          type: string
+    AuthzPolicyRollbackResponse:
+      type: object
+      properties:
+        policy_set_id:
+          type: string
+        previous_effective_version:
+          type: integer
+          nullable: true
+        previous_active_version:
+          type: integer
+          nullable: true
+        previous_candidate_version:
+          type: integer
+          nullable: true
+        active_version:
+          type: integer
+        rollout_mode:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
     FindingSeverity:
       type: string
       enum: [critical, high, medium, low, info]

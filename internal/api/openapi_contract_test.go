@@ -12,6 +12,8 @@ func TestOpenAPIV1SpecContainsCoreEndpoints(t *testing.T) {
 	spec := readOpenAPISpec(t)
 	required := []string{
 		"openapi: 3.0.3",
+		"/v1/authz/policies/simulate:",
+		"/v1/authz/policies/rollback:",
 		"/v1/findings:",
 		"/v1/findings/{finding_id}:",
 		"/v1/findings/{finding_id}/history:",
@@ -23,6 +25,25 @@ func TestOpenAPIV1SpecContainsCoreEndpoints(t *testing.T) {
 		"/v1/relationships:",
 		"/v1/repo-scans:",
 		"/v1/repo-findings:",
+	}
+	for _, item := range required {
+		if !strings.Contains(spec, item) {
+			t.Fatalf("openapi spec missing %q", item)
+		}
+	}
+}
+
+func TestOpenAPIV1SpecDeclaresAuthSecurity(t *testing.T) {
+	spec := readOpenAPISpec(t)
+	required := []string{
+		"security:",
+		"- ApiKeyAuth: []",
+		"- BearerAuth: []",
+		"securitySchemes:",
+		"ApiKeyAuth:",
+		"BearerAuth:",
+		"name: X-API-Key",
+		"scheme: bearer",
 	}
 	for _, item := range required {
 		if !strings.Contains(spec, item) {
