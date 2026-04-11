@@ -15,6 +15,7 @@ Use this for quick production-like environments on one host.
 1. Copy env template:
    - `cp deploy/docker/.env.example deploy/docker/.env`
 2. Edit strong secrets in `deploy/docker/.env`.
+   - local dashboard CORS is preconfigured in the template: `IDENTRAIL_CORS_ALLOWED_ORIGINS=http://localhost:8081`
 3. Start stack:
    - `docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env up -d --build`
 4. Verify:

@@ -1,6 +1,9 @@
 # Changelog
 
 ## Unreleased
+- Improved Docker Compose out-of-box web/API connectivity:
+  - added `IDENTRAIL_CORS_ALLOWED_ORIGINS=http://localhost:8081` to `deploy/docker/.env.example`
+  - documented local CORS default in Docker and deployment guides
 - Hardened repository scan API defaults and target restrictions:
   - local filesystem repository paths are now rejected in API/worker repo-scan flow
   - empty repo scan allowlist now denies all targets (explicit allowlist required)
