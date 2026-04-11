@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { apiClient, buildQuery } from './client';
+import { apiClient, buildQuery, mergeRequestHeaders } from './client';
 
 describe('buildQuery', () => {
   it('encodes defined query params only', () => {
@@ -28,10 +28,9 @@ describe('apiClient', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain('/v1/findings?scan_id=scan-1&severity=high&type=risky_trust_policy');
-    expect(options.headers).toMatchObject({
-      'Content-Type': 'application/json',
-      'X-API-Key': 'reader'
-    });
+    const headers = new Headers(options.headers);
+    expect(headers.get('content-type')).toBe('application/json');
+    expect(headers.get('x-api-key')).toBe('reader');
   });
 
   it('uses default scan listing sort contract', async () => {
@@ -84,11 +83,21 @@ describe('apiClient', () => {
     });
 
     const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(options.headers).toMatchObject({
-      'X-API-Key': 'reader',
-      'X-Identrail-Tenant-ID': 'tenant-a',
-      'X-Identrail-Workspace-ID': 'workspace-a'
-    });
+    const headers = new Headers(options.headers);
+    expect(headers.get('x-api-key')).toBe('reader');
+    expect(headers.get('x-identrail-tenant-id')).toBe('tenant-a');
+    expect(headers.get('x-identrail-workspace-id')).toBe('workspace-a');
+  });
+
+  it('merges override headers from tuple arrays and Headers', () => {
+    const tupleMerged = mergeRequestHeaders({ apiKey: 'reader' }, [['X-Trace-ID', 'trace-1']]);
+    expect(tupleMerged.get('x-api-key')).toBe('reader');
+    expect(tupleMerged.get('x-trace-id')).toBe('trace-1');
+
+    const headerOverrides = new Headers({ Authorization: 'Bearer test-token', 'X-API-Key': 'override' });
+    const headersMerged = mergeRequestHeaders({ apiKey: 'reader' }, headerOverrides);
+    expect(headersMerged.get('authorization')).toBe('Bearer test-token');
+    expect(headersMerged.get('x-api-key')).toBe('override');
   });
 
   it('surfaces backend error envelope message', async () => {
@@ -100,5 +109,38 @@ describe('apiClient', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(apiClient.getFindingsSummary({ apiKey: 'reader' })).rejects.toThrow('unauthorized');
+  });
+
+  it('requests finding triage history with scan scope', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [] })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.listFindingHistory('finding-1', 'scan-1', 15, { apiKey: 'reader' });
+
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toContain('/v1/findings/finding-1/history?scan_id=scan-1&limit=15');
+  });
+
+  it('sends triage patch payload for finding workflow actions', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ finding: { id: 'finding-1' } })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.triageFinding(
+      'finding-1',
+      { status: 'ack', assignee: 'platform', comment: 'acknowledged' },
+      'scan-1',
+      { apiKey: 'writer' }
+    );
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/v1/findings/finding-1/triage?scan_id=scan-1');
+    expect(options.method).toBe('PATCH');
+    expect(options.body).toBe(JSON.stringify({ status: 'ack', assignee: 'platform', comment: 'acknowledged' }));
   });
 });

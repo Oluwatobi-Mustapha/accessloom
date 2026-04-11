@@ -15,6 +15,7 @@ export type Finding = {
   evidence?: Record<string, unknown>;
   remediation: string;
   created_at: string;
+  triage?: FindingTriage;
 };
 
 export type ScanRecord = {
@@ -84,6 +85,36 @@ export type RequestAuthContext = {
   bearerToken?: string;
 };
 
+export type FindingLifecycleStatus = 'open' | 'ack' | 'suppressed' | 'resolved';
+
+export type FindingTriage = {
+  status: FindingLifecycleStatus;
+  assignee?: string;
+  suppression_expires_at?: string;
+  updated_at?: string;
+  updated_by?: string;
+};
+
+export type FindingTriageEvent = {
+  id: string;
+  finding_id: string;
+  action: string;
+  from_status: FindingLifecycleStatus;
+  to_status: FindingLifecycleStatus;
+  assignee?: string;
+  suppression_expires_at?: string;
+  comment?: string;
+  actor?: string;
+  created_at: string;
+};
+
+export type FindingTriageRequest = {
+  status?: FindingLifecycleStatus;
+  assignee?: string;
+  suppression_expires_at?: string;
+  comment?: string;
+};
+
 const configuredURL = import.meta.env.VITE_IDENTRAIL_API_URL as string | undefined;
 if (import.meta.env.PROD) {
   if (!configuredURL) {
@@ -122,9 +153,21 @@ function buildRequestHeaders(auth?: RequestAuthContext): Record<string, string> 
   return headers;
 }
 
-async function request<T>(path: string, auth?: RequestAuthContext): Promise<T> {
-  const headers = buildRequestHeaders(auth);
-  const res = await fetch(`${baseURL}${path}`, { headers });
+export function mergeRequestHeaders(auth?: RequestAuthContext, initHeaders?: HeadersInit): Headers {
+  const headers = new Headers(buildRequestHeaders(auth));
+  if (!initHeaders) {
+    return headers;
+  }
+  const normalizedHeaders = new Headers(initHeaders);
+  normalizedHeaders.forEach((value, key) => {
+    headers.set(key, value);
+  });
+  return headers;
+}
+
+async function request<T>(path: string, auth?: RequestAuthContext, init: RequestInit = {}): Promise<T> {
+  const headers = mergeRequestHeaders(auth, init.headers);
+  const res = await fetch(`${baseURL}${path}`, { ...init, headers });
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
     try {
@@ -179,6 +222,19 @@ export const apiClient = {
   getFinding(findingID: string, scanID?: string, auth?: RequestAuthContext) {
     const suffix = buildQuery({ scan_id: scanID });
     return request<Finding>(`/v1/findings/${encodeURIComponent(findingID)}${suffix}`, auth);
+  },
+  listFindingHistory(findingID: string, scanID?: string, limit = 20, auth?: RequestAuthContext) {
+    return request<{ items: FindingTriageEvent[] }>(
+      `/v1/findings/${encodeURIComponent(findingID)}/history${buildQuery({ scan_id: scanID, limit })}`,
+      auth
+    );
+  },
+  triageFinding(findingID: string, payload: FindingTriageRequest, scanID?: string, auth?: RequestAuthContext) {
+    const suffix = buildQuery({ scan_id: scanID });
+    return request<{ finding: Finding }>(`/v1/findings/${encodeURIComponent(findingID)}/triage${suffix}`, auth, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    });
   },
   getScanDiff(scanID: string, limit = 20, auth?: RequestAuthContext, previousScanID?: string) {
     return request<ScanDiff>(
