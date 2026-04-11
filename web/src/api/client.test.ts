@@ -101,4 +101,37 @@ describe('apiClient', () => {
 
     await expect(apiClient.getFindingsSummary({ apiKey: 'reader' })).rejects.toThrow('unauthorized');
   });
+
+  it('requests finding triage history with scan scope', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ items: [] })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.listFindingHistory('finding-1', 'scan-1', 15, { apiKey: 'reader' });
+
+    const [url] = fetchMock.mock.calls[0] as [string];
+    expect(url).toContain('/v1/findings/finding-1/history?scan_id=scan-1&limit=15');
+  });
+
+  it('sends triage patch payload for finding workflow actions', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ finding: { id: 'finding-1' } })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await apiClient.triageFinding(
+      'finding-1',
+      { status: 'ack', assignee: 'platform', comment: 'acknowledged' },
+      'scan-1',
+      { apiKey: 'writer' }
+    );
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain('/v1/findings/finding-1/triage?scan_id=scan-1');
+    expect(options.method).toBe('PATCH');
+    expect(options.body).toBe(JSON.stringify({ status: 'ack', assignee: 'platform', comment: 'acknowledged' }));
+  });
 });

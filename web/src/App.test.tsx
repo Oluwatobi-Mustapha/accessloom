@@ -38,6 +38,22 @@ describe('App', () => {
           ]
         });
       }
+      if (url.includes('/v1/findings/f-1/history')) {
+        return ok({
+          items: [
+            {
+              id: 'evt-1',
+              finding_id: 'f-1',
+              action: 'commented',
+              from_status: 'open',
+              to_status: 'open',
+              comment: 'initial review',
+              actor: 'subject:reviewer',
+              created_at: '2026-03-16T00:00:00Z'
+            }
+          ]
+        });
+      }
       if (url.includes('/v1/findings/f-1')) {
         return ok({
           id: 'f-1',
@@ -201,5 +217,136 @@ describe('App', () => {
       });
       expect(matchedCall).toBeDefined();
     });
+  });
+
+  it('supports finding triage actions and renders audit trail', async () => {
+    let historyItems = [
+      {
+        id: 'evt-1',
+        finding_id: 'f-1',
+        action: 'commented',
+        from_status: 'open',
+        to_status: 'open',
+        comment: 'initial review',
+        actor: 'subject:reviewer',
+        created_at: '2026-03-16T00:00:00Z'
+      }
+    ];
+
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('/v1/findings/summary')) return ok({ total: 1, by_severity: { high: 1 }, by_type: { risky_trust_policy: 1 } });
+      if (url.includes('/v1/findings/trends')) return ok({ items: [] });
+      if (url.includes('/v1/scans?')) {
+        return ok({
+          items: [{ id: 'scan-1', provider: 'aws', status: 'completed', started_at: '2026-03-16T00:00:00Z', asset_count: 1, finding_count: 1 }]
+        });
+      }
+      if (url.includes('/v1/findings?')) {
+        return ok({
+          items: [
+            {
+              id: 'f-1',
+              scan_id: 'scan-1',
+              type: 'risky_trust_policy',
+              severity: 'high',
+              title: 'Risky trust',
+              human_summary: 'summary',
+              remediation: 'fix',
+              created_at: '2026-03-16T00:00:00Z',
+              triage: { status: 'open' }
+            }
+          ]
+        });
+      }
+      if (url.includes('/v1/findings/f-1/history')) {
+        return ok({ items: historyItems });
+      }
+      if (url.includes('/v1/findings/f-1/triage')) {
+        historyItems = [
+          {
+            id: 'evt-2',
+            finding_id: 'f-1',
+            action: 'acknowledged',
+            from_status: 'open',
+            to_status: 'ack',
+            comment: 'accepted for follow-up',
+            actor: 'subject:writer',
+            created_at: '2026-03-16T00:01:00Z'
+          },
+          ...historyItems
+        ];
+        return ok({
+          finding: {
+            id: 'f-1',
+            scan_id: 'scan-1',
+            type: 'risky_trust_policy',
+            severity: 'high',
+            title: 'Risky trust',
+            human_summary: 'summary',
+            remediation: 'fix',
+            created_at: '2026-03-16T00:00:00Z',
+            triage: { status: 'ack', assignee: 'platform' }
+          }
+        });
+      }
+      if (url.includes('/v1/findings/f-1')) {
+        return ok({
+          id: 'f-1',
+          scan_id: 'scan-1',
+          type: 'risky_trust_policy',
+          severity: 'high',
+          title: 'Risky trust',
+          human_summary: 'summary',
+          remediation: 'fix',
+          created_at: '2026-03-16T00:00:00Z',
+          triage: { status: 'open' }
+        });
+      }
+      if (url.includes('/v1/scans/scan-1/diff')) {
+        return ok({
+          scan_id: 'scan-1',
+          added_count: 0,
+          resolved_count: 0,
+          persisting_count: 1,
+          added: [],
+          resolved: [],
+          persisting: []
+        });
+      }
+      if (url.includes('/v1/identities')) return ok({ items: [] });
+      if (url.includes('/v1/relationships')) return ok({ items: [] });
+      if (url.includes('/v1/scans/scan-1/events')) return ok({ items: [] });
+      return ok({ items: [] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText('Risky trust').length).toBeGreaterThan(0);
+      expect(screen.getByText('commented')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText('Assignee'), { target: { value: 'platform' } });
+    fireEvent.change(screen.getByLabelText('Comment'), { target: { value: 'accepted for follow-up' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Ack' }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText((_, node) => {
+          const text = node?.textContent?.replace(/\s+/g, ' ').trim();
+          return text === 'Status: ack';
+        })
+      ).toBeInTheDocument();
+      expect(screen.getByText('acknowledged')).toBeInTheDocument();
+    });
+
+    const patchCall = fetchMock.mock.calls.find((call) => {
+      const requestCall = call as unknown as [RequestInfo | URL, RequestInit?];
+      return String(requestCall[0]).includes('/v1/findings/f-1/triage?scan_id=scan-1');
+    }) as [RequestInfo | URL, RequestInit] | undefined;
+    expect(patchCall).toBeDefined();
+    expect(patchCall?.[1].method).toBe('PATCH');
   });
 });

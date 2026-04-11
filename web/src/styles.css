@@ -77,13 +77,19 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   border: 1px solid #b8ced6;
   border-radius: 10px;
   padding: 0.6rem 0.7rem;
   font-size: 0.95rem;
   background: #fff;
+}
+
+textarea {
+  min-height: 82px;
+  resize: vertical;
 }
 
 .total {
@@ -153,6 +159,50 @@ select {
 
 .error {
   color: var(--warning);
+}
+
+.success {
+  color: #1e7f38;
+}
+
+.triage-controls {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.triage-controls h3 {
+  margin: 0.2rem 0 0;
+}
+
+.triage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.triage-actions button {
+  border: 1px solid #0a6659;
+  background: #0f8376;
+  color: #fff;
+  border-radius: 8px;
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.triage-actions button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.triage-history li {
+  padding: 0.45rem 0;
+  border-bottom: 1px solid #e3edf0;
+}
+
+.triage-history li:last-child {
+  border-bottom: none;
 }
 
 .hint {

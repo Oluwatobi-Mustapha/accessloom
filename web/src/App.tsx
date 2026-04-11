@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   apiClient,
   type Finding,
+  type FindingLifecycleStatus,
+  type FindingTriageEvent,
   type FindingsSummary,
   type Identity,
+  type FindingTriageRequest,
   type RequestAuthContext,
   type Relationship,
   type ScanDiff,
@@ -11,6 +14,50 @@ import {
   type ScanRecord,
   type TrendPoint
 } from './api/client';
+
+function formatDateTime(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleString();
+}
+
+function toDateTimeLocal(value?: string): string {
+  if (!value) {
+    return '';
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return '';
+  }
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getDate()).padStart(2, '0');
+  const hour = String(parsed.getHours()).padStart(2, '0');
+  const minute = String(parsed.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+}
+
+function fromDateTimeLocal(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed.toISOString();
+}
+
+function findingStatus(finding: Finding | null): FindingLifecycleStatus {
+  return finding?.triage?.status ?? 'open';
+}
+
+function formatTriageAction(action: string): string {
+  return action.replace(/_/g, ' ');
+}
 
 export function App() {
   const [apiKey, setApiKey] = useState('');
@@ -33,9 +80,18 @@ export function App() {
   const [overviewError, setOverviewError] = useState<string | null>(null);
   const [detailsError, setDetailsError] = useState<string | null>(null);
   const [findingError, setFindingError] = useState<string | null>(null);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [triageError, setTriageError] = useState<string | null>(null);
+  const [triageSuccess, setTriageSuccess] = useState<string | null>(null);
   const [loadingOverview, setLoadingOverview] = useState(false);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [loadingFinding, setLoadingFinding] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [submittingTriage, setSubmittingTriage] = useState(false);
+  const [triageHistory, setTriageHistory] = useState<FindingTriageEvent[]>([]);
+  const [triageAssignee, setTriageAssignee] = useState('');
+  const [triageSuppressUntil, setTriageSuppressUntil] = useState('');
+  const [triageComment, setTriageComment] = useState('');
   const [refreshNonce, setRefreshNonce] = useState(0);
 
   const topSeverities = useMemo(() => {
@@ -181,32 +237,96 @@ export function App() {
     const scanID = availableScanID;
     if (!selectedFindingID || !scanID) {
       setSelectedFinding(null);
+      setTriageHistory([]);
       setFindingError(null);
+      setHistoryError(null);
       return;
     }
     let active = true;
     setLoadingFinding(true);
-    apiClient
-      .getFinding(selectedFindingID, scanID, requestAuth)
-      .then((item) => {
+    setLoadingHistory(true);
+    Promise.all([
+      apiClient.getFinding(selectedFindingID, scanID, requestAuth),
+      apiClient.listFindingHistory(selectedFindingID, scanID, 20, requestAuth)
+    ])
+      .then(([item, history]) => {
         if (!active) return;
         setSelectedFinding(item);
+        setTriageHistory(history.items);
         setFindingError(null);
+        setHistoryError(null);
       })
       .catch((err: Error) => {
         if (!active) return;
         setSelectedFinding(null);
+        setTriageHistory([]);
         setFindingError(err.message);
+        setHistoryError(err.message);
       })
       .finally(() => {
-        if (active) setLoadingFinding(false);
+        if (!active) return;
+        setLoadingFinding(false);
+        setLoadingHistory(false);
       });
     return () => {
       active = false;
     };
   }, [selectedFindingID, availableScanID, requestAuth]);
 
+  useEffect(() => {
+    setTriageAssignee(selectedFinding?.triage?.assignee ?? '');
+    setTriageSuppressUntil(toDateTimeLocal(selectedFinding?.triage?.suppression_expires_at));
+    setTriageComment('');
+    setTriageError(null);
+    setTriageSuccess(null);
+  }, [selectedFindingID, selectedFinding?.triage?.assignee, selectedFinding?.triage?.suppression_expires_at]);
+
   const triggerRefresh = () => setRefreshNonce((value) => value + 1);
+  const canSubmitTriage = Boolean(selectedFinding && availableScanID);
+
+  const submitTriageAction = async (status: FindingLifecycleStatus): Promise<void> => {
+    if (!selectedFindingID || !availableScanID) {
+      return;
+    }
+    setTriageError(null);
+    setTriageSuccess(null);
+
+    const payload: FindingTriageRequest = {
+      status,
+      assignee: triageAssignee.trim(),
+      comment: triageComment.trim()
+    };
+
+    if (status === 'suppressed') {
+      const suppressionExpiry = fromDateTimeLocal(triageSuppressUntil);
+      if (!suppressionExpiry) {
+        setTriageError('Suppression requires a valid future "Suppress Until" value.');
+        return;
+      }
+      payload.suppression_expires_at = suppressionExpiry;
+    }
+
+    setSubmittingTriage(true);
+    try {
+      const triageResult = await apiClient.triageFinding(selectedFindingID, payload, availableScanID, requestAuth);
+      setSelectedFinding(triageResult.finding);
+      setFindings((current) =>
+        current.map((finding) => (finding.id === triageResult.finding.id ? triageResult.finding : finding))
+      );
+      const historyResult = await apiClient.listFindingHistory(selectedFindingID, availableScanID, 20, requestAuth);
+      setTriageHistory(historyResult.items);
+      setTriageSuccess(`Finding updated to ${status}.`);
+      setTriageComment('');
+    } catch (err) {
+      if (err instanceof Error) {
+        setTriageError(err.message);
+      } else {
+        setTriageError('failed to update finding triage');
+      }
+    } finally {
+      setSubmittingTriage(false);
+    }
+  };
 
   return (
     <main className="page">
@@ -341,6 +461,7 @@ export function App() {
               <tr>
                 <th>ID</th>
                 <th>Severity</th>
+                <th>Triage</th>
                 <th>Type</th>
                 <th>Title</th>
               </tr>
@@ -354,6 +475,7 @@ export function App() {
                 >
                   <td>{finding.id.slice(0, 12)}</td>
                   <td>{finding.severity}</td>
+                  <td>{finding.triage?.status ?? 'open'}</td>
                   <td>{finding.type}</td>
                   <td>{finding.title}</td>
                 </tr>
@@ -377,6 +499,70 @@ export function App() {
               <p>
                 <strong>Remediation:</strong> {selectedFinding.remediation}
               </p>
+              <p>
+                <strong>Status:</strong> {findingStatus(selectedFinding)}
+              </p>
+              <p>
+                <strong>Assignee:</strong> {selectedFinding.triage?.assignee || 'unassigned'}
+              </p>
+              {selectedFinding.triage?.suppression_expires_at && (
+                <p>
+                  <strong>Suppressed Until:</strong> {formatDateTime(selectedFinding.triage.suppression_expires_at)}
+                </p>
+              )}
+
+              <div className="triage-controls">
+                <h3>Triage Actions</h3>
+                <label htmlFor="triage-assignee">Assignee</label>
+                <input
+                  id="triage-assignee"
+                  value={triageAssignee}
+                  onChange={(event) => setTriageAssignee(event.target.value)}
+                  placeholder="e.g. platform-oncall"
+                />
+
+                <label htmlFor="triage-suppress-until">Suppress Until</label>
+                <input
+                  id="triage-suppress-until"
+                  type="datetime-local"
+                  value={triageSuppressUntil}
+                  onChange={(event) => setTriageSuppressUntil(event.target.value)}
+                />
+
+                <label htmlFor="triage-comment">Comment</label>
+                <textarea
+                  id="triage-comment"
+                  value={triageComment}
+                  onChange={(event) => setTriageComment(event.target.value)}
+                  placeholder="Optional audit comment"
+                />
+
+                <div className="triage-actions">
+                  <button
+                    type="button"
+                    onClick={() => void submitTriageAction('ack')}
+                    disabled={!canSubmitTriage || submittingTriage}
+                  >
+                    Ack
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void submitTriageAction('suppressed')}
+                    disabled={!canSubmitTriage || submittingTriage}
+                  >
+                    Suppress
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void submitTriageAction('resolved')}
+                    disabled={!canSubmitTriage || submittingTriage}
+                  >
+                    Resolve
+                  </button>
+                </div>
+                {triageSuccess && <p className="success">{triageSuccess}</p>}
+                {triageError && <p className="error">{triageError}</p>}
+              </div>
             </>
           )}
         </div>
@@ -388,6 +574,25 @@ export function App() {
               <li>Added: {scanDiff.added_count}</li>
               <li>Resolved: {scanDiff.resolved_count}</li>
               <li>Persisting: {scanDiff.persisting_count}</li>
+            </ul>
+          )}
+
+          <h3>Triage Audit Trail</h3>
+          {loadingHistory && <p>Loading triage history...</p>}
+          {historyError && <p className="error">{historyError}</p>}
+          {!loadingHistory && !historyError && triageHistory.length === 0 && (
+            <p className="hint">No triage actions recorded yet.</p>
+          )}
+          {!loadingHistory && !historyError && triageHistory.length > 0 && (
+            <ul className="stats-list triage-history">
+              {triageHistory.map((event) => (
+                <li key={event.id}>
+                  <strong>{formatTriageAction(event.action)}</strong> · {event.from_status} → {event.to_status} ·{' '}
+                  {formatDateTime(event.created_at)}
+                  {event.actor && <span> · {event.actor}</span>}
+                  {event.comment && <div>{event.comment}</div>}
+                </li>
+              ))}
             </ul>
           )}
         </div>
