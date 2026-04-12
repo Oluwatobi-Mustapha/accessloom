@@ -20,6 +20,7 @@ Portable deployment profiles:
 
 - Confirm `IDENTRAIL_DATABASE_URL` points to target environment.
 - Confirm migrations path is correct (`IDENTRAIL_MIGRATIONS_DIR`).
+- Confirm shared API/worker config keeps `IDENTRAIL_RUN_MIGRATIONS=false`.
 - Confirm lock backend for deployment shape:
   - single instance: `IDENTRAIL_LOCK_BACKEND=inmemory` or `auto`
   - multi-instance: `IDENTRAIL_LOCK_BACKEND=postgres`
@@ -53,10 +54,12 @@ Portable deployment profiles:
 ## 2) Deploy Sequence
 
 1. Ensure CI is green on `main` (`Go Quality`, `Go Tests`, `Go Integration (Postgres)`, `Web Build`).
-2. Deploy API service with `IDENTRAIL_RUN_MIGRATIONS=true`.
-3. Verify health endpoint: `GET /healthz`.
-4. Verify migrations were applied.
-5. Deploy worker with same DB + provider config.
+2. Run migrations once using the dedicated migration job:
+   - Kubernetes manifests: apply `deploy/kubernetes/migration-job.yaml` and wait for job completion.
+   - Helm: pre-install/pre-upgrade hook job runs automatically when `migrations.enabled=true`.
+3. Deploy API service with `IDENTRAIL_RUN_MIGRATIONS=false`.
+4. Verify health endpoint: `GET /healthz`.
+5. Deploy worker with same DB + provider config (`IDENTRAIL_RUN_MIGRATIONS=false`).
 6. Trigger one scan (`POST /v1/scans`) with write-authorized key.
 7. Verify:
   - scan is accepted as queued (`202`) then completed by worker

@@ -11,16 +11,20 @@ Simple migration strategy for production safety.
 
 ## Runtime Behavior
 
-- API startup can auto-apply up migrations when:
+- Shared API/worker deployments must run with `IDENTRAIL_RUN_MIGRATIONS=false`.
+- Run schema migrations in a single one-shot migrator process:
+  - Kubernetes manifests: `deploy/kubernetes/migration-job.yaml`
+  - Helm chart: pre-install/pre-upgrade migration Job hook
+- The migrator job sets:
   - `IDENTRAIL_RUN_MIGRATIONS=true`
-  - `IDENTRAIL_MIGRATIONS_DIR` points to the migration folder.
+  - `IDENTRAIL_RUN_MIGRATIONS_ONLY=true`
 - Down migrations are intentionally manual.
 
 ## Roll Forward (Preferred)
 
-1. Deploy new app version with `IDENTRAIL_RUN_MIGRATIONS=true`.
-2. Verify `/healthz` and one scan smoke run.
-3. Keep worker disabled until API checks pass, then enable worker.
+1. Deploy and wait for the dedicated migrator job to complete successfully.
+2. Deploy API and worker pods with `IDENTRAIL_RUN_MIGRATIONS=false`.
+3. Verify `/healthz` and one scan smoke run.
 
 ## Rollback Procedure
 
