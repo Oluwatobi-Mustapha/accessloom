@@ -36,7 +36,7 @@ Machine identity risk is fragmented across cloud IAM, Kubernetes, and repositori
 
 ## Contribution
 
-Identrail is a free and open source project licensed under the [MIT License](./LICENSE).
+Identrail is a free and open source project licensed under the [Apache-2.0 license](./LICENSE).
 
 You can help by:
 
