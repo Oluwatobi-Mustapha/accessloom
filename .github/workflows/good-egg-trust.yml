@@ -28,8 +28,6 @@ jobs:
           comment: 'true'
           check-run: 'true'
           fail-on-low: 'false'
-          scoring-model: 'v3'
-          skip-known-contributors: 'true'
 
       - name: Sync trust labels
         uses: actions/github-script@v8
@@ -48,7 +46,6 @@ jobs:
               'trust/low': { color: 'd93f0b', description: 'Good Egg trust level: LOW' },
               'trust/unknown': { color: '6e7781', description: 'Good Egg trust level: UNKNOWN' },
               'trust/bot': { color: '5319e7', description: 'Good Egg trust level: BOT' },
-              'trust/existing-contributor': { color: '1d76db', description: 'Good Egg trust level: EXISTING_CONTRIBUTOR' },
             };
 
             const trustToLabel = {
@@ -57,7 +54,6 @@ jobs:
               LOW: 'trust/low',
               UNKNOWN: 'trust/unknown',
               BOT: 'trust/bot',
-              EXISTING_CONTRIBUTOR: 'trust/existing-contributor',
             };
 
             const targetLabel = trustToLabel[trustLevel] || 'trust/unknown';

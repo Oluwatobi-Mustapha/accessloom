@@ -7,7 +7,7 @@ Workflow:
 
 ## What it does
 
-- Scores PR authors with the Good Egg `v3` model.
+- Scores every PR author on each workflow run.
 - Posts a PR comment and check run with the trust result.
 - Applies a single trust label on the PR:
   - `trust/high`
@@ -15,7 +15,6 @@ Workflow:
   - `trust/low`
   - `trust/unknown`
   - `trust/bot`
-  - `trust/existing-contributor`
 
 This signal is advisory by default (`fail-on-low=false`). It is meant to support triage, not replace code review.
 
