@@ -37,6 +37,9 @@ paths:
                   service:
                     type: string
   /v1/authz/policies/simulate:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     post:
       tags: [Authorization]
       summary: Simulate authorization policy decision
@@ -82,6 +85,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
   /v1/authz/policies/rollback:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     post:
       tags: [Authorization]
       summary: Roll back central authorization policy to a target version
@@ -127,6 +133,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
   /v1/findings:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [Findings]
       summary: List findings
@@ -164,6 +173,9 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
   /v1/findings/summary:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [Findings]
       summary: Findings summary
@@ -178,6 +190,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/FindingsSummary"
   /v1/findings/trends:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [Findings]
       summary: Findings trend over recent scans
@@ -209,6 +224,9 @@ paths:
                     items:
                       $ref: "#/components/schemas/TrendPoint"
   /v1/findings/{finding_id}:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [Findings]
       summary: Get finding by id
@@ -231,6 +249,9 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
   /v1/findings/{finding_id}/history:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [Findings]
       summary: List finding triage history
@@ -259,6 +280,9 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
   /v1/findings/{finding_id}/triage:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     patch:
       tags: [Findings]
       summary: Update finding triage workflow metadata
@@ -296,6 +320,9 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
   /v1/findings/{finding_id}/exports:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [Findings]
       summary: Get standards-aligned exports for a finding
@@ -323,6 +350,9 @@ paths:
                     type: object
                     additionalProperties: true
   /v1/scans:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [Scans]
       summary: List scans
@@ -356,6 +386,9 @@ paths:
         "429":
           description: Scan queue is full
   /v1/scans/{scan_id}/diff:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [Scans]
       summary: Compare a scan with baseline
@@ -379,6 +412,9 @@ paths:
         "400":
           description: Invalid baseline
   /v1/scans/{scan_id}/events:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [Scans]
       summary: List scan lifecycle events
@@ -405,6 +441,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/ScanEventPage"
   /v1/identities:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [Explorer]
       summary: List normalized identities
@@ -436,6 +475,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/IdentityPage"
   /v1/relationships:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [Explorer]
       summary: List graph relationships
@@ -465,6 +507,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/RelationshipPage"
   /v1/ownership/signals:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [Explorer]
       summary: List ownership signals
@@ -485,6 +530,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/OwnershipSignalPage"
   /v1/repo-scans:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [RepositoryExposure]
       summary: List repository exposure scans
@@ -532,6 +580,9 @@ paths:
         "503":
           description: Repo scan is disabled
   /v1/repo-scans/{repo_scan_id}:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [RepositoryExposure]
       summary: Get repository scan
@@ -551,6 +602,9 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
   /v1/repo-findings:
+    parameters:
+      - $ref: "#/components/parameters/scopeTenantID"
+      - $ref: "#/components/parameters/scopeWorkspaceID"
     get:
       tags: [RepositoryExposure]
       summary: List repository scan findings
@@ -589,6 +643,20 @@ components:
       scheme: bearer
       bearerFormat: JWT
   parameters:
+    scopeTenantID:
+      in: header
+      name: X-Identrail-Tenant-ID
+      required: false
+      schema:
+        type: string
+      description: Optional tenant scope override when token claims do not provide tenant context.
+    scopeWorkspaceID:
+      in: header
+      name: X-Identrail-Workspace-ID
+      required: false
+      schema:
+        type: string
+      description: Optional workspace scope override when token claims do not provide workspace context.
     limit:
       in: query
       name: limit
