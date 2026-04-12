@@ -26,7 +26,7 @@ else
 fi
 
 echo "[4/8] Docker compose config validation"
-cp deploy/docker/.env.example deploy/docker/.env
+[[ -f deploy/docker/.env ]] || cp deploy/docker/.env.example deploy/docker/.env
 docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env config >/tmp/identrail-compose.yml
 
 echo "[5/8] Terraform validation"
