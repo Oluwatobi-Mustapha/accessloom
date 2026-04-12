@@ -151,10 +151,11 @@ func TestValidateSecurityRejectsAWSFixtureWhenLiveSourcesRequiredWithDefaultProv
 	cfg := Config{
 		AWSSource:          "fixture",
 		RequireLiveSources: true,
-		APIKeys:            []string{"reader"},
+		APIKeys:            []string{"reader", "writer"},
+		WriteAPIKeys:       []string{"writer"},
 	}
-	if err := ValidateSecurity(cfg); err == nil {
-		t.Fatal("expected fixture aws source to be rejected when default provider is used")
+	if err := ValidateSecurity(cfg); err == nil || !strings.Contains(err.Error(), "IDENTRAIL_AWS_SOURCE=sdk") {
+		t.Fatalf("expected default provider to reject fixture aws source, got %v", err)
 	}
 }
 
