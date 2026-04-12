@@ -50,15 +50,16 @@ type RepoScannerFactory func(historyLimit int, maxFindings int) RepoScanExecutor
 
 // Service orchestrates scan execution and persistence.
 type Service struct {
-	Store         db.Store
-	Scanner       ScannerRunner
-	Provider      string
-	DefaultScope  db.Scope
-	Now           func() time.Time
-	Locker        scheduler.Locker
-	LockNamespace string
-	Alerter       FindingAlerter
-	OnAlertError  func(error)
+	Store          db.Store
+	Scanner        ScannerRunner
+	Provider       string
+	DefaultScope   db.Scope
+	Now            func() time.Time
+	Locker         scheduler.Locker
+	LockNamespace  string
+	Alerter        FindingAlerter
+	OnAlertError   func(error)
+	ReadinessCheck func(context.Context) error
 	// Repo scan controls are intentionally separate from cloud identity scan flow.
 	RepoScanEnabled             bool
 	RepoScanDefaultHistoryLimit int
@@ -69,6 +70,25 @@ type Service struct {
 	ScanQueueMaxPending         int
 	RepoQueueMaxPending         int
 	RepoScannerFactory          RepoScannerFactory
+}
+
+// CheckReadiness validates critical runtime dependencies for readiness checks.
+func (s *Service) CheckReadiness(ctx context.Context) error {
+	if s == nil {
+		return errors.New("service is not initialized")
+	}
+	if s.Store == nil {
+		return errors.New("store is not initialized")
+	}
+	if s.Scanner == nil {
+		return errors.New("scanner is not initialized")
+	}
+	if s.ReadinessCheck != nil {
+		if err := s.ReadinessCheck(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RunScanResult is returned after a scan API trigger.

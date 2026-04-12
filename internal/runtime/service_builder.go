@@ -119,6 +119,20 @@ func BuildScanService(cfg config.Config) (*api.Service, func() error, error) {
 		// Validation should catch this; keep in-memory as safe fallback.
 		svc.Locker = scheduler.NewInMemoryLocker()
 	}
+	if pgStore != nil {
+		svc.ReadinessCheck = func(ctx context.Context) error {
+			pingCtx := ctx
+			cancel := func() {}
+			if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+				pingCtx, cancel = context.WithTimeout(ctx, 2*time.Second)
+			}
+			defer cancel()
+			if err := pgStore.DB().PingContext(pingCtx); err != nil {
+				return fmt.Errorf("ping postgres: %w", err)
+			}
+			return nil
+		}
+	}
 	svc.RepoScanEnabled = cfg.RepoScanEnabled
 	if cfg.RepoScanHistoryLimit > 0 {
 		svc.RepoScanDefaultHistoryLimit = cfg.RepoScanHistoryLimit

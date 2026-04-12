@@ -51,6 +51,23 @@ func (f *fakeRepoExecutor) ScanRepository(_ context.Context, target string) (rep
 	return f.result, nil
 }
 
+func TestServiceCheckReadiness(t *testing.T) {
+	svc := NewService(db.NewMemoryStore(), fakeScanner{}, "aws")
+	if err := svc.CheckReadiness(context.Background()); err != nil {
+		t.Fatalf("expected readiness check to pass, got %v", err)
+	}
+}
+
+func TestServiceCheckReadinessDependencyFailure(t *testing.T) {
+	svc := NewService(db.NewMemoryStore(), fakeScanner{}, "aws")
+	svc.ReadinessCheck = func(context.Context) error {
+		return errors.New("dependency unavailable")
+	}
+	if err := svc.CheckReadiness(context.Background()); err == nil {
+		t.Fatal("expected readiness check failure")
+	}
+}
+
 func TestServiceRunScanSuccess(t *testing.T) {
 	store := db.NewMemoryStore()
 	now := time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC)

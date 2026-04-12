@@ -110,6 +110,32 @@ func NewRouter(logger *zap.Logger, metrics *telemetry.Metrics, svc *Service, opt
 		})
 	})
 
+	r.GET("/readyz", func(c *gin.Context) {
+		if svc == nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status":  "not_ready",
+				"service": "identrail",
+			})
+			return
+		}
+		readyCtx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+		if err := svc.CheckReadiness(readyCtx); err != nil {
+			if logger != nil {
+				logger.Warn("readiness check failed", telemetry.ZapError(err))
+			}
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"status":  "not_ready",
+				"service": "identrail",
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "ready",
+			"service": "identrail",
+		})
+	})
+
 	r.GET("/metrics", gin.WrapH(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
 
 	var authzStore db.Store
