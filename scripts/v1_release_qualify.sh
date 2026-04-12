@@ -26,7 +26,25 @@ else
 fi
 
 echo "[4/8] Docker compose config validation"
-docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env.example config >/tmp/identrail-compose.yml
+compose_env_path="deploy/docker/.env"
+compose_env_backup=""
+cleanup_compose_env() {
+  if [[ -n "${compose_env_backup}" && -f "${compose_env_backup}" ]]; then
+    mv "${compose_env_backup}" "${compose_env_path}"
+    compose_env_backup=""
+    return
+  fi
+  rm -f "${compose_env_path}"
+}
+if [[ -f "${compose_env_path}" ]]; then
+  compose_env_backup="$(mktemp)"
+  cp "${compose_env_path}" "${compose_env_backup}"
+fi
+trap cleanup_compose_env EXIT
+cp deploy/docker/.env.example "${compose_env_path}"
+docker compose -f deploy/docker/docker-compose.yml --env-file "${compose_env_path}" config >/tmp/identrail-compose.yml
+cleanup_compose_env
+trap - EXIT
 
 echo "[5/8] Terraform validation"
 if command -v terraform >/dev/null 2>&1; then
