@@ -220,6 +220,9 @@ func ValidateSecurity(cfg Config) error {
 		if _, ok := allowedKubernetesSources[source]; !ok {
 			return fmt.Errorf("invalid IDENTRAIL_K8S_SOURCE %q", cfg.KubernetesSource)
 		}
+		if cfg.RequireLiveSources && source == "fixture" {
+			return fmt.Errorf("IDENTRAIL_REQUIRE_LIVE_SOURCES=true requires IDENTRAIL_K8S_SOURCE=kubectl")
+		}
 		if source == "kubectl" && strings.TrimSpace(cfg.KubectlPath) == "" {
 			return fmt.Errorf("IDENTRAIL_KUBECTL_PATH must be set when IDENTRAIL_K8S_SOURCE=kubectl")
 		}
@@ -231,6 +234,9 @@ func ValidateSecurity(cfg Config) error {
 		}
 		if _, ok := allowedAWSSources[source]; !ok {
 			return fmt.Errorf("invalid IDENTRAIL_AWS_SOURCE %q", cfg.AWSSource)
+		}
+		if cfg.RequireLiveSources && source == "fixture" {
+			return fmt.Errorf("IDENTRAIL_REQUIRE_LIVE_SOURCES=true requires IDENTRAIL_AWS_SOURCE=sdk")
 		}
 		if source == "sdk" && strings.TrimSpace(cfg.AWSRegion) == "" {
 			return fmt.Errorf("IDENTRAIL_AWS_REGION must be set when IDENTRAIL_AWS_SOURCE=sdk")

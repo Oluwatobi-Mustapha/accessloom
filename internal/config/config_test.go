@@ -22,6 +22,7 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("IDENTRAIL_K8S_SOURCE", "")
 	t.Setenv("IDENTRAIL_KUBECTL_PATH", "")
 	t.Setenv("IDENTRAIL_KUBE_CONTEXT", "")
+	t.Setenv("IDENTRAIL_REQUIRE_LIVE_SOURCES", "")
 	t.Setenv("IDENTRAIL_SCAN_INTERVAL", "")
 	t.Setenv("IDENTRAIL_WORKER_RUN_NOW", "")
 	t.Setenv("IDENTRAIL_API_KEYS", "")
@@ -117,6 +118,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.KubeContext != "" {
 		t.Fatalf("expected empty kube context by default, got %q", cfg.KubeContext)
+	}
+	if cfg.RequireLiveSources {
+		t.Fatal("expected require live sources false by default")
 	}
 	if cfg.ScanInterval != defaultScanInterval {
 		t.Fatalf("expected default scan interval %v, got %v", defaultScanInterval, cfg.ScanInterval)
@@ -289,6 +293,7 @@ func TestLoadFromEnv(t *testing.T) {
 	t.Setenv("IDENTRAIL_K8S_SOURCE", "kubectl")
 	t.Setenv("IDENTRAIL_KUBECTL_PATH", "/usr/local/bin/kubectl")
 	t.Setenv("IDENTRAIL_KUBE_CONTEXT", "dev-cluster")
+	t.Setenv("IDENTRAIL_REQUIRE_LIVE_SOURCES", "true")
 	t.Setenv("IDENTRAIL_SCAN_INTERVAL", "30m")
 	t.Setenv("IDENTRAIL_WORKER_RUN_NOW", "false")
 	t.Setenv("IDENTRAIL_API_KEYS", "key1,key2")
@@ -387,6 +392,9 @@ func TestLoadFromEnv(t *testing.T) {
 	}
 	if cfg.KubeContext != "dev-cluster" {
 		t.Fatalf("unexpected kube context: %q", cfg.KubeContext)
+	}
+	if !cfg.RequireLiveSources {
+		t.Fatal("expected require live sources true")
 	}
 	if cfg.ScanInterval != 30*time.Minute {
 		t.Fatalf("unexpected scan interval: %v", cfg.ScanInterval)

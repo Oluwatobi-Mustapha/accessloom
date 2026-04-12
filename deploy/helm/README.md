@@ -25,6 +25,8 @@ This chart is the Kubernetes deployment baseline for Identrail.
 - Migrations run as a pre-install/pre-upgrade Helm hook job (`templates/migration-job.yaml`).
 - API and worker deployments force `IDENTRAIL_RUN_MIGRATIONS=false` to avoid DDL races.
 - Disable hook jobs only if migrations are handled externally: set `migrations.enabled=false`.
+- Values default to `IDENTRAIL_AWS_SOURCE=sdk` and enforce `IDENTRAIL_REQUIRE_LIVE_SOURCES=true`.
+- `IDENTRAIL_K8S_SOURCE` defaults to `fixture` to avoid requiring a `kubectl` binary in the default backend image. For Kubernetes provider deployments, set `IDENTRAIL_K8S_SOURCE=kubectl` and use an image that includes `kubectl`.
 - Enable web deployment by setting `web.enabled=true`.
 - Enable ingress by setting `ingress.enabled=true`.
 - `IDENTRAIL_AUDIT_LOG_FILE` is empty by default. If you enable it, mount a writable path for the container user.

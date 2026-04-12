@@ -135,6 +135,18 @@ func TestValidateSecurityAcceptsAWSSDKMode(t *testing.T) {
 	}
 }
 
+func TestValidateSecurityRejectsAWSFixtureWhenLiveSourcesRequired(t *testing.T) {
+	cfg := Config{
+		Provider:           "aws",
+		AWSSource:          "fixture",
+		RequireLiveSources: true,
+		APIKeys:            []string{"reader"},
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected fixture aws source to be rejected when live sources are required")
+	}
+}
+
 func TestValidateSecurityRejectsInvalidKubernetesSource(t *testing.T) {
 	cfg := Config{
 		Provider:         "kubernetes",
@@ -168,6 +180,18 @@ func TestValidateSecurityAcceptsKubectlMode(t *testing.T) {
 	}
 	if err := ValidateSecurity(cfg); err != nil {
 		t.Fatalf("expected kubectl mode to be valid, got %v", err)
+	}
+}
+
+func TestValidateSecurityRejectsKubernetesFixtureWhenLiveSourcesRequired(t *testing.T) {
+	cfg := Config{
+		Provider:           "kubernetes",
+		KubernetesSource:   "fixture",
+		RequireLiveSources: true,
+		APIKeys:            []string{"reader"},
+	}
+	if err := ValidateSecurity(cfg); err == nil {
+		t.Fatal("expected fixture kubernetes source to be rejected when live sources are required")
 	}
 }
 

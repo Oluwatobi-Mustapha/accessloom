@@ -62,6 +62,7 @@ type Config struct {
 	KubernetesSource           string
 	KubectlPath                string
 	KubeContext                string
+	RequireLiveSources         bool
 	ScanInterval               time.Duration
 	WorkerRunNow               bool
 	APIKeys                    []string
@@ -134,6 +135,7 @@ func Load() Config {
 		KubernetesSource:           strings.ToLower(getEnv("IDENTRAIL_K8S_SOURCE", defaultK8sSource)),
 		KubectlPath:                getEnv("IDENTRAIL_KUBECTL_PATH", defaultKubectlPath),
 		KubeContext:                getEnv("IDENTRAIL_KUBE_CONTEXT", ""),
+		RequireLiveSources:         parseBool(getEnv("IDENTRAIL_REQUIRE_LIVE_SOURCES", "false"), false),
 		ScanInterval:               parseDuration(getEnv("IDENTRAIL_SCAN_INTERVAL", defaultScanInterval.String()), defaultScanInterval),
 		WorkerRunNow:               parseBool(getEnv("IDENTRAIL_WORKER_RUN_NOW", "true"), true),
 		APIKeys:                    parseCommaSeparated(getEnv("IDENTRAIL_API_KEYS", "")),
