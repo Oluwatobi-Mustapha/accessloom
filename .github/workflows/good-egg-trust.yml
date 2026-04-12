@@ -1,0 +1,103 @@
+name: Good Egg Trust
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+  issues: write
+
+concurrency:
+  group: good-egg-trust-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  score-author-trust:
+    name: Score PR author trust
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Score PR author (advisory)
+        id: egg
+        uses: 2ndSetAI/good-egg@026775d031d94339d1fc0f6428abe04677d3e2d9 # v0
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          comment: 'true'
+          check-run: 'true'
+          fail-on-low: 'false'
+          scoring-model: 'v3'
+          skip-known-contributors: 'true'
+
+      - name: Sync trust labels
+        uses: actions/github-script@v8
+        env:
+          TRUST_LEVEL: ${{ steps.egg.outputs.trust-level }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const prNumber = context.payload.pull_request.number;
+            const trustLevel = (process.env.TRUST_LEVEL || 'UNKNOWN').toUpperCase();
+
+            const labelMeta = {
+              'trust/high': { color: '0e8a16', description: 'Good Egg trust level: HIGH' },
+              'trust/medium': { color: 'fbca04', description: 'Good Egg trust level: MEDIUM' },
+              'trust/low': { color: 'd93f0b', description: 'Good Egg trust level: LOW' },
+              'trust/unknown': { color: '6e7781', description: 'Good Egg trust level: UNKNOWN' },
+              'trust/bot': { color: '5319e7', description: 'Good Egg trust level: BOT' },
+              'trust/existing-contributor': { color: '1d76db', description: 'Good Egg trust level: EXISTING_CONTRIBUTOR' },
+            };
+
+            const trustToLabel = {
+              HIGH: 'trust/high',
+              MEDIUM: 'trust/medium',
+              LOW: 'trust/low',
+              UNKNOWN: 'trust/unknown',
+              BOT: 'trust/bot',
+              EXISTING_CONTRIBUTOR: 'trust/existing-contributor',
+            };
+
+            const targetLabel = trustToLabel[trustLevel] || 'trust/unknown';
+            const managedLabels = Object.keys(labelMeta);
+
+            for (const [name, meta] of Object.entries(labelMeta)) {
+              try {
+                await github.rest.issues.createLabel({
+                  owner,
+                  repo,
+                  name,
+                  color: meta.color,
+                  description: meta.description,
+                });
+              } catch (error) {
+                if (error.status !== 422) {
+                  throw error;
+                }
+              }
+            }
+
+            const currentLabels = (context.payload.pull_request.labels || []).map((label) => label.name);
+            const staleLabels = currentLabels.filter((label) => managedLabels.includes(label) && label !== targetLabel);
+
+            for (const label of staleLabels) {
+              await github.rest.issues.removeLabel({
+                owner,
+                repo,
+                issue_number: prNumber,
+                name: label,
+              });
+            }
+
+            if (!currentLabels.includes(targetLabel)) {
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: prNumber,
+                labels: [targetLabel],
+              });
+            }
+
+            core.info(`Applied Good Egg trust label: ${targetLabel}`);

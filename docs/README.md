@@ -50,6 +50,7 @@ This index maps Identrail docs by operator, developer, security/compliance, and 
 ## Security and governance track
 
 - Threat model: `threat_model.md`
+- Contributor trust scoring (Good Egg): `contributor-trust-scoring.md`
 - Architecture decisions: `ADR.md`
 - V1 scope baseline: `v1_scope_and_baseline.md`
 - Security policy: `../SECURITY.md`
