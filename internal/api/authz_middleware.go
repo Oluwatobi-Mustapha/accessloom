@@ -40,9 +40,9 @@ type routePolicy struct {
 type routePolicyRegistry map[string]routePolicy
 
 func newRoutePolicyRegistry() routePolicyRegistry {
-	compiled, err := compileRouteAuthorizationPolicyBundle(defaultBuiltInRouteAuthorizationPolicyBundle())
+	compiled, err := compileBuiltInRouteAuthorizationPolicyBundle()
 	if err != nil {
-		panic("compile built-in route policy registry: " + err.Error())
+		return routePolicyRegistry{}
 	}
 	return compiled.RouteRegistry
 }
@@ -73,9 +73,9 @@ func defaultRouteActionRoleGrants() map[string][]string {
 }
 
 func newCentralPolicyEngine(store db.Store) *PolicyEngine {
-	compiled, err := compileRouteAuthorizationPolicyBundle(defaultBuiltInRouteAuthorizationPolicyBundle())
+	compiled, err := compileBuiltInRouteAuthorizationPolicyBundle()
 	if err != nil {
-		panic("compile built-in central policy engine: " + err.Error())
+		compiled = emptyCompiledRouteAuthorizationPolicy()
 	}
 	return newCentralPolicyEngineFromCompiled(store, compiled)
 }

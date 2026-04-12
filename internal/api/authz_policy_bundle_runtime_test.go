@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -369,6 +370,22 @@ func TestCentralPolicyRuntimeResolverErrorAndRolloutFallbackPaths(t *testing.T) 
 	}
 	if runtimePolicy.RolloutMode != db.AuthzPolicyRolloutModeEnforce {
 		t.Fatalf("expected rollout mode to reflect enforce fallback, got %q", runtimePolicy.RolloutMode)
+	}
+}
+
+func TestCentralPolicyRuntimeResolverReturnsStructuredInitError(t *testing.T) {
+	ctx := testAuthzPolicyScopeContext()
+	resolver := &storeBackedCentralPolicyRuntimeResolver{
+		policySet: defaultCentralPolicySetID,
+		initErr:   errors.New("compile built-in policy bundle: invalid route policy"),
+	}
+
+	_, err := resolver.Resolve(ctx)
+	if err == nil {
+		t.Fatal("expected init error from resolver")
+	}
+	if !strings.Contains(err.Error(), "compile built-in policy bundle") {
+		t.Fatalf("expected compile error detail, got %v", err)
 	}
 }
 

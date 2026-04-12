@@ -65,6 +65,7 @@ type storeBackedCentralPolicyRuntimeResolver struct {
 	store      db.Store
 	policySet  string
 	fallback   compiledRouteAuthorizationPolicy
+	initErr    error
 	cacheByKey sync.Map
 }
 
@@ -73,24 +74,39 @@ func newCentralPolicyRuntimeResolver(store db.Store) centralPolicyRuntimeResolve
 }
 
 func newCentralPolicyRuntimeResolverWithPolicySet(store db.Store, policySetID string) centralPolicyRuntimeResolver {
-	compiled, err := compileRouteAuthorizationPolicyBundle(defaultBuiltInRouteAuthorizationPolicyBundle())
-	if err != nil {
-		panic(fmt.Sprintf("compile built-in policy bundle: %v", err))
-	}
+	compiled, err := compileBuiltInRouteAuthorizationPolicyBundle()
 	policySet := strings.TrimSpace(policySetID)
 	if policySet == "" {
 		policySet = defaultCentralPolicySetID
 	}
-	return &storeBackedCentralPolicyRuntimeResolver{
+	resolver := &storeBackedCentralPolicyRuntimeResolver{
 		store:     store,
 		policySet: policySet,
 		fallback:  compiled,
+	}
+	if err != nil {
+		resolver.fallback = emptyCompiledRouteAuthorizationPolicy()
+		resolver.initErr = fmt.Errorf("compile built-in policy bundle: %w", err)
+	}
+	return resolver
+}
+
+func compileBuiltInRouteAuthorizationPolicyBundle() (compiledRouteAuthorizationPolicy, error) {
+	return compileRouteAuthorizationPolicyBundle(defaultBuiltInRouteAuthorizationPolicyBundle())
+}
+
+func emptyCompiledRouteAuthorizationPolicy() compiledRouteAuthorizationPolicy {
+	return compiledRouteAuthorizationPolicy{
+		RouteRegistry:  routePolicyRegistry{},
+		RBACActionRole: map[string][]string{},
+		ABACPolicies:   map[string]abacActionPolicy{},
+		ReBACPolicies:  map[string]rebacActionPolicy{},
 	}
 }
 
 func (r *storeBackedCentralPolicyRuntimeResolver) Resolve(ctx context.Context) (resolvedCentralPolicyRuntime, error) {
 	if r == nil {
-		compiled, err := compileRouteAuthorizationPolicyBundle(defaultBuiltInRouteAuthorizationPolicyBundle())
+		compiled, err := compileBuiltInRouteAuthorizationPolicyBundle()
 		if err != nil {
 			return resolvedCentralPolicyRuntime{}, fmt.Errorf("compile built-in policy bundle: %w", err)
 		}
@@ -107,6 +123,9 @@ func (r *storeBackedCentralPolicyRuntimeResolver) Resolve(ctx context.Context) (
 				ValidatedVersions: nil,
 			},
 		}, nil
+	}
+	if r.initErr != nil {
+		return resolvedCentralPolicyRuntime{}, r.initErr
 	}
 	fallback := r.fallbackRuntime()
 	if r.store == nil {
